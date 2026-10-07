@@ -1,6 +1,7 @@
 //! Header authentication: GET with Range, PUT with a body, a valueless subresource, a sorted query.
 
-use tessari_s3_core::auth::{AuthError, PayloadHash, PayloadVerifier};
+use tessari_s3_core::auth::{AuthError, PayloadHash, PayloadVerifier, verify_payload_digest};
+use tessari_s3_core::objects::checksum::Hashes;
 
 use crate::{EMPTY_SHA256, NOW, REGION, authorization, check};
 
@@ -166,6 +167,34 @@ fn put_object_with_one_body_byte_changed_is_refused_before_commit() {
     let mut body = PayloadVerifier::new(expected);
     body.update(b"Welcome to Amazon S4.");
     assert_eq!(body.finish(), Err(AuthError::PayloadHashMismatch));
+}
+
+#[test]
+fn put_object_body_is_verified_from_the_one_pass_digests() {
+    let verified = check(
+        "PUT",
+        "/test%24file.text",
+        "",
+        &put_object_headers(),
+        REGION,
+        NOW,
+    )
+    .expect("headers verify");
+    let PayloadHash::Sha256(expected) = verified.payload() else {
+        panic!("a hex payload hash")
+    };
+    let mut same = Hashes::new();
+    same.update(PUT_BODY);
+    assert_eq!(
+        verify_payload_digest(&expected, &same.finish().sha256),
+        Ok(())
+    );
+    let mut other = Hashes::new();
+    other.update(b"Welcome to Amazon S4.");
+    assert_eq!(
+        verify_payload_digest(&expected, &other.finish().sha256),
+        Err(AuthError::PayloadHashMismatch)
+    );
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
-use super::model::{NewObject, StoredObject};
+use super::model::{Content, NewObject, StoredObject};
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -43,6 +43,10 @@ pub(crate) fn record(
     object: &NewObject,
 ) -> Result<Value> {
     let size = i64::try_from(object.size).map_err(|_| malformed("size beyond i64"))?;
+    let content = match &object.content {
+        Content::Inline(bytes) => ("inline", Value::Bytes(bytes.clone())),
+        Content::Data(id) => ("data", Value::Uuid(*id)),
+    };
     let fields: BTreeMap<String, Value> = [
         ("bucket_name", Value::String(bucket.to_owned())),
         ("key", Value::String(key.to_owned())),
@@ -52,7 +56,7 @@ pub(crate) fn record(
         ("headers", strings(&object.headers)),
         ("metadata", strings(&object.metadata)),
         ("checksums", strings(&object.checksums)),
-        ("inline", Value::Bytes(object.inline.clone())),
+        content,
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v))
@@ -86,9 +90,10 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
         },
         _ => return Err(malformed("modified")),
     };
-    let inline = match fields.get("inline") {
-        Some(Value::Bytes(bytes)) => bytes.clone(),
-        _ => return Err(malformed("inline")),
+    let content = match (fields.get("data"), fields.get("inline")) {
+        (Some(Value::Uuid(id)), _) => Content::Data(*id),
+        (_, Some(Value::Bytes(bytes))) => Content::Inline(bytes.clone()),
+        _ => return Err(malformed("neither inline bytes nor a data id")),
     };
     let object = StoredObject {
         size,
@@ -97,7 +102,7 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
         headers: read_strings(fields.get("headers"), "headers")?,
         metadata: read_strings(fields.get("metadata"), "metadata")?,
         checksums: read_strings(fields.get("checksums"), "checksums")?,
-        inline,
+        content,
     };
     Ok((incarnation, object))
 }

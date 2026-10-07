@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
         max_inflight = config.max_inflight,
         "tessaridb-s3 starting"
     );
-    let storage = Storage::new(MetaPool::new(config.meta.clone())?);
+    let storage = Storage::new(MetaPool::new(config.meta.clone())?, config.data_dir.clone());
     // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
     // start, rather than answering every request 503.
     storage.prepare().await?;

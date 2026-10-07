@@ -4,7 +4,7 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalC
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::{read, record};
-use super::model::NewObject;
+use super::model::{Content, NewObject};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use crate::{Error, Result};
 
@@ -119,7 +119,7 @@ impl ObjectRepository for TessariObjects {
             ("incarnation".to_owned(), Value::Uuid(incarnation)),
         ];
         // `modified` is the store's clock at commit, merged into the bound record.
-        let script = match guard {
+        let statement = match guard {
             Guard::None => {
                 "UPSERT objects:$id = object::merge($object, { modified: time::now() }) RETURN AFTER;"
             }
@@ -137,8 +137,17 @@ impl ObjectRepository for TessariObjects {
                  WHERE incarnation = $stale RETURN AFTER;"
             }
         };
-        match self.pool.run(script, parameters).await {
-            Ok(answers) => match first_record(answers.into_iter().next())? {
+        // A data object commits together with the removal of its pending `gc` entry; the `supersede` event queues
+        // whatever data the record held before, in the same transaction. The write's answer follows `BEGIN`.
+        let (script, answer_at) = match &object.content {
+            Content::Inline(_) => (statement.to_owned(), 0),
+            Content::Data(data) => {
+                parameters.push(("data".to_owned(), Value::Uuid(*data)));
+                (format!("BEGIN; {statement} DELETE gc:$data; COMMIT;"), 1)
+            }
+        };
+        match self.pool.run(&script, parameters).await {
+            Ok(answers) => match first_record(answers.into_iter().nth(answer_at))? {
                 Some(value) => Ok(Wrote::Record(value)),
                 None => Err(Error::Malformed {
                     record: "object",
@@ -148,6 +157,23 @@ impl ObjectRepository for TessariObjects {
             Err(error) if is_condition_refusal(&error) => Ok(Wrote::Refused),
             Err(error) => Err(error.into()),
         }
+    }
+
+    async fn queue(&self, id: [u8; 16]) -> Result<()> {
+        let parameters = vec![("data".to_owned(), Value::Uuid(id))];
+        self.pool
+            .run(
+                "UPSERT gc:$data SET data = $data, queued = time::now();",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn unqueue(&self, id: [u8; 16]) -> Result<()> {
+        let parameters = vec![("data".to_owned(), Value::Uuid(id))];
+        self.pool.run("DELETE gc:$data;", parameters).await?;
+        Ok(())
     }
 
     async fn remove(&self, bucket: &BucketName, key: &ObjectKey) -> Result<()> {

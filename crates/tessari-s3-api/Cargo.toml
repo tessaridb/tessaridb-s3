@@ -19,6 +19,7 @@ tower.workspace = true
 uuid.workspace = true
 quick-xml.workspace = true
 base64.workspace = true
+futures-util.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 

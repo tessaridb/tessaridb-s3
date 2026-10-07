@@ -4,7 +4,16 @@ use std::collections::BTreeMap;
 
 use tessari_s3_types::Timestamp;
 
-/// A new object's metadata and inline bytes, ready to commit.
+/// Where an object's bytes are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Content {
+    /// In the metadata record itself (objects up to the inline size).
+    Inline(Vec<u8>),
+    /// In the data file with this id.
+    Data([u8; 16]),
+}
+
+/// A new object's metadata and where its bytes are, ready to commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewObject {
     /// Size in bytes.
@@ -17,8 +26,8 @@ pub struct NewObject {
     pub metadata: BTreeMap<String, String>,
     /// Checksums by algorithm name (`CRC64NVME` …), base64.
     pub checksums: BTreeMap<String, String>,
-    /// The object's bytes, stored in the metadata record.
-    pub inline: Vec<u8>,
+    /// The object's bytes or the data file holding them.
+    pub content: Content,
 }
 
 /// A stored object.
@@ -36,8 +45,8 @@ pub struct StoredObject {
     pub metadata: BTreeMap<String, String>,
     /// Checksums by algorithm name.
     pub checksums: BTreeMap<String, String>,
-    /// The bytes.
-    pub inline: Vec<u8>,
+    /// The bytes or the data file holding them.
+    pub content: Content,
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.

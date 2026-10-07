@@ -10,6 +10,8 @@ pub enum ErrorCode {
     AccessControlListNotSupported,
     /// 400: the Content-MD5 or checksum value is not well formed.
     InvalidDigest,
+    /// 400: the upload exceeds the maximum allowed object size.
+    EntityTooLarge,
     /// 400: the storage class is not one this server offers.
     InvalidStorageClass,
     /// 411: the request needs a Content-Length.
@@ -82,6 +84,7 @@ impl ErrorCode {
             Self::AccessDenied => "AccessDenied",
             Self::AccessControlListNotSupported => "AccessControlListNotSupported",
             Self::InvalidDigest => "InvalidDigest",
+            Self::EntityTooLarge => "EntityTooLarge",
             Self::InvalidStorageClass => "InvalidStorageClass",
             Self::MissingContentLength => "MissingContentLength",
             Self::MetadataTooLarge => "MetadataTooLarge",
@@ -147,6 +150,7 @@ impl ErrorCode {
             Self::MetadataTooLarge
             | Self::InvalidStorageClass
             | Self::InvalidDigest
+            | Self::EntityTooLarge
             | Self::AccessControlListNotSupported => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
@@ -197,6 +201,7 @@ mod tests {
                 409,
             ),
             (ErrorCode::BadDigest, "BadDigest", 400),
+            (ErrorCode::EntityTooLarge, "EntityTooLarge", 400),
             (ErrorCode::IncompleteBody, "IncompleteBody", 400),
             (ErrorCode::InternalError, "InternalError", 500),
             (ErrorCode::InvalidAccessKeyId, "InvalidAccessKeyId", 403),

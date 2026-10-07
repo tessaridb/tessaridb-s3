@@ -7,6 +7,7 @@
 #![cfg(test)]
 
 mod buckets;
+mod large;
 mod objects;
 #[path = "../wire/signer.rs"]
 #[allow(
@@ -30,8 +31,22 @@ pub(crate) const IGNORED: &str =
     "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD";
 
 /// A server state over a fresh namespace on the test node, schema applied, and a separate pool into the same
-/// namespace for a test that must plant a record directly.
+/// namespace for a test that must plant a record directly. Large objects go to a fresh data directory that is
+/// created on first use.
 pub(crate) async fn fresh() -> (ApiState, MetaPool) {
+    let (state, planter, _) = fresh_with(Some(scratch_dir())).await;
+    (state, planter)
+}
+
+/// A directory of this test's own under the system temp dir; the test that inspects it removes it.
+pub(crate) fn scratch_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("tessari-s3-live-{}", uuid::Uuid::new_v4().simple()))
+}
+
+/// As [`fresh`], with the data directory chosen by the caller (`None`: not configured), which it gets back.
+pub(crate) async fn fresh_with(
+    data_dir: Option<std::path::PathBuf>,
+) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
     let need = |key: &str| {
         std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for the live suite"))
     };
@@ -49,11 +64,21 @@ pub(crate) async fn fresh() -> (ApiState, MetaPool) {
             need("TESSARIDB_S3_TEST_META_PASSWORD"),
         ),
         ("TESSARIDB_S3_META_NAMESPACE", namespace),
+        (
+            "TESSARIDB_S3_DATA_DIR",
+            data_dir
+                .as_ref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_default(),
+        ),
     ];
     let config =
         S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
             .expect("live configuration");
-    let storage = Storage::new(MetaPool::new(config.meta.clone()).expect("pool"));
+    let storage = Storage::new(
+        MetaPool::new(config.meta.clone()).expect("pool"),
+        config.data_dir.clone(),
+    );
     storage
         .prepare()
         .await
@@ -62,6 +87,7 @@ pub(crate) async fn fresh() -> (ApiState, MetaPool) {
     (
         ApiState::new(&config, ApiState::system_clock(), storage),
         planter,
+        data_dir,
     )
 }
 
@@ -71,6 +97,7 @@ pub(crate) struct Seen {
     pub(crate) headers: axum::http::HeaderMap,
     pub(crate) code: Option<String>,
     pub(crate) body: String,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// `YYYYMMDDTHHMMSSZ` for now.
@@ -136,9 +163,11 @@ pub(crate) async fn call_with(
         .expect("infallible router");
     let status = response.status().as_u16();
     let headers = response.headers().clone();
-    let body =
-        String::from_utf8_lossy(&to_bytes(response.into_body(), 1 << 20).await.expect("body"))
-            .into_owned();
+    let bytes = to_bytes(response.into_body(), 64 << 20)
+        .await
+        .map(|bytes| bytes.to_vec())
+        .unwrap_or_default();
+    let body = String::from_utf8_lossy(&bytes).into_owned();
     let code = body
         .split_once("<Code>")
         .and_then(|(_, rest)| rest.split_once("</Code>"))
@@ -148,5 +177,6 @@ pub(crate) async fn call_with(
         headers,
         code,
         body,
+        bytes,
     }
 }

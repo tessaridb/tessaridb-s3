@@ -20,7 +20,7 @@ pub use chunked::{ChunkedDecoder, Trailer};
 pub use encode::percent_decode;
 pub use error::{AuthError, AuthResult};
 pub use header::{AuthorizationHeader, verify_header};
-pub use payload::{PayloadVerifier, parse_payload_hash};
+pub use payload::{PayloadVerifier, parse_payload_hash, verify_payload_digest};
 pub use presign::{PresignedQuery, verify_presigned};
 pub use tessari_s3_types::SecretKey;
 pub use verified::{PayloadHash, Verified};

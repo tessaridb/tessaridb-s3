@@ -6,9 +6,10 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, heade
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
 use tessari_s3_core::objects::range::{RangeRequest, resolve};
-use tessari_s3_storage::objects::StoredObject;
+use tessari_s3_storage::objects::{Content, StoredObject};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
+use super::data;
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
@@ -102,32 +103,32 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             ));
         }
     };
-    let bytes = match slice {
-        None => object.inline.clone(),
-        Some((start, end)) => {
-            let start =
-                usize::try_from(start).map_err(|_| Error::new(ErrorCode::InvalidRange, "range"))?;
-            let end =
-                usize::try_from(end).map_err(|_| Error::new(ErrorCode::InvalidRange, "range"))?;
-            object
-                .inline
-                .get(start..=end)
-                .map(<[u8]>::to_vec)
-                .unwrap_or_default()
-        }
+    let length = match slice {
+        None => object.size,
+        Some((start, end)) => end
+            .checked_sub(start)
+            .and_then(|span| span.checked_add(1))
+            .ok_or_else(|| Error::new(ErrorCode::InvalidRange, "range"))?,
     };
-    let mut response = Response::new(if head {
+    let body = if head {
         Body::empty()
     } else {
-        Body::from(bytes.clone())
-    });
+        match &object.content {
+            Content::Inline(bytes) => Body::from(inline_part(bytes, slice)?),
+            Content::Data(id) => {
+                let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
+                data::send(call.state.storage().objects(), *id, object.size, start, end).await?
+            }
+        }
+    };
+    let mut response = Response::new(body);
     *response.status_mut() = status;
     let headers = response.headers_mut();
     describe(headers, &object, call, slice.is_none());
     set(
         headers,
         header::CONTENT_LENGTH.as_str(),
-        &bytes.len().to_string(),
+        &length.to_string(),
     );
     if let Some((start, end)) = slice {
         set(
@@ -137,6 +138,20 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         );
     }
     Ok(response)
+}
+
+/// The inline bytes of the whole object or of `slice`.
+fn inline_part(bytes: &[u8], slice: Option<(u64, u64)>) -> Result<Vec<u8>> {
+    let Some((start, end)) = slice else {
+        return Ok(bytes.to_vec());
+    };
+    let range = || Error::new(ErrorCode::InvalidRange, "range");
+    let start = usize::try_from(start).map_err(|_| range())?;
+    let end = usize::try_from(end).map_err(|_| range())?;
+    Ok(bytes
+        .get(start..=end)
+        .map(<[u8]>::to_vec)
+        .unwrap_or_default())
 }
 
 /// The headers that describe the stored object.

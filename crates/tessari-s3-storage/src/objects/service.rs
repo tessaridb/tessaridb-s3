@@ -1,32 +1,105 @@
 //! Object rules: a write commits only into a live bucket's current incarnation, under its condition, as one
-//! statement; a read sees an object only if it belongs to the bucket's current incarnation.
+//! statement; a read sees an object only if it belongs to the bucket's current incarnation. A data file is queued for
+//! reclamation before it exists and leaves the queue only in the transaction that commits an object pointing at it.
 
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
-use super::model::{NewObject, Removed, StoredObject, WriteCondition, Written};
+use super::model::{Content, NewObject, Removed, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use super::tessaridb::TessariObjects;
-use crate::Result;
+use super::upload::Upload;
+use crate::data::{DataFiles, DataReader};
+use crate::{Error, Result};
 
 /// Object operations.
 #[derive(Clone)]
 pub struct ObjectService {
     repository: TessariObjects,
+    data: Option<DataFiles>,
 }
 
 impl ObjectService {
-    /// The service over `repository`.
+    /// The service over `repository`, with data files in `data` when a data directory is configured.
     #[must_use]
-    pub const fn new(repository: TessariObjects) -> Self {
-        Self { repository }
+    pub(crate) const fn new(repository: TessariObjects, data: Option<DataFiles>) -> Self {
+        Self { repository, data }
     }
 
-    /// Commits `object` at `bucket/key` under `condition`.
+    /// Whether objects above the inline size can be stored.
+    #[must_use]
+    pub const fn stores_data(&self) -> bool {
+        self.data.is_some()
+    }
+
+    fn files(&self) -> Result<&DataFiles> {
+        self.data.as_ref().ok_or(Error::NoDataDirectory)
+    }
+
+    /// Starts a data file: its id is queued for reclamation first, then the file is created.
+    ///
+    /// # Errors
+    /// [`Error::NoDataDirectory`], the metadata store's refusal or outage, or the drive's failure.
+    pub async fn upload(&self) -> Result<Upload> {
+        let files = self.files()?;
+        let id = *uuid::Uuid::new_v4().as_bytes();
+        self.repository.queue(id).await?;
+        match files.create(id).await {
+            Ok(writer) => Ok(Upload::new(id, writer)),
+            Err(error) => {
+                self.release_logged(id).await;
+                Err(error)
+            }
+        }
+    }
+
+    /// Removes data `id`'s file and then its queue entry; a failure leaves the entry for the reclaimer.
+    ///
+    /// # Errors
+    /// The drive's or the metadata store's failure.
+    pub async fn release(&self, id: [u8; 16]) -> Result<()> {
+        self.files()?.remove(id).await?;
+        self.repository.unqueue(id).await
+    }
+
+    async fn release_logged(&self, id: [u8; 16]) {
+        if let Err(error) = self.release(id).await {
+            let data = uuid::Uuid::from_bytes(id);
+            tracing::warn!(%data, error = %error, "data left queued for the reclaimer");
+        }
+    }
+
+    /// Opens data `id` holding an object of `size` bytes, its header and length checked.
+    ///
+    /// # Errors
+    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] or the drive's failure.
+    pub async fn open(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
+        self.files()?.open(id, size).await
+    }
+
+    /// Commits `object` at `bucket/key` under `condition`. A data object whose write is refused releases its file;
+    /// one whose outcome is unknown (the store did not answer) keeps it queued, because the commit may have
+    /// happened.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
     pub async fn put(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        object: &NewObject,
+        condition: &WriteCondition,
+    ) -> Result<Written> {
+        let outcome = self.commit(bucket, key, object, condition).await?;
+        if let (Content::Data(id), false) =
+            (&object.content, matches!(outcome, Written::Committed(_)))
+        {
+            self.release_logged(*id).await;
+        }
+        Ok(outcome)
+    }
+
+    async fn commit(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,

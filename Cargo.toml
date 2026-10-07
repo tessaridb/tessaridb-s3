@@ -38,6 +38,8 @@ sha1 = "0.10"
 crc-fast = "1"
 base64 = "0.22"
 subtle = "2"
+blake3 = "1"
+futures-util = { version = "0.3", default-features = false }
 zeroize = { version = "1", features = ["derive"] }
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

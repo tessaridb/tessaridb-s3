@@ -106,6 +106,8 @@ pub struct Digests {
     pub md5_hex: String,
     /// The raw MD5, for Content-MD5 comparison and multipart ETags.
     pub md5: [u8; 16],
+    /// The raw SHA-256, for the signed payload hash of a body read in one pass.
+    pub sha256: [u8; 32],
     values: [(ChecksumAlgorithm, String); 5],
 }
 
@@ -166,6 +168,7 @@ impl Hashes {
         Digests {
             md5_hex: md5.iter().map(|b| format!("{b:02x}")).collect(),
             md5,
+            sha256: sha256.into(),
             values: [
                 (ChecksumAlgorithm::Crc32, STANDARD.encode(crc32)),
                 (ChecksumAlgorithm::Crc32c, STANDARD.encode(crc32c)),

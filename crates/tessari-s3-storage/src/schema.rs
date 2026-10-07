@@ -8,14 +8,24 @@ use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass};
 
 use crate::Result;
 
-/// The table definitions, run inside the configured namespace and database.
+/// The table definitions, run inside the configured namespace and database. `gc` holds the data ids whose files may
+/// be reclaimed: an upload's own id from before its file exists until the commit that references it, and — through
+/// the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it replaced.
+/// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
+/// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
+BEGIN;
 DEFINE TABLE IF NOT EXISTS buckets (\
  name string REQUIRED, created datetime REQUIRED, region string REQUIRED, incarnation uuid REQUIRED);
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
  inline bytes, data uuid);
+DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED);
+DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
+WHEN $before.data != NONE AND $before.data != $after.data \
+THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
+COMMIT;
 ";
 
 /// Creates the namespace, the database and the tables when they are missing. Several nodes starting together race

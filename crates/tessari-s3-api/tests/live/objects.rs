@@ -307,26 +307,6 @@ async fn conditional_reads_and_ranges() {
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn an_object_larger_than_the_inline_size_is_not_implemented_yet() {
-    let (state, _) = fresh().await;
-    bucket(&state, "big").await;
-    let body = vec![b'x'; 128 * 1024 + 1];
-    let refused = call(&state, "PUT", "/big/k", vec![], &body).await;
-    assert_eq!(
-        (refused.status, refused.code.as_deref()),
-        (501, Some("NotImplemented"))
-    );
-    assert_eq!(
-        call(&state, "PUT", "/big/edge", vec![], &vec![b'x'; 128 * 1024])
-            .await
-            .status,
-        200,
-        "128 KiB fits"
-    );
-}
-
-#[tokio::test]
-#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn an_object_from_an_earlier_life_of_the_bucket_is_invisible_and_replaceable() {
     let (state, planter) = fresh().await;
     bucket(&state, "reborn").await;

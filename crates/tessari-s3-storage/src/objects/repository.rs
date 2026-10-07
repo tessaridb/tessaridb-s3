@@ -51,7 +51,8 @@ pub(crate) trait ObjectRepository: Send + Sync {
         bucket: &BucketName,
         key: &ObjectKey,
     ) -> impl Future<Output = Result<Snapshot>> + Send;
-    /// Writes `object` under `guard` as ONE statement: UPSERT, CREATE, or UPDATE … WHERE.
+    /// Writes `object` under `guard` as ONE statement: UPSERT, CREATE, or UPDATE … WHERE. When the object's bytes
+    /// are in a data file, the same transaction removes that file's pending `gc` entry.
     fn write(
         &self,
         bucket: &BucketName,
@@ -60,6 +61,10 @@ pub(crate) trait ObjectRepository: Send + Sync {
         object: &NewObject,
         guard: &Guard,
     ) -> impl Future<Output = Result<Wrote>> + Send;
+    /// Queues data `id` for reclamation; done before its file is created.
+    fn queue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
+    /// Takes data `id` off the reclamation queue, after its file was removed.
+    fn unqueue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Removes the record at `bucket/key`, if any.
     fn remove(
         &self,

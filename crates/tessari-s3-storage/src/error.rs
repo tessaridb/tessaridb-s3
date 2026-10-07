@@ -17,6 +17,26 @@ pub enum Error {
         /// What is wrong with it.
         reason: &'static str,
     },
+    /// A data file operation failed at the operating system. After a failed sync the write is over: the pages the
+    /// sync covered may be gone even though a second sync would succeed.
+    #[error("data file {op} failed: {kind}")]
+    DataIo {
+        /// Which operation (`create`, `write`, `sync`, `rename`, `read` …).
+        op: &'static str,
+        /// The operating system's error kind; the message is logged where it happened.
+        kind: std::io::ErrorKind,
+    },
+    /// A data file does not hold what its record says it should — the media or the file was damaged.
+    #[error("data file {id} is damaged: {reason}")]
+    Corrupt {
+        /// The data id, hex.
+        id: String,
+        /// What failed verification.
+        reason: &'static str,
+    },
+    /// An object needs a data file and no data directory is configured.
+    #[error("no data directory is configured (TESSARIDB_S3_DATA_DIR)")]
+    NoDataDirectory,
 }
 
 impl Error {
@@ -25,7 +45,10 @@ impl Error {
     pub fn category(&self) -> ErrorCategory {
         match self {
             Self::Meta(meta) => meta.category(),
-            Self::Malformed { .. } => ErrorCategory::Internal,
+            Self::Malformed { .. }
+            | Self::DataIo { .. }
+            | Self::Corrupt { .. }
+            | Self::NoDataDirectory => ErrorCategory::Internal,
         }
     }
 }

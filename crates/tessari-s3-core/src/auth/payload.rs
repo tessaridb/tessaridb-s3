@@ -48,11 +48,19 @@ impl PayloadVerifier {
     /// [`AuthError::PayloadHashMismatch`] when the body differs from the declaration.
     pub fn finish(self) -> AuthResult<()> {
         let actual: [u8; 32] = self.hasher.finalize().into();
-        if bool::from(actual.ct_eq(&self.expected)) {
-            Ok(())
-        } else {
-            Err(AuthError::PayloadHashMismatch)
-        }
+        verify_payload_digest(&self.expected, &actual)
+    }
+}
+
+/// Compares a body's SHA-256, computed elsewhere in the same pass as its other digests, with the declared one.
+///
+/// # Errors
+/// [`AuthError::PayloadHashMismatch`] when they differ.
+pub fn verify_payload_digest(expected: &[u8; 32], actual: &[u8; 32]) -> AuthResult<()> {
+    if bool::from(actual.ct_eq(expected)) {
+        Ok(())
+    } else {
+        Err(AuthError::PayloadHashMismatch)
     }
 }
 

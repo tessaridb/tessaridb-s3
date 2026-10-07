@@ -27,3 +27,11 @@ section records which TessariDB version its metadata runs on.
   conditional reads, a single Range and the `response-*` overrides. Headers for
   features not implemented here (tagging, encryption, Object Lock, ACLs other
   than owner-only) are refused rather than ignored.
+- Objects above 128 KiB, up to 5 GiB per PUT (`EntityTooLarge` beyond), in data
+  files under `TESSARIDB_S3_DATA_DIR`: the body streams to disk one 1 MiB block
+  at a time with a BLAKE3 hash per block, is synced and renamed into place before
+  the object is committed, and every block is verified when it is read — a
+  damaged block is never served. A file's id is queued for reclamation in
+  TessariDB before the file exists and leaves the queue only in the transaction
+  that commits the object; an overwrite or a delete queues the data it replaces
+  in that same transaction. The metadata schema is applied as one transaction.

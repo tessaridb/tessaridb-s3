@@ -69,3 +69,9 @@ pub const USER_METADATA_MAX: usize = 2 * 1024;
 
 /// Framing allowance on top of the decoded length when reading an aws-chunked body (headers, signatures, trailer).
 pub const CHUNKED_FRAMING_ALLOWANCE: usize = 64 * 1024;
+
+/// Bytes per verified block of a data file (1 MiB, ADR-0002): the unit a write hashes and a read verifies.
+pub const DATA_BLOCK_SIZE: u32 = 1 << 20;
+
+/// Largest object one PutObject may carry (5 GiB, S3's limit; EntityTooLarge beyond it).
+pub const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;

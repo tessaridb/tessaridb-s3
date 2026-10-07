@@ -20,9 +20,11 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **It stores small objects only, on one node.** The server verifies SigV4
-> signatures, keeps buckets and objects up to 128 KiB in TessariDB, and answers
-> larger objects and every operation it does not implement `NotImplemented`.
+> **It stores objects on one node, without listing or multipart yet.** The server
+> verifies SigV4 signatures, keeps buckets and object metadata in TessariDB —
+> objects up to 128 KiB inline, larger ones (up to 5 GiB per PUT) in verified
+> data files on the node's drive — and answers every operation it does not
+> implement `NotImplemented`.
 > There is no release and no image. Apart from the
 > [Status](#status) section and the items marked as tested below, this page
 > describes what the project is for, not a working system.
@@ -71,7 +73,7 @@ claims it; the two marked **tested** already are:
 | | |
 |---|---|
 | Stage | pre-alpha |
-| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and objects ≤ 128 KiB in TessariDB: CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, GetObject, HeadObject, DeleteObject; every other operation `NotImplemented` |
+| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, GetObject, HeadObject, DeleteObject; every other operation `NotImplemented` |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -105,6 +107,7 @@ The process reads its configuration from the environment:
 | `TESSARIDB_S3_META_NAMESPACE` / `_DATABASE` | `s3` / `meta` | where the metadata lives; created on start-up |
 | `TESSARIDB_S3_META_CA` | unset | a PEM certificate authority to verify the node's TLS against; unset speaks in the clear |
 | `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata node |
+| `TESSARIDB_S3_DATA_DIR` | unset | where objects above 128 KiB are stored (`<dir>/s3data/…`); unset, such objects are answered `NotImplemented` |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the

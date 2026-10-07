@@ -1,5 +1,6 @@
 //! Object operations: PutObject, GetObject, HeadObject and DeleteObject.
 
+mod data;
 mod headers;
 mod put;
 mod read;
