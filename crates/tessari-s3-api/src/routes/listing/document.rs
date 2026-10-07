@@ -52,7 +52,13 @@ fn url_encode(text: &str) -> String {
 
 /// A key, prefix or marker as this listing writes it.
 fn name(listing: &Listing<'_>, text: &str) -> Result<String> {
-    if listing.url {
+    listed_name(listing.url, text)
+}
+
+/// A key, prefix or marker as a listing writes it: URL-encoded when the request asked for `encoding-type=url`,
+/// otherwise as XML text, refused when XML 1.0 cannot carry it.
+pub(crate) fn listed_name(url: bool, text: &str) -> Result<String> {
+    if url {
         return Ok(url_encode(text));
     }
     xml_text(text).ok_or_else(|| {

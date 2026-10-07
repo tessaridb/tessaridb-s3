@@ -20,6 +20,7 @@ mod reclaim;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod signer;
+mod uploads;
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;

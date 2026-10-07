@@ -15,6 +15,7 @@ use crate::{Error, Result};
 
 mod document;
 
+pub(crate) use document::listed_name;
 use document::{Listing, Version};
 
 fn invalid(message: &str) -> Error {
@@ -33,7 +34,7 @@ fn max_keys(call: &Call<'_>) -> Result<usize> {
 }
 
 /// `encoding-type`: absent, or `url`.
-fn url_encoded(call: &Call<'_>) -> Result<bool> {
+pub(crate) fn url_encoded(call: &Call<'_>) -> Result<bool> {
     match call.query_value("encoding-type") {
         None => Ok(false),
         Some("url") => Ok(true),

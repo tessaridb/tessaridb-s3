@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_core::objects::multipart::{ListedPart, Refusal};
+use tessari_s3_core::objects::upload_listing::UploadPage;
 use tessari_s3_types::{PartNumber, Timestamp, UploadId};
 
 use crate::objects::{WriteCondition, Written};
@@ -113,4 +114,24 @@ pub enum Completed {
     ChecksumMismatch,
     /// The object write did not commit, for the reason given (bucket gone, condition false).
     NotWritten(Written),
+}
+
+/// An open upload as ListMultipartUploads shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenUpload {
+    /// The upload id.
+    pub id: UploadId,
+    /// When CreateMultipartUpload started it.
+    pub initiated: Timestamp,
+    /// Where it sits in the listing order (the id of its `pending` record).
+    pub(crate) position: String,
+}
+
+/// What a ListMultipartUploads read ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UploadsListed {
+    /// One page of the bucket's open uploads.
+    Page(UploadPage<OpenUpload>),
+    /// The bucket does not exist.
+    NoSuchBucket,
 }

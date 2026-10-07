@@ -84,6 +84,16 @@ pub fn past(prefix: &str) -> String {
     anchor
 }
 
+/// The CommonPrefix `key` rolls up into, when there is a delimiter and the key holds it after `prefix`.
+#[must_use]
+pub fn rolled_up(prefix: &str, delimiter: Option<&str>, key: &str) -> Option<String> {
+    let delimiter = delimiter.filter(|d| !d.is_empty())?;
+    let rest = key.get(prefix.len()..)?;
+    let at = rest.find(delimiter)?;
+    let end = prefix.len().checked_add(at)?.checked_add(delimiter.len())?;
+    key.get(..end).map(str::to_owned)
+}
+
 /// Builds one page from batches.
 #[derive(Debug)]
 pub struct Lister<T> {
@@ -140,7 +150,7 @@ impl<T> Lister<T> {
                 last_key = Some(key);
                 continue;
             }
-            let entry = match self.rolled_up(&key) {
+            let entry = match rolled_up(&self.spec.prefix, self.spec.delimiter.as_deref(), &key) {
                 Some(prefix) => {
                     skipping = Some(prefix.clone());
                     let not_past_start = self
@@ -173,20 +183,6 @@ impl<T> Lister<T> {
             (true, Some(prefix), _) => Some(Anchor::After(past(&prefix))),
             (true, None, Some(key)) => Some(Anchor::After(key)),
         };
-    }
-
-    /// The CommonPrefix `key` rolls up into, when the request has a delimiter and the key holds it after the prefix.
-    fn rolled_up(&self, key: &str) -> Option<String> {
-        let delimiter = self.spec.delimiter.as_deref().filter(|d| !d.is_empty())?;
-        let rest = key.get(self.spec.prefix.len()..)?;
-        let at = rest.find(delimiter)?;
-        let end = self
-            .spec
-            .prefix
-            .len()
-            .checked_add(at)?
-            .checked_add(delimiter.len())?;
-        key.get(..end).map(str::to_owned)
     }
 
     /// The page.

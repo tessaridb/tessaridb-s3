@@ -7,3 +7,4 @@ pub mod listing;
 pub mod multipart;
 pub mod range;
 pub mod token;
+pub mod upload_listing;

@@ -70,3 +70,7 @@ section records which TessariDB version its metadata runs on.
   overwriting or deleting it queues every part's file. CreateMultipartUpload
   now accepts a declared checksum algorithm (it was refused as an unknown
   checksum header) and refuses a type the algorithm does not allow.
+- ListMultipartUploads: a bucket's open uploads by key in byte order and,
+  within a key, by initiation; paged by `key-marker` and `upload-id-marker`,
+  rolled up at a delimiter (a CommonPrefix counts once), `encoding-type=url`.
+  An upload that completes or is aborted leaves the listing in the same commit.

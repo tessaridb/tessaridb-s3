@@ -2,10 +2,11 @@
 //! upload exists, and a part's data file is queued for reclamation before it exists, exactly as an object's is.
 
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::multipart::{ObjectChecksum, PartRecord, assemble};
-use tessari_s3_types::{BucketName, ObjectKey, PartNumber, UploadId};
+use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 
 use super::model::{Completed, Completion, Created, NewPart, NewUpload, PartWritten, PartsPage};
 use super::repository::{MultipartRepository, UploadRecord};
@@ -20,10 +21,17 @@ fn malformed(reason: &'static str) -> Error {
     }
 }
 
+fn clock() -> Error {
+    Error::Malformed {
+        record: "clock",
+        reason: "the system clock is outside the representable range",
+    }
+}
+
 /// Multipart operations.
 #[derive(Clone)]
 pub struct MultipartService {
-    repository: TessariMultipart,
+    pub(super) repository: TessariMultipart,
     objects: ObjectService,
 }
 
@@ -55,8 +63,16 @@ impl MultipartService {
         let mut bytes = [0_u8; 16];
         getrandom::fill(&mut bytes).map_err(|_| Error::Randomness)?;
         let id = UploadId::from_bytes(bytes);
+        // One instant for the record and its place in the listing, so the time shown and the order agree.
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| clock())?;
+        let initiated = Timestamp {
+            seconds: i64::try_from(since.as_secs()).map_err(|_| clock())?,
+            nanos: since.subsec_nanos(),
+        };
         self.repository
-            .create(id, bucket, key, incarnation, upload)
+            .create(id, bucket, key, incarnation, initiated, upload)
             .await?;
         Ok(Created::Created(id))
     }
@@ -76,6 +92,7 @@ impl MultipartService {
             key: upload_key,
             incarnation,
             declared,
+            ..
         }) = self.repository.upload(id).await?
         else {
             return Ok(None);

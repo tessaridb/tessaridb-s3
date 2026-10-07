@@ -2,9 +2,10 @@
 
 use std::future::Future;
 
-use tessari_s3_types::{BucketName, ObjectKey, PartNumber, UploadId};
+use tessari_s3_core::objects::upload_listing::UploadAnchor;
+use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 
-use super::model::{NewPart, NewUpload, StoredPart};
+use super::model::{NewPart, NewUpload, OpenUpload, StoredPart};
 use crate::Result;
 
 /// An upload record: what it is bound to and what its Create fixed.
@@ -14,6 +15,26 @@ pub(crate) struct UploadRecord {
     pub(crate) key: String,
     pub(crate) incarnation: [u8; 16],
     pub(crate) declared: NewUpload,
+    /// The upload as the listing orders it; `None` for an upload recorded before the listing existed.
+    pub(crate) opened: Option<OpenUpload>,
+}
+
+/// An open upload as the listing order holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingRow {
+    pub(crate) bucket: String,
+    pub(crate) key: String,
+    pub(crate) incarnation: [u8; 16],
+    pub(crate) upload: OpenUpload,
+}
+
+/// One read of the listing order, with the bucket's incarnation at the same snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingBatch {
+    pub(crate) bucket: Option<[u8; 16]>,
+    pub(crate) rows: Vec<PendingRow>,
+    /// Whether the read filled its limit, so more rows may follow.
+    pub(crate) full: bool,
 }
 
 /// A part as Complete reads it.
@@ -31,15 +52,26 @@ pub(crate) trait MultipartRepository: Send + Sync {
         &self,
         bucket: &BucketName,
     ) -> impl Future<Output = Result<Option<[u8; 16]>>> + Send;
-    /// Records a new upload for `bucket/key` under `incarnation`.
+    /// Records a new upload for `bucket/key` under `incarnation`, started at `initiated`, and its place in the
+    /// listing order, in one transaction.
     fn create(
         &self,
         id: UploadId,
         bucket: &BucketName,
         key: &ObjectKey,
         incarnation: [u8; 16],
+        initiated: Timestamp,
         upload: &NewUpload,
     ) -> impl Future<Output = Result<()>> + Send;
+    /// The listing-order position a walk from `anchor` starts after.
+    fn position_of(&self, bucket: &BucketName, anchor: &UploadAnchor<OpenUpload>) -> String;
+    /// At most `limit` open uploads after listing position `after`, in listing order.
+    fn pending(
+        &self,
+        bucket: &BucketName,
+        after: &str,
+        limit: usize,
+    ) -> impl Future<Output = Result<PendingBatch>> + Send;
     /// The upload record, if it exists.
     fn upload(&self, id: UploadId) -> impl Future<Output = Result<Option<UploadRecord>>> + Send;
     /// Writes part `number` of upload `id` in ONE transaction that also requires the upload to still exist and takes

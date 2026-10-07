@@ -1,4 +1,5 @@
-//! Multipart uploads: CreateMultipartUpload, UploadPart, AbortMultipartUpload and ListParts. An upload id that is
+//! Multipart uploads: CreateMultipartUpload, UploadPart, AbortMultipartUpload and ListParts (CompleteMultipartUpload
+//! and ListMultipartUploads in their own modules). An upload id that is
 //! malformed, unknown, or issued for another key answers `NoSuchUpload`; a part's body streams into its own data file
 //! exactly as a large PutObject's does.
 
@@ -21,9 +22,11 @@ use crate::{Error, Result};
 
 mod complete;
 mod declared;
+mod uploads;
 
 pub(crate) use complete::complete;
 use declared::declared_checksum;
+pub(crate) use uploads::list_uploads;
 
 fn no_such_upload() -> Error {
     Error::new(

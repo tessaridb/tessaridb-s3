@@ -14,7 +14,8 @@ use crate::Result;
 /// Multipart uploads keep their own records (`uploads`, `parts`), never seen by an object read or a listing, and a
 /// replaced or removed part queues its data the same way (`part_superseded`). A completed upload's parts become an
 /// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
-/// removal queues its file.
+/// removal queues its file. Each open upload also has a `pending` record whose id orders the uploads as
+/// ListMultipartUploads lists them; whatever deletes the upload drops it in the same transaction (`upload_closed`).
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -33,7 +34,7 @@ THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::n
 DEFINE TABLE IF NOT EXISTS uploads (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, initiated datetime REQUIRED,\
  headers object REQUIRED, metadata object REQUIRED, checksum_algorithm string, checksum_type string,\
- last_part datetime);
+ last_part datetime, position string);
 DEFINE TABLE IF NOT EXISTS parts (\
  upload uuid REQUIRED, number int REQUIRED, data uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, checksums object REQUIRED);
@@ -45,6 +46,11 @@ THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::n
 DEFINE EVENT IF NOT EXISTS parts_released ON objects FOR UPDATE, DELETE \
 WHEN $before.upload != NONE AND $before.upload != $after.upload \
 THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
+DEFINE TABLE IF NOT EXISTS pending (\
+ upload uuid REQUIRED, bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED,\
+ initiated datetime REQUIRED, position string REQUIRED);
+DEFINE EVENT IF NOT EXISTS upload_closed ON uploads FOR DELETE WHEN $before.position != NONE \
+THEN { LET $listed = $before.position; DELETE pending:$listed; };
 COMMIT;
 ";
 

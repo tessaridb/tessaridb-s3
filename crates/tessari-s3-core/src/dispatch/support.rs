@@ -16,6 +16,7 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::HeadBucket,
     Operation::HeadObject,
     Operation::ListBuckets,
+    Operation::ListMultipartUploads,
     Operation::ListObjects,
     Operation::ListObjectsV2,
     Operation::ListParts,

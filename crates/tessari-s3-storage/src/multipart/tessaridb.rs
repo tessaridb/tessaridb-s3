@@ -4,14 +4,18 @@
 use std::collections::BTreeMap;
 
 use tessari_s3_constants::MULTIPART_MAX_PARTS;
+use tessari_s3_core::objects::upload_listing::UploadAnchor;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 
 use super::entity::complete_row;
-use super::model::{NewPart, NewUpload, StoredPart};
-use super::repository::{MultipartRepository, PartRow, UploadRecord};
+use super::model::{NewPart, NewUpload, OpenUpload, StoredPart};
+use super::repository::{MultipartRepository, PartRow, PendingBatch, UploadRecord};
 use crate::answers::{first_record, incarnation_of};
 use crate::{Error, Result};
+
+#[path = "tessaridb_pending.rs"]
+mod pending;
 
 /// The TessariDB multipart repository.
 #[derive(Clone)]
@@ -114,37 +118,23 @@ impl MultipartRepository for TessariMultipart {
         bucket: &BucketName,
         key: &ObjectKey,
         incarnation: [u8; 16],
+        initiated: Timestamp,
         upload: &NewUpload,
     ) -> Result<()> {
-        let mut record: BTreeMap<String, Value> = [
-            ("bucket_name", Value::String(bucket.as_str().to_owned())),
-            ("key", Value::String(key.as_str().to_owned())),
-            ("incarnation", Value::Uuid(incarnation)),
-            ("headers", strings(&upload.headers)),
-            ("metadata", strings(&upload.metadata)),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v))
-        .collect();
-        for (field, value) in [
-            ("checksum_algorithm", &upload.checksum_algorithm),
-            ("checksum_type", &upload.checksum_type),
-        ] {
-            if let Some(value) = value {
-                record.insert(field.to_owned(), Value::String(value.clone()));
-            }
-        }
-        let parameters = vec![
-            ("upload".to_owned(), Value::Uuid(id.bytes())),
-            ("record".to_owned(), Value::Object(record)),
-        ];
-        self.pool
-            .run(
-                "CREATE uploads:$upload = object::merge($record, { initiated: time::now() });",
-                parameters,
-            )
-            .await?;
-        Ok(())
+        pending::create(&self.pool, id, bucket, key, incarnation, initiated, upload).await
+    }
+
+    fn position_of(&self, bucket: &BucketName, anchor: &UploadAnchor<OpenUpload>) -> String {
+        pending::position_of(bucket, anchor)
+    }
+
+    async fn pending(
+        &self,
+        bucket: &BucketName,
+        after: &str,
+        limit: usize,
+    ) -> Result<PendingBatch> {
+        pending::page(&self.pool, bucket, after, limit).await
     }
 
     async fn upload(&self, id: UploadId) -> Result<Option<UploadRecord>> {
@@ -152,8 +142,8 @@ impl MultipartRepository for TessariMultipart {
         let answers = self
             .pool
             .run(
-                "SELECT bucket_name, key, incarnation, headers, metadata, checksum_algorithm, checksum_type \
-                 FROM ONLY uploads:$upload;",
+                "SELECT bucket_name, key, incarnation, headers, metadata, checksum_algorithm, checksum_type, \
+                 initiated, position FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -179,6 +169,14 @@ impl MultipartRepository for TessariMultipart {
                 metadata: string_map(fields.get("metadata"))?,
                 checksum_algorithm: optional("checksum_algorithm"),
                 checksum_type: optional("checksum_type"),
+            },
+            opened: match fields.get("position") {
+                Some(Value::String(position)) => Some(OpenUpload {
+                    id,
+                    initiated: pending::initiated_of(fields.get("initiated"))?,
+                    position: position.clone(),
+                }),
+                _ => None,
             },
             incarnation: match fields.get("incarnation") {
                 Some(Value::Uuid(bytes)) => *bytes,

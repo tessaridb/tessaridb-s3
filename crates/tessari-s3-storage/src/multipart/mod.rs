@@ -1,13 +1,15 @@
 //! The `multipart` domain: uploads and their parts in TessariDB, each part's bytes in its own data file.
 
 mod entity;
+mod listing;
 mod model;
 mod repository;
 mod service;
 mod tessaridb;
 
 pub use model::{
-    Completed, Completion, Created, NewPart, NewUpload, PartWritten, PartsPage, StoredPart,
+    Completed, Completion, Created, NewPart, NewUpload, OpenUpload, PartWritten, PartsPage,
+    StoredPart, UploadsListed,
 };
 pub use service::MultipartService;
 pub use tessaridb::TessariMultipart;

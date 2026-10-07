@@ -118,3 +118,6 @@ pub const MULTIPART_READ_ATTEMPTS: u32 = 3;
 
 /// Most parts one ListParts page carries, and the default.
 pub const LIST_PARTS_MAX: usize = 1000;
+
+/// Most uploads (and common prefixes) one ListMultipartUploads page returns.
+pub const LIST_UPLOADS_MAX: usize = 1000;
