@@ -65,6 +65,12 @@ pub(crate) trait MultipartRepository: Send + Sync {
     ) -> impl Future<Output = Result<()>> + Send;
     /// The listing-order position a walk from `anchor` starts after.
     fn position_of(&self, bucket: &BucketName, anchor: &UploadAnchor<OpenUpload>) -> String;
+    /// At most `limit` open uploads initiated before `cutoff`.
+    fn initiated_before(
+        &self,
+        cutoff: Timestamp,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<UploadId>>> + Send;
     /// At most `limit` open uploads after listing position `after`, in listing order.
     fn pending(
         &self,

@@ -49,6 +49,8 @@ THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT AL
 DEFINE TABLE IF NOT EXISTS pending (\
  upload uuid REQUIRED, bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED,\
  initiated datetime REQUIRED, position string REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
+DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
 DEFINE EVENT IF NOT EXISTS upload_closed ON uploads FOR DELETE WHEN $before.position != NONE \
 THEN { LET $listed = $before.position; DELETE pending:$listed; };
 COMMIT;

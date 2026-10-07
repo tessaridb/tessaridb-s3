@@ -87,3 +87,7 @@ section records which TessariDB version its metadata runs on.
 - GetObjectTagging answers an existing object's tag set, which is always empty
   (PutObject refuses `x-amz-tagging` and nothing else writes tags) — the AWS
   CLI reads it before a server-side multipart copy.
+- The upload reaper: a multipart upload open longer than
+  `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` (7 days by default, counted from its
+  initiation) is aborted exactly as AbortMultipartUpload would, so its parts'
+  files are reclaimed — the backstop for uploads nobody finishes.

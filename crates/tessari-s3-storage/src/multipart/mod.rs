@@ -3,12 +3,13 @@
 mod entity;
 mod listing;
 mod model;
+mod reap;
 mod repository;
 mod service;
 mod tessaridb;
 
 pub use model::{
-    Completed, Completion, Created, NewPart, NewUpload, OpenUpload, PartWritten, PartsPage,
+    Completed, Completion, Created, NewPart, NewUpload, OpenUpload, PartWritten, PartsPage, Reaped,
     StoredPart, UploadsListed,
 };
 pub use service::MultipartService;

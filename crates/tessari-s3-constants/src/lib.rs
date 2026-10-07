@@ -83,6 +83,13 @@ pub const DEFAULT_RECLAIM_GRACE_SECS: u64 = 24 * 60 * 60;
 /// Seconds between reclamation passes, when `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` is unset.
 pub const DEFAULT_RECLAIM_INTERVAL_SECS: u64 = 300;
 
+/// Seconds a multipart upload may stay open before the reaper aborts it (7 days), when
+/// `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` is unset: the server-wide backstop for uploads nobody finishes.
+pub const DEFAULT_UPLOAD_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// Uploads one reaper pass aborts at most.
+pub const REAP_BATCH: usize = 1000;
+
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 

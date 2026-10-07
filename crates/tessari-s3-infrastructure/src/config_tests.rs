@@ -157,3 +157,26 @@ fn reclamation_defaults_and_overrides() {
         })
     ));
 }
+
+#[test]
+fn an_upload_lives_a_week_unless_configured_and_never_zero_seconds() {
+    let config = load(&CREDENTIALS).expect("loads");
+    assert_eq!(config.upload_max_age_secs, 7 * 24 * 60 * 60);
+    let mut vars = CREDENTIALS.to_vec();
+    vars.push(("TESSARIDB_S3_UPLOAD_MAX_AGE_SECS", "3600"));
+    assert_eq!(load(&vars).expect("loads").upload_max_age_secs, 3600);
+    for bad in ["0", "-1", "soon"] {
+        let mut refused = CREDENTIALS.to_vec();
+        refused.push(("TESSARIDB_S3_UPLOAD_MAX_AGE_SECS", bad));
+        assert!(
+            matches!(
+                load(&refused).map(|_| ()),
+                Err(Error::InvalidConfig {
+                    key: "TESSARIDB_S3_UPLOAD_MAX_AGE_SECS",
+                    ..
+                })
+            ),
+            "{bad}"
+        );
+    }
+}

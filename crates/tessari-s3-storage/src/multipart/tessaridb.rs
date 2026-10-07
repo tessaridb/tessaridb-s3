@@ -128,6 +128,10 @@ impl MultipartRepository for TessariMultipart {
         pending::position_of(bucket, anchor)
     }
 
+    async fn initiated_before(&self, cutoff: Timestamp, limit: usize) -> Result<Vec<UploadId>> {
+        pending::initiated_before(&self.pool, cutoff, limit).await
+    }
+
     async fn pending(
         &self,
         bucket: &BucketName,

@@ -2,6 +2,8 @@
 //! paged by key-marker and upload-id-marker without a repeat or a gap; rolled up at a delimiter; an upload that ends
 //! leaves the listing; another bucket's uploads and an earlier incarnation's never appear.
 
+use tessari_s3_infrastructure::tessaridb::{Answer, Value};
+
 use crate::multipart::{create, etag, part, text, texts};
 use crate::{IGNORED, call, fresh};
 
@@ -179,5 +181,89 @@ async fn an_earlier_incarnations_uploads_are_not_listed_and_a_missing_bucket_is_
         texts(&fresh_bucket, "Upload", "Key").len(),
         0,
         "{fresh_bucket}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_upload_past_the_maximum_age_is_reaped_and_its_parts_queued() {
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/mpa", vec![], b"").await.status, 200);
+    let old = create(&state, "/mpa/old").await;
+    for (number, bytes) in [("1", b"aa"), ("2", b"bb")] {
+        let uploaded = part(&state, "/mpa/old", &old, number, bytes).await;
+        assert_eq!(uploaded.status, 200, "{}", uploaded.body);
+    }
+    let young = create(&state, "/mpa/young").await;
+    let parts = crate::multipart::part_data(&planter).await;
+    assert_eq!(parts.len(), 2);
+    // Age the old upload: its initiation an hour back, where the reaper reads it.
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970");
+    let hour_ago = Value::Datetime {
+        seconds: i64::try_from(since.as_secs()).expect("seconds") - 3600,
+        nanos: 0,
+    };
+    let id = tessari_s3_types::UploadId::parse(&old).expect("an upload id");
+    // An `UPDATE` names its record: read the upload's place in the listing, then write that one record.
+    let read = planter
+        .run(
+            "SELECT position FROM ONLY uploads:$u;",
+            vec![("u".to_owned(), Value::Uuid(id.bytes()))],
+        )
+        .await
+        .expect("read the upload");
+    let position = match read.into_iter().next() {
+        Some(Answer::Records { records, .. }) => records.into_iter().next().map(|(_, v)| v),
+        Some(Answer::Value { value, .. }) => Some(value),
+        _ => None,
+    }
+    .and_then(|value| match value {
+        Value::Object(fields) => fields.get("position").cloned(),
+        _ => None,
+    })
+    .expect("the upload's listing position");
+    planter
+        .run(
+            "UPDATE pending:$p SET initiated = $t;",
+            vec![("p".to_owned(), position), ("t".to_owned(), hour_ago)],
+        )
+        .await
+        .expect("age the upload");
+    let multipart = state.storage().multipart();
+    let reaped = multipart.reap(1800, 1000).await.expect("reap");
+    assert_eq!((reaped.examined, reaped.aborted), (1, 1), "{reaped:?}");
+    let gone = call(
+        &state,
+        "GET",
+        "/mpa/old",
+        vec![("uploadId", Some(old.as_str()))],
+        b"",
+    )
+    .await;
+    assert_eq!(gone.code.as_deref(), Some("NoSuchUpload"), "{}", gone.body);
+    let kept = call(
+        &state,
+        "GET",
+        "/mpa/young",
+        vec![("uploadId", Some(young.as_str()))],
+        b"",
+    )
+    .await;
+    assert_eq!(kept.status, 200, "{}", kept.body);
+    let listed = uploads(&state, "/mpa", &[]).await;
+    assert_eq!(texts(&listed, "Upload", "UploadId"), [young]);
+    let queued = crate::large::queued(&planter).await;
+    assert!(
+        parts.iter().all(|id| queued.contains(id)),
+        "every part's file is queued"
+    );
+    let again = multipart.reap(1800, 1000).await.expect("reap");
+    assert_eq!(
+        (again.examined, again.aborted),
+        (0, 0),
+        "nothing left to reap"
     );
 }

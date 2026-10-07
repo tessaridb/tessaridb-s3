@@ -1,7 +1,7 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
 //! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
-//! configured), the API state and router, the listener, then serving until SIGINT or SIGTERM, after which in-flight
+//! configured, and the upload reaper), the API state and router, the listener, then serving until SIGINT or SIGTERM, after which in-flight
 //! requests and the daemons' current runs get the configured grace period before the process exits.
 
 use std::time::Duration;
@@ -11,7 +11,7 @@ use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
-use tessari_s3_daemons::{Reclaimer, run};
+use tessari_s3_daemons::{Reclaimer, UploadReaper, run};
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -43,6 +43,13 @@ async fn main() -> anyhow::Result<()> {
         );
         daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
     }
+    // Uploads can be opened without a data directory, so the reaper always runs.
+    let reaper = UploadReaper::new(
+        storage.multipart().clone(),
+        config.upload_max_age_secs,
+        Duration::from_secs(config.reclaim_interval_secs),
+    );
+    daemons.spawn(run(Arc::new(reaper), stop_rx.clone()));
     let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let mut server_stop = stop_rx;

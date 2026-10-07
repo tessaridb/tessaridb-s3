@@ -5,7 +5,8 @@ use std::net::SocketAddr;
 
 use tessari_s3_constants::{
     DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_RECLAIM_GRACE_SECS,
-    DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS, MIN_SECRET_KEY_LEN,
+    DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
+    DEFAULT_UPLOAD_MAX_AGE_SECS, MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::SecretKey;
 
@@ -38,6 +39,9 @@ pub struct S3Config {
     pub reclaim_grace_secs: u64,
     /// `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` — time between reclamation passes (positive).
     pub reclaim_interval_secs: u64,
+    /// `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` — how long a multipart upload may stay open before the reaper aborts it
+    /// (positive; counted from its initiation, as S3's AbortIncompleteMultipartUpload counts).
+    pub upload_max_age_secs: u64,
 }
 
 impl S3Config {
@@ -116,6 +120,16 @@ impl S3Config {
             .map_or(Ok(DEFAULT_RECLAIM_INTERVAL_SECS), |secs| {
                 u64::try_from(secs).map_err(|_| Error::InvalidConfig {
                     key: "TESSARIDB_S3_RECLAIM_INTERVAL_SECS",
+                    reason: "too large",
+                })
+            })?,
+            upload_max_age_secs: parse_positive(
+                get("TESSARIDB_S3_UPLOAD_MAX_AGE_SECS"),
+                "TESSARIDB_S3_UPLOAD_MAX_AGE_SECS",
+            )?
+            .map_or(Ok(DEFAULT_UPLOAD_MAX_AGE_SECS), |secs| {
+                u64::try_from(secs).map_err(|_| Error::InvalidConfig {
+                    key: "TESSARIDB_S3_UPLOAD_MAX_AGE_SECS",
                     reason: "too large",
                 })
             })?,

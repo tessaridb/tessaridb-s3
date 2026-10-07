@@ -135,3 +135,12 @@ pub enum UploadsListed {
     /// The bucket does not exist.
     NoSuchBucket,
 }
+
+/// What one reaper pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Reaped {
+    /// Open uploads found past the maximum age.
+    pub examined: usize,
+    /// Uploads aborted.
+    pub aborted: usize,
+}

@@ -202,3 +202,36 @@ pub(super) async fn page(
         full,
     })
 }
+
+/// See `MultipartRepository::initiated_before`. The index range is exactly the uploads due, so walking it is the work.
+pub(super) async fn initiated_before(
+    pool: &MetaPool,
+    cutoff: Timestamp,
+    limit: usize,
+) -> Result<Vec<UploadId>> {
+    let parameters = vec![(
+        "cutoff".to_owned(),
+        Value::Datetime {
+            seconds: cutoff.seconds,
+            nanos: cutoff.nanos,
+        },
+    )];
+    // `LIMIT` takes a literal on 0.33.1; the limit is this server's own integer, never a caller's value.
+    let script = format!(
+        "SELECT upload FROM pending WHERE initiated < $cutoff LIMIT {limit} USING INDEX by_pending_initiated;"
+    );
+    let answers = pool.run(&script, parameters).await?;
+    let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+    records
+        .iter()
+        .map(|(_, value)| match value {
+            Value::Object(fields) => match fields.get("upload") {
+                Some(Value::Uuid(id)) => Ok(UploadId::from_bytes(*id)),
+                _ => Err(malformed("upload")),
+            },
+            _ => Err(malformed("not an object")),
+        })
+        .collect()
+}
