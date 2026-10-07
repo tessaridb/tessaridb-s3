@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod buckets;
+pub mod dispatch;
 mod error;
 pub mod multipart;
 pub mod objects;
