@@ -2,6 +2,7 @@
 
 pub mod checksum;
 pub mod conditions;
+pub mod copy;
 pub mod crc_combine;
 pub mod listing;
 pub mod multipart;

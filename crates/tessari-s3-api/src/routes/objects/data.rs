@@ -203,6 +203,18 @@ pub(super) async fn send_parts(
     start: u64,
     end: u64,
 ) -> Result<Body> {
+    Ok(Body::from_stream(
+        stream_parts(objects, parts, start, end).await?,
+    ))
+}
+
+/// The verified bytes `start..=end` of an object made of `parts`, as [`send_parts`] sends them.
+pub(super) async fn stream_parts(
+    objects: &ObjectService,
+    parts: &[([u8; 16], u64)],
+    start: u64,
+    end: u64,
+) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
     let sizes: Vec<u64> = parts.iter().map(|(_, size)| *size).collect();
     let mut wanted = segments(&sizes, start, end)
         .into_iter()
@@ -212,7 +224,7 @@ pub(super) async fn send_parts(
                 .map(|(id, size)| (*id, *size, segment.start, segment.end))
         });
     let Some((id, size, from, to)) = wanted.next() else {
-        return Ok(Body::empty());
+        return Ok(futures_util::stream::empty().boxed());
     };
     let first = blocks(objects, id, size, from, to).await?;
     let objects = objects.clone();
@@ -229,11 +241,11 @@ pub(super) async fn send_parts(
                 futures_util::stream::once(async move { Err(std::io::Error::other(error.message)) }).boxed()
             }
         });
-    Ok(Body::from_stream(first.chain(later)))
+    Ok(first.chain(later).boxed())
 }
 
 /// The verified blocks holding bytes `start..=end` of data `id`, the first already read.
-async fn blocks(
+pub(super) async fn blocks(
     objects: &ObjectService,
     id: [u8; 16],
     size: u64,

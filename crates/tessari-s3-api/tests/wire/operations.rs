@@ -61,6 +61,9 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
         let (status, code) = if answering == Operation::DeleteObjects {
             // Its handler refuses a body with neither Content-MD5 nor a checksum before reading the store.
             (400, "InvalidRequest")
+        } else if answering == Operation::CopyObject {
+            // `x-amz-copy-source: value` is not bucket/key: refused before reading the store.
+            (400, "InvalidArgument")
         } else if matches!(
             answering,
             Operation::UploadPart

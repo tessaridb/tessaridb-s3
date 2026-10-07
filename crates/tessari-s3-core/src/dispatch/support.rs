@@ -6,6 +6,7 @@ use super::catalog::Operation;
 const IMPLEMENTED: &[Operation] = &[
     Operation::AbortMultipartUpload,
     Operation::CompleteMultipartUpload,
+    Operation::CopyObject,
     Operation::CreateBucket,
     Operation::CreateMultipartUpload,
     Operation::DeleteBucket,

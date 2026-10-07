@@ -32,6 +32,7 @@ pub(crate) async fn route(
         Operation::ListObjects => listing::list_v1(call).await,
         Operation::ListObjectsV2 => listing::list_v2(call).await,
         Operation::PutObject => objects::put(call, objects::key(call)?, body).await,
+        Operation::CopyObject => objects::copy(call, objects::key(call)?).await,
         Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
         Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,

@@ -225,6 +225,7 @@ fn exactly_the_operations_with_handlers_are_implemented() {
     let expected = [
         "AbortMultipartUpload",
         "CompleteMultipartUpload",
+        "CopyObject",
         "CreateBucket",
         "CreateMultipartUpload",
         "DeleteBucket",

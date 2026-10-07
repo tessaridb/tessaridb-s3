@@ -74,3 +74,9 @@ section records which TessariDB version its metadata runs on.
   within a key, by initiation; paged by `key-marker` and `upload-id-marker`,
   rolled up at a delimiter (a CommonPrefix counts once), `encoding-type=url`.
   An upload that completes or is aborted leaves the listing in the same commit.
+- CopyObject: up to 5 GiB, any source (inline, data file or multipart) becomes a
+  single-part object with its own bytes, an MD5 ETag and a checksum recomputed
+  over the copy and checked against the source's; `x-amz-metadata-directive`
+  COPY or REPLACE, the copy-source conditions (412 when one does not hold), the
+  destination's If-None-Match / If-Match, and copying onto itself only with
+  REPLACE. A version, SSE-C and a source past 5 GiB are refused by name.

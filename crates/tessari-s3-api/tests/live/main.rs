@@ -8,6 +8,7 @@
 
 mod buckets;
 mod complete;
+mod copy;
 mod delete_many;
 mod large;
 mod listing;

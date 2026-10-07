@@ -1,5 +1,6 @@
-//! Object operations: PutObject, GetObject, HeadObject, DeleteObject and DeleteObjects.
+//! Object operations: PutObject, CopyObject, GetObject, HeadObject, DeleteObject and DeleteObjects.
 
+mod copy;
 pub(crate) mod data;
 mod delete_many;
 pub(crate) mod headers;
@@ -15,6 +16,7 @@ use crate::pipeline::call::Call;
 use crate::pipeline::response::empty_response;
 use crate::{Error, Result};
 
+pub(crate) use copy::copy;
 pub(crate) use delete_many::delete_many;
 pub(crate) use put::put;
 pub(crate) use read::read;

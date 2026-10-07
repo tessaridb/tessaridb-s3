@@ -244,21 +244,30 @@ async fn commit(
             }
             Ok(response)
         }
-        Written::NoSuchBucket => Err(Error::new(
+        refused => Err(not_written(&refused)),
+    }
+}
+
+/// The S3 error for an object write that did not commit.
+pub(super) fn not_written(written: &Written) -> Error {
+    let (code, message) = match written {
+        Written::NoSuchBucket => (
             ErrorCode::NoSuchBucket,
             "the specified bucket does not exist",
-        )),
-        Written::NoSuchKey => Err(Error::new(
-            ErrorCode::NoSuchKey,
-            "the specified key does not exist",
-        )),
-        Written::DataReclaimed => Err(Error::new(
+        ),
+        Written::NoSuchKey => (ErrorCode::NoSuchKey, "the specified key does not exist"),
+        Written::DataReclaimed => (
             ErrorCode::InternalError,
             "the upload took longer than its data is kept; please try again",
-        )),
-        Written::PreconditionFailed => Err(Error::new(
+        ),
+        Written::PreconditionFailed => (
             ErrorCode::PreconditionFailed,
             "at least one of the preconditions you specified did not hold",
-        )),
-    }
+        ),
+        Written::Committed(_) => (
+            ErrorCode::InternalError,
+            "a committed write was reported as refused",
+        ),
+    };
+    Error::new(code, message)
 }
