@@ -42,6 +42,42 @@ impl Timestamp {
         format!("{weekday}, {day:02} {month_name} {year:04} {hour:02}:{minute:02}:{second:02} GMT")
     }
 
+    /// Parses an IMF-fixdate (`Mon, 12 Oct 2009 17:50:30 GMT`), the form HTTP requires senders to use; anything else
+    /// is `None`, and a conditional header carrying it is ignored as RFC 9110 says.
+    #[must_use]
+    pub fn parse_http_date(text: &str) -> Option<Self> {
+        const MONTHS: [&str; 12] = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ];
+        let parts: Vec<&str> = text.trim().split(' ').collect();
+        let [_weekday, day, month, year, clock, "GMT"] = parts.as_slice() else {
+            return None;
+        };
+        let month = MONTHS
+            .iter()
+            .position(|m| m == month)
+            .and_then(|i| i64::try_from(i).ok())?
+            .checked_add(1)?;
+        let number = |t: &str| t.parse::<i64>().ok();
+        let (day, year) = (number(day)?, number(year)?);
+        let mut hms = clock.split(':').map(number);
+        let (hour, minute, second) = (hms.next()??, hms.next()??, hms.next()??);
+        let valid = (1..=31).contains(&day)
+            && (0..24).contains(&hour)
+            && (0..60).contains(&minute)
+            && (0..61).contains(&second);
+        if !valid || hms.next().is_some() {
+            return None;
+        }
+        let days = days_from_civil(year, month, day);
+        let seconds = days
+            .checked_mul(86_400)?
+            .checked_add(hour.checked_mul(3_600)?)?
+            .checked_add(minute.checked_mul(60)?)?
+            .checked_add(second)?;
+        Some(Self { seconds, nanos: 0 })
+    }
+
     /// Year, month, day, hour, minute, second in UTC (the days-to-civil algorithm for the proleptic Gregorian
     /// calendar). Inputs are bounded by `i64` seconds, so the saturating steps never saturate in practice; they keep
     /// the no-bare-arithmetic rule.
@@ -93,6 +129,37 @@ impl Timestamp {
     }
 }
 
+/// Days from 1970-01-01 to a proleptic Gregorian date (civil-to-days). Bounded inputs keep the saturating steps from
+/// ever saturating; they keep the no-bare-arithmetic rule.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let shifted_year = if month <= 2 {
+        year.saturating_sub(1)
+    } else {
+        year
+    };
+    let era = shifted_year.div_euclid(400);
+    let year_of_era = shifted_year.saturating_sub(era.saturating_mul(400));
+    let month_from_march = if month > 2 {
+        month.saturating_sub(3)
+    } else {
+        month.saturating_add(9)
+    };
+    let day_of_year = month_from_march
+        .saturating_mul(153)
+        .saturating_add(2)
+        .div_euclid(5)
+        .saturating_add(day)
+        .saturating_sub(1);
+    let day_of_era = year_of_era
+        .saturating_mul(365)
+        .saturating_add(year_of_era.div_euclid(4))
+        .saturating_sub(year_of_era.div_euclid(100))
+        .saturating_add(day_of_year);
+    era.saturating_mul(146_097)
+        .saturating_add(day_of_era)
+        .saturating_sub(719_468)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Timestamp;
@@ -132,6 +199,26 @@ mod tests {
                 (iso, http),
                 "{seconds}"
             );
+            assert_eq!(
+                Timestamp::parse_http_date(http),
+                Some(Timestamp { seconds, nanos: 0 }),
+                "{http}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_imf_fixdate_parses() {
+        let refused = [
+            "",
+            "yesterday",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+            "Mon, 12 Oct 2009 25:00:00 GMT",
+            "Mon, 12 Oct 2009 17:50:30 UTC",
+        ];
+        for text in refused {
+            assert_eq!(Timestamp::parse_http_date(text), None, "{text}");
         }
     }
 }

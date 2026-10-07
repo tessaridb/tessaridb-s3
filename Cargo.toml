@@ -33,6 +33,10 @@ tessaridb-client = "0.10"
 quick-xml = "0.42"
 hmac = "0.12"
 sha2 = "0.10"
+md-5 = "0.10"
+sha1 = "0.10"
+crc-fast = "1"
+base64 = "0.22"
 subtle = "2"
 zeroize = { version = "1", features = ["derive"] }
 [workspace.lints.rust]
