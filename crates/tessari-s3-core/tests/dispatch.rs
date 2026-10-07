@@ -216,13 +216,20 @@ fn a_fixed_path_operation_resolves_only_on_its_path() {
 }
 
 #[test]
-fn until_the_object_core_lands_every_operation_is_refused_with_not_implemented() {
+fn exactly_the_operations_with_handlers_are_implemented() {
     let implemented: Vec<&str> = CATALOG
         .iter()
         .filter(|spec| is_implemented(spec.operation))
         .map(|spec| spec.name)
         .collect();
-    assert!(implemented.is_empty(), "{implemented:?}");
+    let expected = [
+        "CreateBucket",
+        "DeleteBucket",
+        "GetBucketLocation",
+        "HeadBucket",
+        "ListBuckets",
+    ];
+    assert_eq!(implemented, expected);
 }
 
 #[test]

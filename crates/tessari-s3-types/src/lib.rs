@@ -7,6 +7,7 @@ mod error;
 mod error_code;
 mod object_key;
 mod secret;
+mod timestamp;
 
 pub use bucket_name::BucketName;
 pub use category::ErrorCategory;
@@ -14,3 +15,4 @@ pub use error::{Error, Result};
 pub use error_code::ErrorCode;
 pub use object_key::ObjectKey;
 pub use secret::SecretKey;
+pub use timestamp::Timestamp;

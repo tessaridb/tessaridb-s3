@@ -11,6 +11,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, Response};
 use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_storage::Storage;
 use tower::ServiceExt;
 
 /// The published examples' credentials, region, and signing time (2013-05-24T00:00:00Z).
@@ -25,6 +27,10 @@ pub(crate) fn state(now: i64, max_inflight: usize) -> ApiState {
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET),
         ("TESSARIDB_S3_DOMAINS", "s3.amazonaws.com"),
+        // Port 1 refuses every connection: an implemented operation meets an unavailable metadata store.
+        ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:1"),
+        ("TESSARIDB_S3_META_USER", "s3"),
+        ("TESSARIDB_S3_META_PASSWORD", "unused-password"),
     ];
     let config = S3Config::from_lookup(|key| {
         vars.iter()
@@ -32,7 +38,13 @@ pub(crate) fn state(now: i64, max_inflight: usize) -> ApiState {
             .map(|(_, v)| (*v).to_owned())
     })
     .expect("test configuration loads");
-    ApiState::with_limit(&config, std::sync::Arc::new(move || now), max_inflight)
+    let storage = Storage::new(MetaPool::new(config.meta.clone()).expect("pool settings"));
+    ApiState::with_limit(
+        &config,
+        std::sync::Arc::new(move || now),
+        max_inflight,
+        storage,
+    )
 }
 
 /// What a client sees: status, the request-id header, the `<Code>` and the body.

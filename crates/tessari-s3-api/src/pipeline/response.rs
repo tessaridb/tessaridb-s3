@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode, header};
 
 use crate::Error;
+use crate::xml::escape as xml_escape;
 
 /// A fresh request id: 16 uppercase hex digits, the shape S3 clients log.
 #[must_use]
@@ -12,6 +13,39 @@ pub fn new_request_id() -> String {
     id.truncate(16);
     id.make_ascii_uppercase();
     id
+}
+
+/// Adds the request id headers every response carries.
+#[must_use]
+pub fn with_request_id(mut response: Response<Body>, request_id: &str) -> Response<Body> {
+    if let Ok(value) = HeaderValue::from_str(request_id) {
+        let headers = response.headers_mut();
+        headers.insert("x-amz-request-id", value.clone());
+        headers.insert("x-amz-id-2", value);
+    }
+    response
+}
+
+/// An XML document response with `status`.
+#[must_use]
+pub fn xml_response(status: StatusCode, document: String) -> Response<Body> {
+    let mut response = Response::new(Body::from(format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{document}"
+    )));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/xml"),
+    );
+    response
+}
+
+/// An empty response with `status`.
+#[must_use]
+pub fn empty_response(status: StatusCode) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = status;
+    response
 }
 
 /// Renders `error` for the request at `resource`. On a HEAD request the server strips the body and keeps the status
@@ -42,25 +76,9 @@ pub fn error_response(error: &Error, resource: &str, request_id: &str) -> Respon
     response
 }
 
-/// Escapes the five XML special characters.
-fn xml_escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for character in text.chars() {
-        match character {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            other => out.push(other),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{new_request_id, xml_escape};
+    use super::new_request_id;
 
     #[test]
     fn request_ids_are_sixteen_uppercase_hex_digits_and_differ() {
@@ -73,10 +91,5 @@ mod tests {
             "{first}"
         );
         assert_ne!(first, second);
-    }
-
-    #[test]
-    fn markup_in_a_key_cannot_escape_the_envelope() {
-        assert_eq!(xml_escape("a<b>&\"c'"), "a&lt;b&gt;&amp;&quot;c&apos;");
     }
 }

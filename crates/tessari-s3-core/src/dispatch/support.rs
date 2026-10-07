@@ -2,8 +2,14 @@
 
 use super::catalog::Operation;
 
-/// Operations with a handler. Empty until the object core lands: every request is refused with 501.
-const IMPLEMENTED: &[Operation] = &[];
+/// Operations with a handler; every other catalog operation is refused with 501.
+const IMPLEMENTED: &[Operation] = &[
+    Operation::CreateBucket,
+    Operation::DeleteBucket,
+    Operation::GetBucketLocation,
+    Operation::HeadBucket,
+    Operation::ListBuckets,
+];
 
 /// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.
 #[must_use]

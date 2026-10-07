@@ -1,13 +1,13 @@
 //! Every operation of the catalog, signed and sent, is answered `NotImplemented` (501) on the wire; AWS's own
 //! published requests authenticate and reach the same answer.
 
-use tessari_s3_core::dispatch::{CATALOG, Target};
+use tessari_s3_core::dispatch::{CATALOG, DispatchRequest, Target, dispatch, is_implemented};
 
 use crate::signer::{EMPTY_SHA256, Unsigned, sign};
 use crate::{ACCESS_KEY, AMZ_DATE, NOW, SECRET, request, send, state};
 
 #[tokio::test]
-async fn every_catalog_operation_signed_and_sent_is_answered_not_implemented() {
+async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_implemented() {
     let mut failures = Vec::new();
     for spec in &CATALOG {
         let path = match spec.target {
@@ -37,8 +37,29 @@ async fn every_catalog_operation_signed_and_sent_is_answered_not_implemented() {
         };
         let (target, signed) = sign(&unsigned);
         let seen = send(state(NOW, 64), request(&method, &target, &signed)).await;
-        let head_ok = method == "HEAD" && seen.status == 501 && seen.body.is_empty();
-        if !(head_ok || (seen.status == 501 && seen.code.as_deref() == Some("NotImplemented"))) {
+        // An implemented operation reaches its handler, which meets the unreachable metadata store and answers
+        // 503 ServiceUnavailable — fail closed, never a guess.
+        // A shadowed row is answered by the operation that owns its wire shape, so judge by that one.
+        let dispatch_query: Vec<(&str, Option<&str>)> = spec
+            .discriminators
+            .iter()
+            .copied()
+            .chain(spec.required_query.iter().map(|name| (*name, Some("1"))))
+            .collect();
+        let answering = dispatch(&DispatchRequest {
+            method: spec.method,
+            target: spec.target,
+            query: &dispatch_query,
+            header_names: spec.required_headers,
+        })
+        .map_or(spec.operation, |answering| answering.operation);
+        let (status, code) = if is_implemented(answering) {
+            (503, "ServiceUnavailable")
+        } else {
+            (501, "NotImplemented")
+        };
+        let head_ok = method == "HEAD" && seen.status == status && seen.body.is_empty();
+        if !(head_ok || (seen.status == status && seen.code.as_deref() == Some(code))) {
             failures.push(format!(
                 "{} {method} {target}: {} {:?}",
                 spec.name, seen.status, seen.code

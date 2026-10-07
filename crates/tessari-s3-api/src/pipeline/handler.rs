@@ -1,5 +1,5 @@
-//! The request pipeline: address, dispatch, authenticate, then the operation — and the refusal for every operation
-//! that has no handler.
+//! The request pipeline: address, dispatch, authenticate, then the operation — or the refusal for an operation
+//! with no handler.
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -10,41 +10,47 @@ use tessari_s3_types::ErrorCode;
 
 use super::address::resolve;
 use super::authenticate::authenticate;
+use super::call::Call;
 use super::query::decode_query;
-use super::response::{error_response, new_request_id};
+use super::response::{error_response, new_request_id, with_request_id};
 use crate::state::ApiState;
-use crate::{Error, Result};
+use crate::{Error, Result, routes};
 
 /// Serves one S3 request. The body is not read before authentication, so no `100 Continue` is sent to a client
 /// that has not proved who it is.
 pub async fn handle(State(state): State<ApiState>, request: Request) -> Response<Body> {
     let request_id = new_request_id();
     let resource = request.uri().path().to_owned();
-    let outcome = serve(&state, &request);
-    let error = match outcome {
-        Ok(never) => match never {},
-        Err(error) => error,
-    };
-    tracing::info!(
-        request_id = %request_id,
-        method = %request.method(),
-        code = error.code.as_str(),
-        status = error.code.http_status(),
-        "request refused"
-    );
-    error_response(&error, &resource, &request_id)
+    let method = request.method().clone();
+    match serve(state, request).await {
+        Ok(response) => {
+            tracing::info!(request_id = %request_id, method = %method, status = response.status().as_u16(), "served");
+            with_request_id(response, &request_id)
+        }
+        Err(error) => {
+            tracing::info!(
+                request_id = %request_id,
+                method = %method,
+                code = error.code.as_str(),
+                status = error.code.http_status(),
+                "refused"
+            );
+            error_response(&error, &resource, &request_id)
+        }
+    }
 }
 
-/// The pipeline up to the operation. Every operation is refused today, so success is uninhabited.
-fn serve(state: &ApiState, request: &Request) -> Result<std::convert::Infallible> {
-    let method = Method::parse(request.method().as_str()).ok_or_else(|| {
+/// The pipeline up to and including the operation.
+async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
+    let (parts, body) = request.into_parts();
+    let method = Method::parse(parts.method.as_str()).ok_or_else(|| {
         Error::new(
             ErrorCode::MethodNotAllowed,
             "the method is not part of the S3 API",
         )
     })?;
-    let mut headers = Vec::with_capacity(request.headers().len());
-    for (name, value) in request.headers() {
+    let mut headers = Vec::with_capacity(parts.headers.len());
+    for (name, value) in &parts.headers {
         let value = value.to_str().map_err(|_| {
             Error::new(
                 ErrorCode::InvalidArgument,
@@ -53,19 +59,14 @@ fn serve(state: &ApiState, request: &Request) -> Result<std::convert::Infallible
         })?;
         headers.push((name.as_str(), value));
     }
-    let host = request
-        .headers()
+    let host = parts
+        .headers
         .get("host")
         .and_then(|value| value.to_str().ok())
-        .or_else(|| {
-            request
-                .uri()
-                .authority()
-                .map(|authority| authority.as_str())
-        })
+        .or_else(|| parts.uri.authority().map(|authority| authority.as_str()))
         .ok_or_else(|| Error::new(ErrorCode::InvalidRequest, "the Host header is required"))?;
-    let raw_path = request.uri().path();
-    let raw_query = request.uri().query().unwrap_or("");
+    let raw_path = parts.uri.path();
+    let raw_query = parts.uri.query().unwrap_or("");
     let addressed = resolve(host, raw_path, state.domains())?;
     let query = decode_query(raw_query)?;
     let query_refs: Vec<(&str, Option<&str>)> = query
@@ -80,21 +81,23 @@ fn serve(state: &ApiState, request: &Request) -> Result<std::convert::Infallible
         header_names: &header_names,
     })?;
     let signed = SignedRequest {
-        method: request.method().as_str(),
+        method: parts.method.as_str(),
         raw_path,
         raw_query,
         headers: &headers,
     };
-    authenticate(state, &signed)?;
-    if is_implemented(spec.operation) {
-        // An operation marked implemented with no handler wired here is a defect; refuse rather than guess.
+    let verified = authenticate(&state, &signed)?;
+    if !is_implemented(spec.operation) {
         return Err(Error::new(
-            ErrorCode::InternalError,
-            "the operation has no handler",
+            ErrorCode::NotImplemented,
+            format!("{} is not implemented", spec.name),
         ));
     }
-    Err(Error::new(
-        ErrorCode::NotImplemented,
-        format!("{} is not implemented", spec.name),
-    ))
+    let call = Call {
+        state: &state,
+        addressed: &addressed,
+        query: &query,
+        verified: &verified,
+    };
+    routes::route(spec.operation, &call, body).await
 }

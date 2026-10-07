@@ -15,3 +15,7 @@ section records which TessariDB version its metadata runs on.
   error envelope with a request id on every response, `503 SlowDown` past the
   in-flight limit, graceful shutdown. Every operation is answered
   `NotImplemented`; nothing is stored yet.
+- Buckets in TessariDB: CreateBucket (with an optional location constraint for
+  this server's region), HeadBucket, DeleteBucket (refused while it holds
+  objects), ListBuckets (prefix, region filter and pages) and GetBucketLocation.
+  The metadata schema is applied on start-up.

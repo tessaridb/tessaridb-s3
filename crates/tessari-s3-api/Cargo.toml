@@ -17,10 +17,12 @@ thiserror.workspace = true
 axum.workspace = true
 tower.workspace = true
 uuid.workspace = true
+quick-xml.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 tracing.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
 hmac.workspace = true
 sha2.workspace = true
 

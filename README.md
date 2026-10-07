@@ -20,9 +20,10 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **It stores nothing yet.** The server starts, verifies SigV4 signatures and
-> resolves every request to one of the 116 S3 operations, then answers each of
-> them `NotImplemented`. There is no release and no image. Apart from the
+> **It stores no objects yet.** The server verifies SigV4 signatures, resolves
+> every request to one of the 116 S3 operations, keeps buckets in TessariDB, and
+> answers every object operation `NotImplemented`. There is no release and no
+> image. Apart from the
 > [Status](#status) section and the items marked as tested below, this page
 > describes what the project is for, not a working system.
 
@@ -70,7 +71,7 @@ claims it; the two marked **tested** already are:
 | | |
 |---|---|
 | Stage | pre-alpha |
-| Server | authenticates SigV4 and answers every S3 operation `NotImplemented`; stores nothing |
+| Server | SigV4; buckets in TessariDB (CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation); every other operation `NotImplemented` |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -99,9 +100,22 @@ The process reads its configuration from the environment:
 | `TESSARIDB_S3_DOMAINS` | empty | comma-separated endpoint domains for `<bucket>.<domain>` addressing; path-style always works |
 | `TESSARIDB_S3_MAX_INFLIGHT` | `1024` | requests served at once before new ones get `503 SlowDown` |
 | `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` | `30` | how long in-flight requests get after SIGTERM |
+| `TESSARIDB_S3_META_ADDRESS` | — (required) | the TessariDB node holding the metadata, `host:port` of its wire surface |
+| `TESSARIDB_S3_META_USER` / `_PASSWORD` | — (required) | the TessariDB user the server signs in as |
+| `TESSARIDB_S3_META_NAMESPACE` / `_DATABASE` | `s3` / `meta` | where the metadata lives; created on start-up |
+| `TESSARIDB_S3_META_CA` | unset | a PEM certificate authority to verify the node's TLS against; unset speaks in the clear |
+| `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata node |
 
-Anonymous requests are refused. SIGINT or SIGTERM stops the server after the
-grace period.
+The server applies its metadata schema on start-up and does not start without
+the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
+server after the grace period.
+
+The live tests need a TessariDB node; each test works in its own namespace:
+
+```sh
+TESSARIDB_S3_TEST_META=127.0.0.1:9080 TESSARIDB_S3_TEST_META_USER=… TESSARIDB_S3_TEST_META_PASSWORD=… \
+  cargo test -p tessari-s3-api --test live -- --ignored
+```
 
 ## Branches
 

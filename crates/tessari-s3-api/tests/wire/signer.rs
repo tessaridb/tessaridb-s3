@@ -42,8 +42,17 @@ pub(crate) struct Unsigned<'a> {
     pub(crate) amz_date: &'a str,
 }
 
-/// The request target (`path?query`) and every header including `Authorization`.
+/// The request target (`path?query`) and every header including `Authorization`, for an empty body.
 pub(crate) fn sign(request: &Unsigned<'_>) -> (String, Vec<(String, String)>) {
+    sign_with_body(request, b"")
+}
+
+/// As [`sign`], declaring `body` by its SHA-256.
+pub(crate) fn sign_with_body(
+    request: &Unsigned<'_>,
+    body: &[u8],
+) -> (String, Vec<(String, String)>) {
+    let payload_hash = hex(&Sha256::digest(body));
     let mut query: Vec<(String, String)> = request
         .query
         .iter()
@@ -68,7 +77,7 @@ pub(crate) fn sign(request: &Unsigned<'_>) -> (String, Vec<(String, String)>) {
     let mut headers: Vec<(String, String)> = vec![
         ("host".to_owned(), request.host.to_owned()),
         ("x-amz-date".to_owned(), request.amz_date.to_owned()),
-        ("x-amz-content-sha256".to_owned(), EMPTY_SHA256.to_owned()),
+        ("x-amz-content-sha256".to_owned(), payload_hash.clone()),
     ];
     headers.extend(
         request
@@ -81,7 +90,7 @@ pub(crate) fn sign(request: &Unsigned<'_>) -> (String, Vec<(String, String)>) {
     let signed_headers: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
     let signed_headers = signed_headers.join(";");
     let canonical_request = format!(
-        "{}\n{}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{EMPTY_SHA256}",
+        "{}\n{}\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}",
         request.method, request.path
     );
     let date = &request.amz_date[..8];

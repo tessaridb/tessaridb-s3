@@ -50,3 +50,12 @@ pub const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
 
 /// Shortest root secret key accepted, in bytes; AWS secret keys are 40 characters.
 pub const MIN_SECRET_KEY_LEN: usize = 16;
+
+/// Connections to the metadata store open at once, when `TESSARIDB_S3_META_MAX_CONNECTIONS` is unset.
+pub const DEFAULT_META_CONNECTIONS: usize = 32;
+
+/// Times the start-up schema is attempted when the store answers `retry` (another node is defining it at once).
+pub const SCHEMA_RETRY_ATTEMPTS: u32 = 8;
+
+/// Milliseconds of back-off per attempt between schema retries (20, 40, 60 … ms).
+pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;

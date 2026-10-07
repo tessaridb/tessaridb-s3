@@ -4,5 +4,8 @@ pub mod buckets;
 mod error;
 pub mod multipart;
 pub mod objects;
+mod schema;
+mod storage;
 
 pub use error::{Error, Result};
+pub use storage::Storage;

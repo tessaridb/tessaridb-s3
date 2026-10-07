@@ -6,6 +6,20 @@
 /// An S3 error code from the core catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
+    /// 503: a dependency the request needs is unavailable; retry.
+    ServiceUnavailable,
+    /// 404: the bucket does not exist.
+    NoSuchBucket,
+    /// 400: the request body is longer than this operation accepts.
+    MaxMessageLengthExceeded,
+    /// 400: the XML body is not well formed or not the expected shape.
+    MalformedXml,
+    /// 400: the bucket would be created in another region than this server's.
+    IllegalLocationConstraintException,
+    /// 409: the bucket still holds objects.
+    BucketNotEmpty,
+    /// 409: the bucket exists and the caller owns it.
+    BucketAlreadyOwnedByYou,
     /// 403: the request is not allowed.
     AccessDenied,
     /// 400: the body does not match its declared digest.
@@ -48,6 +62,13 @@ impl ErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AccessDenied => "AccessDenied",
+            Self::ServiceUnavailable => "ServiceUnavailable",
+            Self::NoSuchBucket => "NoSuchBucket",
+            Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
+            Self::MalformedXml => "MalformedXML",
+            Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
+            Self::BucketNotEmpty => "BucketNotEmpty",
+            Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
             Self::BadDigest => "BadDigest",
             Self::IncompleteBody => "IncompleteBody",
             Self::InternalError => "InternalError",
@@ -85,6 +106,12 @@ impl ErrorCode {
             | Self::MissingSecurityHeader
             | Self::UnsupportedSignature => 400,
             Self::InternalError => 500,
+            Self::BucketAlreadyOwnedByYou | Self::BucketNotEmpty => 409,
+            Self::IllegalLocationConstraintException
+            | Self::MalformedXml
+            | Self::MaxMessageLengthExceeded => 400,
+            Self::NoSuchBucket => 404,
+            Self::ServiceUnavailable => 503,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
             Self::SlowDown => 503,
@@ -101,6 +128,25 @@ mod tests {
     fn every_code_has_its_catalog_status() {
         let catalog = [
             (ErrorCode::AccessDenied, "AccessDenied", 403),
+            (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
+            (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
+            (
+                ErrorCode::MaxMessageLengthExceeded,
+                "MaxMessageLengthExceeded",
+                400,
+            ),
+            (ErrorCode::MalformedXml, "MalformedXML", 400),
+            (
+                ErrorCode::IllegalLocationConstraintException,
+                "IllegalLocationConstraintException",
+                400,
+            ),
+            (ErrorCode::BucketNotEmpty, "BucketNotEmpty", 409),
+            (
+                ErrorCode::BucketAlreadyOwnedByYou,
+                "BucketAlreadyOwnedByYou",
+                409,
+            ),
             (ErrorCode::BadDigest, "BadDigest", 400),
             (ErrorCode::IncompleteBody, "IncompleteBody", 400),
             (ErrorCode::InternalError, "InternalError", 500),

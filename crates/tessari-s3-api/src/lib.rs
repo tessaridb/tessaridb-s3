@@ -4,6 +4,7 @@ mod error;
 mod pipeline;
 pub mod routes;
 mod state;
+mod xml;
 
 pub use error::{Error, Result};
 pub use state::{ApiState, Clock};

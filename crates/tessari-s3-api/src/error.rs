@@ -42,6 +42,39 @@ impl From<AuthError> for Error {
     }
 }
 
+impl From<tessari_s3_storage::Error> for Error {
+    fn from(error: tessari_s3_storage::Error) -> Self {
+        use tessari_s3_infrastructure::tessaridb::{MetaError, RefusalClass};
+        use tessari_s3_storage::Error as Storage;
+        match &error {
+            Storage::Meta(MetaError::Unavailable { .. }) => {
+                tracing::warn!(error = %error, "metadata store unavailable");
+                Self::new(
+                    ErrorCode::ServiceUnavailable,
+                    "the metadata store is unavailable; retry",
+                )
+            }
+            Storage::Meta(MetaError::Refused {
+                class: Some(RefusalClass::Retry | RefusalClass::Unavailable),
+                ..
+            }) => {
+                tracing::warn!(error = %error, "metadata store asked for a retry");
+                Self::new(
+                    ErrorCode::ServiceUnavailable,
+                    "the metadata store is busy; retry",
+                )
+            }
+            _ => {
+                tracing::error!(error = %error, "storage failure");
+                Self::new(
+                    ErrorCode::InternalError,
+                    "we encountered an internal error; please try again",
+                )
+            }
+        }
+    }
+}
+
 impl From<DispatchError> for Error {
     fn from(error: DispatchError) -> Self {
         Self::new(error.s3_code(), error.to_string())

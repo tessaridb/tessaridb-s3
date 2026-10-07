@@ -1,0 +1,143 @@
+//! The bucket operations end to end against a real TessariDB node.
+//!
+//! Needs `TESSARIDB_S3_TEST_META` (a node's wire `host:port`), `TESSARIDB_S3_TEST_META_USER` and
+//! `TESSARIDB_S3_TEST_META_PASSWORD`; each test works in its own fresh namespace. Without them every test is
+//! `ignored` — visible in the summary — and `cargo test -p tessari-s3-api --test live -- --ignored` runs them.
+
+#![cfg(test)]
+
+mod buckets;
+#[path = "../wire/signer.rs"]
+#[allow(
+    dead_code,
+    reason = "shared with the wire tests; each binary uses part of it"
+)]
+mod signer;
+
+use axum::body::{Body, to_bytes};
+use axum::http::Request;
+use tessari_s3_api::{ApiState, router};
+use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_storage::Storage;
+use tessari_s3_types::Timestamp;
+use tower::ServiceExt;
+
+pub(crate) const ACCESS_KEY: &str = "AKLIVETEST0000000001";
+pub(crate) const SECRET: &str = "live-test-secret-0123456789abcdef";
+pub(crate) const IGNORED: &str =
+    "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD";
+
+/// A server state over a fresh namespace on the test node, schema applied, and a separate pool into the same
+/// namespace for a test that must plant a record directly.
+pub(crate) async fn fresh() -> (ApiState, MetaPool) {
+    let need = |key: &str| {
+        std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for the live suite"))
+    };
+    let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
+    let vars = [
+        ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
+        ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET.to_owned()),
+        ("TESSARIDB_S3_META_ADDRESS", need("TESSARIDB_S3_TEST_META")),
+        (
+            "TESSARIDB_S3_META_USER",
+            need("TESSARIDB_S3_TEST_META_USER"),
+        ),
+        (
+            "TESSARIDB_S3_META_PASSWORD",
+            need("TESSARIDB_S3_TEST_META_PASSWORD"),
+        ),
+        ("TESSARIDB_S3_META_NAMESPACE", namespace),
+    ];
+    let config =
+        S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+            .expect("live configuration");
+    let storage = Storage::new(MetaPool::new(config.meta.clone()).expect("pool"));
+    storage
+        .prepare()
+        .await
+        .expect("schema applies on the test node");
+    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    (
+        ApiState::new(&config, ApiState::system_clock(), storage),
+        planter,
+    )
+}
+
+/// What a client sees.
+pub(crate) struct Seen {
+    pub(crate) status: u16,
+    pub(crate) headers: axum::http::HeaderMap,
+    pub(crate) code: Option<String>,
+    pub(crate) body: String,
+}
+
+/// `YYYYMMDDTHHMMSSZ` for now.
+pub(crate) fn amz_now_for_tests() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_secs()).expect("seconds fit"))
+        .expect("after the epoch");
+    let iso = Timestamp { seconds, nanos: 0 }.iso8601_millis();
+    format!(
+        "{}{}{}T{}{}{}Z",
+        &iso[0..4],
+        &iso[5..7],
+        &iso[8..10],
+        &iso[11..13],
+        &iso[14..16],
+        &iso[17..19]
+    )
+}
+
+/// Signs and sends one request carrying `body`, declared by its SHA-256.
+pub(crate) async fn call(
+    state: &ApiState,
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    body: &[u8],
+) -> Seen {
+    let amz_date = amz_now_for_tests();
+    let unsigned = signer::Unsigned {
+        method,
+        host: "localhost:9100",
+        path,
+        query,
+        headers: Vec::new(),
+        access_key: ACCESS_KEY,
+        secret: SECRET,
+        region: "us-east-1",
+        amz_date: &amz_date,
+    };
+    let (target, mut headers) = signer::sign_with_body(&unsigned, body);
+    headers.sort();
+    let mut builder = Request::builder().method(method).uri(target);
+    for (name, value) in &headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    let request = builder.body(Body::from(body.to_vec())).expect("request");
+    let response = router(state.clone())
+        .oneshot(request)
+        .await
+        .expect("infallible router");
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), 1 << 20)
+            .await
+            .expect("body")
+            .to_vec(),
+    )
+    .expect("utf-8");
+    let code = body
+        .split_once("<Code>")
+        .and_then(|(_, rest)| rest.split_once("</Code>"))
+        .map(|(c, _)| c.to_owned());
+    Seen {
+        status,
+        headers,
+        code,
+        body,
+    }
+}

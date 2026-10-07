@@ -4,11 +4,12 @@
 use std::net::SocketAddr;
 
 use tessari_s3_constants::{
-    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
-    MIN_SECRET_KEY_LEN,
+    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_REGION,
+    DEFAULT_SHUTDOWN_GRACE_SECS, MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::SecretKey;
 
+use crate::tessaridb::{MetaSettings, is_safe_name};
 use crate::{Error, Result};
 
 /// Everything the S3 server reads from its environment.
@@ -29,6 +30,8 @@ pub struct S3Config {
     pub max_inflight: usize,
     /// `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` — how long in-flight requests get after SIGTERM.
     pub shutdown_grace_secs: u64,
+    /// `TESSARIDB_S3_META_*` — the TessariDB node holding every bucket and object record.
+    pub meta: MetaSettings,
 }
 
 impl S3Config {
@@ -90,7 +93,9 @@ impl S3Config {
                 reason: "not a whole number of seconds",
             })?,
         };
+        let meta = meta_settings(&get)?;
         Ok(Self {
+            meta,
             listen,
             region,
             domains,
@@ -100,6 +105,45 @@ impl S3Config {
             shutdown_grace_secs,
         })
     }
+}
+
+/// `TESSARIDB_S3_META_ADDRESS`, `_USER`, `_PASSWORD` (required), `_NAMESPACE` (`s3`), `_DATABASE` (`meta`),
+/// `_CA` (a PEM file; unset speaks in the clear) and `_MAX_CONNECTIONS` (32).
+fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> {
+    let required = |key: &'static str| get(key).ok_or(Error::MissingConfig { key });
+    let name = |key: &'static str, default: &str| {
+        let value = get(key).unwrap_or_else(|| default.to_owned());
+        if is_safe_name(&value) {
+            Ok(value)
+        } else {
+            Err(Error::InvalidConfig {
+                key,
+                reason: "must match [a-z][a-z0-9_]*, at most 63 characters",
+            })
+        }
+    };
+    let trust_pem = match get("TESSARIDB_S3_META_CA") {
+        Some(path) => Some(
+            std::fs::read(path.trim()).map_err(|_| Error::InvalidConfig {
+                key: "TESSARIDB_S3_META_CA",
+                reason: "the file cannot be read",
+            })?,
+        ),
+        None => None,
+    };
+    Ok(MetaSettings {
+        address: required("TESSARIDB_S3_META_ADDRESS")?,
+        user: required("TESSARIDB_S3_META_USER")?,
+        password: SecretKey::new(required("TESSARIDB_S3_META_PASSWORD")?),
+        namespace: name("TESSARIDB_S3_META_NAMESPACE", "s3")?,
+        database: name("TESSARIDB_S3_META_DATABASE", "meta")?,
+        trust_pem,
+        max_connections: parse_positive(
+            get("TESSARIDB_S3_META_MAX_CONNECTIONS"),
+            "TESSARIDB_S3_META_MAX_CONNECTIONS",
+        )?
+        .unwrap_or(DEFAULT_META_CONNECTIONS),
+    })
 }
 
 /// Parses an optional positive integer.
@@ -132,12 +176,15 @@ mod tests {
         S3Config::from_lookup(|key| map.get(key).cloned())
     }
 
-    const CREDENTIALS: [(&str, &str); 2] = [
+    const CREDENTIALS: [(&str, &str); 5] = [
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
         (
             "TESSARIDB_S3_ROOT_SECRET_KEY",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         ),
+        ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:9080"),
+        ("TESSARIDB_S3_META_USER", "s3"),
+        ("TESSARIDB_S3_META_PASSWORD", "meta-password-0123"),
     ];
 
     #[test]
@@ -149,6 +196,32 @@ mod tests {
         assert_eq!(
             (config.max_inflight, config.shutdown_grace_secs),
             (1024, 30)
+        );
+        assert_eq!(
+            (
+                config.meta.namespace.as_str(),
+                config.meta.database.as_str()
+            ),
+            ("s3", "meta")
+        );
+        assert_eq!(config.meta.max_connections, 32);
+        assert!(config.meta.trust_pem.is_none());
+    }
+
+    #[test]
+    fn a_tenancy_name_that_is_not_an_identifier_is_refused() {
+        let mut vars = CREDENTIALS.to_vec();
+        vars.push(("TESSARIDB_S3_META_NAMESPACE", "s3; DROP"));
+        let refusal = load(&vars).map(|_| ()).expect_err("refused");
+        assert!(
+            matches!(
+                refusal,
+                Error::InvalidConfig {
+                    key: "TESSARIDB_S3_META_NAMESPACE",
+                    ..
+                }
+            ),
+            "{refusal:?}"
         );
     }
 
@@ -206,6 +279,10 @@ mod tests {
     #[test]
     fn the_secret_never_appears_in_debug_output() {
         let config = load(&CREDENTIALS).expect("loads");
-        assert!(!format!("{config:?}").contains("EXAMPLEKEY"));
+        let printed = format!("{config:?}");
+        assert!(
+            !printed.contains("EXAMPLEKEY") && !printed.contains("meta-password"),
+            "{printed}"
+        );
     }
 }

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_storage::Storage;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
 use crate::{Error, Result};
@@ -23,18 +24,24 @@ struct Inner {
     root_secret_key: SecretKey,
     max_inflight: usize,
     clock: Clock,
+    storage: Storage,
 }
 
 impl ApiState {
     /// State from the server configuration and a clock.
     #[must_use]
-    pub fn new(config: &S3Config, clock: Clock) -> Self {
-        Self::with_limit(config, clock, config.max_inflight)
+    pub fn new(config: &S3Config, clock: Clock, storage: Storage) -> Self {
+        Self::with_limit(config, clock, config.max_inflight, storage)
     }
 
     /// As [`ApiState::new`] with an explicit in-flight limit; `0` sheds every request (used to test the 503 path).
     #[must_use]
-    pub fn with_limit(config: &S3Config, clock: Clock, max_inflight: usize) -> Self {
+    pub fn with_limit(
+        config: &S3Config,
+        clock: Clock,
+        max_inflight: usize,
+        storage: Storage,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 region: config.region.clone(),
@@ -43,6 +50,7 @@ impl ApiState {
                 root_secret_key: config.root_secret_key.clone(),
                 max_inflight,
                 clock,
+                storage,
             }),
         }
     }
@@ -81,6 +89,12 @@ impl ApiState {
     #[must_use]
     pub fn max_inflight(&self) -> usize {
         self.inner.max_inflight
+    }
+
+    /// The storage services.
+    #[must_use]
+    pub fn storage(&self) -> &Storage {
+        &self.inner.storage
     }
 
     /// The secret for `access_key`.

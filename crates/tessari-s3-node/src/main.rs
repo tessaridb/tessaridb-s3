@@ -1,12 +1,15 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
-//! Order: tracing, configuration, the API state and router, the listener, then serving until SIGINT or SIGTERM,
+//! Order: tracing, configuration, the metadata pool and schema, the API state and router, the listener, then serving
+//! until SIGINT or SIGTERM,
 //! after which in-flight requests get the configured grace period before the process exits.
 
 use std::time::Duration;
 
 use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -21,7 +24,12 @@ async fn main() -> anyhow::Result<()> {
         max_inflight = config.max_inflight,
         "tessaridb-s3 starting"
     );
-    let app = router(ApiState::new(&config, ApiState::system_clock()));
+    let storage = Storage::new(MetaPool::new(config.meta.clone())?);
+    // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
+    // start, rather than answering every request 503.
+    storage.prepare().await?;
+    tracing::info!(meta = %config.meta.address, namespace = %config.meta.namespace, "metadata schema ready");
+    let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let (stop_tx, mut stop_rx) = watch::channel(false);
     let server = axum::serve(listener, app).with_graceful_shutdown(async move {
