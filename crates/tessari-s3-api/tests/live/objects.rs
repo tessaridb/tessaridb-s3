@@ -349,3 +349,61 @@ async fn an_object_from_an_earlier_life_of_the_bucket_is_invisible_and_replaceab
         "new"
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_objects_tag_set_is_empty_because_nothing_can_write_one() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    bucket(&state, "tags").await;
+    assert_eq!(
+        call(&state, "PUT", "/tags/k", vec![], b"v").await.status,
+        200
+    );
+    let tagged = call_with(
+        &state,
+        "PUT",
+        "/tags/t",
+        vec![],
+        vec![("x-amz-tagging", "a=b")],
+        b"v",
+    )
+    .await;
+    assert_eq!(
+        tagged.code.as_deref(),
+        Some("NotImplemented"),
+        "a tag cannot be written"
+    );
+    let tags = call(&state, "GET", "/tags/k", vec![("tagging", None)], b"").await;
+    assert_eq!(tags.status, 200, "{}", tags.body);
+    assert!(tags.body.contains("<Tagging"), "{}", tags.body);
+    assert!(tags.body.contains("<TagSet></TagSet>"), "{}", tags.body);
+    let missing = call(&state, "GET", "/tags/none", vec![("tagging", None)], b"").await;
+    assert_eq!(
+        missing.code.as_deref(),
+        Some("NoSuchKey"),
+        "{}",
+        missing.body
+    );
+    let no_bucket = call(&state, "GET", "/tags-none/k", vec![("tagging", None)], b"").await;
+    assert_eq!(
+        no_bucket.code.as_deref(),
+        Some("NoSuchBucket"),
+        "{}",
+        no_bucket.body
+    );
+    let version = call(
+        &state,
+        "GET",
+        "/tags/k",
+        vec![("tagging", None), ("versionId", Some("1"))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        version.code.as_deref(),
+        Some("NotImplemented"),
+        "{}",
+        version.body
+    );
+}

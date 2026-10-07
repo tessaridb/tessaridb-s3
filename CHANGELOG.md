@@ -84,3 +84,6 @@ section records which TessariDB version its metadata runs on.
   (`bytes=first-last` only) or the whole source — with the copy-source
   conditions, an MD5 ETag of the copied bytes and a data file of its own; the
   upload is checked before the source is read.
+- GetObjectTagging answers an existing object's tag set, which is always empty
+  (PutObject refuses `x-amz-tagging` and nothing else writes tags) — the AWS
+  CLI reads it before a server-side multipart copy.

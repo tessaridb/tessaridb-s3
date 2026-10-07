@@ -233,6 +233,7 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "DeleteObjects",
         "GetBucketLocation",
         "GetObject",
+        "GetObjectTagging",
         "HeadBucket",
         "HeadObject",
         "ListBuckets",

@@ -35,6 +35,7 @@ pub(crate) async fn route(
         Operation::CopyObject => objects::copy(call, objects::key(call)?).await,
         Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
+        Operation::GetObjectTagging => objects::tagging(call, objects::key(call)?).await,
         Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,
         Operation::DeleteObjects => objects::delete_many(call, body).await,
         Operation::CreateMultipartUpload => multipart::create(call, objects::key(call)?).await,

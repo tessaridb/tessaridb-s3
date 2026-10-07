@@ -14,6 +14,7 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::DeleteObjects,
     Operation::GetBucketLocation,
     Operation::GetObject,
+    Operation::GetObjectTagging,
     Operation::HeadBucket,
     Operation::HeadObject,
     Operation::ListBuckets,
