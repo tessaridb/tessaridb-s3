@@ -5,8 +5,11 @@ use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::{read, record};
 use super::model::{Content, NewObject};
-use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
+use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
 use crate::{Error, Result};
+
+#[path = "tessaridb_page.rs"]
+mod page;
 
 /// The TessariDB object repository.
 #[derive(Clone)]
@@ -255,6 +258,16 @@ impl ObjectRepository for TessariObjects {
             }
             _ => false,
         })
+    }
+
+    async fn page(
+        &self,
+        bucket: &BucketName,
+        at: Option<&str>,
+        after: &str,
+        limit: usize,
+    ) -> Result<Batch> {
+        page::page(&self.pool, bucket, at, after, limit).await
     }
 
     async fn remove(&self, bucket: &BucketName, key: &ObjectKey) -> Result<()> {

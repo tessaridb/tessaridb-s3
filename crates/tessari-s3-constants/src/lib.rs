@@ -88,3 +88,6 @@ pub const RECLAIM_BATCH: usize = 1000;
 
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
+
+/// Most entries (keys and common prefixes) one ListObjects page carries, and the default.
+pub const LIST_MAX_KEYS: usize = 1000;

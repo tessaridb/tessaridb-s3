@@ -8,6 +8,7 @@
 
 mod buckets;
 mod large;
+mod listing;
 mod objects;
 mod reclaim;
 #[path = "../wire/signer.rs"]

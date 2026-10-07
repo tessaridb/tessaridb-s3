@@ -38,3 +38,12 @@ section records which TessariDB version its metadata runs on.
 - A reclaimer removes queued data files once they are past a grace period
   (24 h by default), never a file an object references; a commit that comes
   after its file was reclaimed is refused instead of pointing at nothing.
+- ListObjectsV2 and ListObjects: keys in UTF-8 byte order read by seeking the
+  bucket's records in TessariDB, a delimiter rolled up into one common prefix
+  that counts once against `max-keys` (at most 1,000) and is skipped with one
+  seek, `start-after` and `marker`, and V2 continuation tokens authenticated
+  for the bucket, prefix and delimiter they were issued for — a page resumes
+  correctly after the key it ended on was deleted. `encoding-type=url` encodes
+  keys and prefixes; without it, a key XML cannot carry is refused rather than
+  written as invalid XML. Objects of an earlier life of the bucket are not
+  listed.

@@ -4,7 +4,7 @@ use std::future::Future;
 
 use tessari_s3_types::{BucketName, ObjectKey};
 
-use super::model::{NewObject, StoredObject};
+use super::model::{NewObject, ObjectSummary, StoredObject};
 use crate::Result;
 
 /// What one write statement requires of the record already at the key.
@@ -36,6 +36,30 @@ pub(crate) struct Snapshot {
     pub(crate) bucket: Option<[u8; 16]>,
     /// The record at the key with the incarnation it was written under.
     pub(crate) object: Option<([u8; 16], StoredObject)>,
+}
+
+/// One object record as a listing reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListRow {
+    /// The bucket the record was written in.
+    pub(crate) bucket: String,
+    /// The object key.
+    pub(crate) key: String,
+    /// The bucket incarnation it was written under.
+    pub(crate) incarnation: [u8; 16],
+    /// What a listing shows.
+    pub(crate) summary: ObjectSummary,
+}
+
+/// Object records in record-id order from an anchor, with the bucket's incarnation, read at one snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Batch {
+    /// The bucket's current incarnation; `None` when the bucket does not exist.
+    pub(crate) bucket: Option<[u8; 16]>,
+    /// The records, the anchor's own first when it was asked for and exists.
+    pub(crate) rows: Vec<ListRow>,
+    /// Whether the read stopped at its limit, so records may follow.
+    pub(crate) full: bool,
 }
 
 /// Object queries.
@@ -78,6 +102,16 @@ pub(crate) trait ObjectRepository: Send + Sync {
     fn mark(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
     /// Whether data `id` is still queued and not being reclaimed — a data commit can still take it.
     fn claimable(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
+    /// At most `limit` object records after `bucket/after` in record-id order — record ids order by UTF-8 bytes, so
+    /// a bucket's keys come in S3's listing order — preceded by the record at `bucket/at` itself when `at` is given.
+    /// Rows past the bucket are included; the caller stops at them.
+    fn page(
+        &self,
+        bucket: &BucketName,
+        at: Option<&str>,
+        after: &str,
+        limit: usize,
+    ) -> impl Future<Output = Result<Batch>> + Send;
     /// Removes the record at `bucket/key`, if any.
     fn remove(
         &self,

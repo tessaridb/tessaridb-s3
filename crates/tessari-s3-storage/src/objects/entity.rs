@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
-use super::model::{Content, NewObject, StoredObject};
+use super::model::{Content, NewObject, ObjectSummary, StoredObject};
+use super::repository::ListRow;
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -64,45 +65,82 @@ pub(crate) fn record(
     Ok(Value::Object(fields))
 }
 
-/// A stored record's incarnation and the object it holds.
-pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
-    let Value::Object(fields) = value else {
-        return Err(malformed("not an object"));
-    };
-    let incarnation = match fields.get("incarnation") {
-        Some(Value::Uuid(bytes)) => *bytes,
-        _ => return Err(malformed("incarnation")),
-    };
-    let size = match fields.get("size") {
+type Fields = BTreeMap<String, Value>;
+
+fn incarnation(fields: &Fields) -> Result<[u8; 16]> {
+    match fields.get("incarnation") {
+        Some(Value::Uuid(bytes)) => Ok(*bytes),
+        _ => Err(malformed("incarnation")),
+    }
+}
+
+fn size(fields: &Fields) -> Result<u64> {
+    match fields.get("size") {
         Some(Value::Number(Number::Integer(size))) => {
-            u64::try_from(*size).map_err(|_| malformed("size"))?
+            u64::try_from(*size).map_err(|_| malformed("size"))
         }
-        _ => return Err(malformed("size")),
-    };
-    let etag = match fields.get("etag") {
-        Some(Value::String(etag)) => etag.clone(),
-        _ => return Err(malformed("etag")),
-    };
-    let modified = match fields.get("modified") {
-        Some(Value::Datetime { seconds, nanos }) => tessari_s3_types::Timestamp {
+        _ => Err(malformed("size")),
+    }
+}
+
+fn text(fields: &Fields, field: &'static str) -> Result<String> {
+    match fields.get(field) {
+        Some(Value::String(text)) => Ok(text.clone()),
+        _ => Err(malformed(field)),
+    }
+}
+
+fn modified(fields: &Fields) -> Result<tessari_s3_types::Timestamp> {
+    match fields.get("modified") {
+        Some(Value::Datetime { seconds, nanos }) => Ok(tessari_s3_types::Timestamp {
             seconds: *seconds,
             nanos: *nanos,
-        },
-        _ => return Err(malformed("modified")),
-    };
+        }),
+        _ => Err(malformed("modified")),
+    }
+}
+
+fn fields_of(value: &Value) -> Result<&Fields> {
+    match value {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(malformed("not an object")),
+    }
+}
+
+/// A stored record's incarnation and the object it holds.
+pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
+    let fields = fields_of(value)?;
     let content = match (fields.get("data"), fields.get("inline")) {
         (Some(Value::Uuid(id)), _) => Content::Data(*id),
         (_, Some(Value::Bytes(bytes))) => Content::Inline(bytes.clone()),
         _ => return Err(malformed("neither inline bytes nor a data id")),
     };
     let object = StoredObject {
-        size,
-        etag,
-        modified,
+        size: size(fields)?,
+        etag: text(fields, "etag")?,
+        modified: modified(fields)?,
         headers: read_strings(fields.get("headers"), "headers")?,
         metadata: read_strings(fields.get("metadata"), "metadata")?,
         checksums: read_strings(fields.get("checksums"), "checksums")?,
         content,
     };
-    Ok((incarnation, object))
+    Ok((incarnation(fields)?, object))
+}
+
+/// A record as a listing reads it (`bucket_name, key, incarnation, size, etag, modified, checksums`).
+pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
+    let fields = fields_of(value)?;
+    Ok(ListRow {
+        bucket: text(fields, "bucket_name")?,
+        key: text(fields, "key")?,
+        incarnation: incarnation(fields)?,
+        summary: ObjectSummary {
+            size: size(fields)?,
+            etag: text(fields, "etag")?,
+            modified: modified(fields)?,
+            checksum_algorithms: read_strings(fields.get("checksums"), "checksums")?
+                .into_keys()
+                .collect(),
+        },
+    })
 }

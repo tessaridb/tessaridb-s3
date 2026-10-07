@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{ErrorCode, SecretKey};
@@ -22,6 +23,7 @@ struct Inner {
     domains: Vec<String>,
     root_access_key: String,
     root_secret_key: SecretKey,
+    list_tokens: TokenKey,
     max_inflight: usize,
     clock: Clock,
     storage: Storage,
@@ -48,6 +50,7 @@ impl ApiState {
                 domains: config.domains.clone(),
                 root_access_key: config.root_access_key.clone(),
                 root_secret_key: config.root_secret_key.clone(),
+                list_tokens: TokenKey::derive(&config.root_secret_key),
                 max_inflight,
                 clock,
                 storage,
@@ -89,6 +92,12 @@ impl ApiState {
     #[must_use]
     pub fn max_inflight(&self) -> usize {
         self.inner.max_inflight
+    }
+
+    /// The key listing continuation tokens are authenticated with.
+    #[must_use]
+    pub fn list_tokens(&self) -> &TokenKey {
+        &self.inner.list_tokens
     }
 
     /// The storage services.

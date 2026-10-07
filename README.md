@@ -20,7 +20,7 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **It stores objects on one node, without listing or multipart yet.** The server
+> **It stores and lists objects on one node, without multipart yet.** The server
 > verifies SigV4 signatures, keeps buckets and object metadata in TessariDB —
 > objects up to 128 KiB inline, larger ones (up to 5 GiB per PUT) in verified
 > data files on the node's drive — and answers every operation it does not
@@ -73,7 +73,7 @@ claims it; the two marked **tested** already are:
 | | |
 |---|---|
 | Stage | pre-alpha |
-| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, GetObject, HeadObject, DeleteObject; every other operation `NotImplemented` |
+| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, GetObject, HeadObject, DeleteObject, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`); every other operation `NotImplemented` |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 

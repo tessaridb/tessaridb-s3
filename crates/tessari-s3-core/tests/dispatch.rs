@@ -231,6 +231,8 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "HeadBucket",
         "HeadObject",
         "ListBuckets",
+        "ListObjects",
+        "ListObjectsV2",
         "PutObject",
     ];
     assert_eq!(implemented, expected);

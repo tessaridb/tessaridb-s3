@@ -95,3 +95,25 @@ pub enum Removed {
     /// The bucket does not exist.
     NoSuchBucket,
 }
+
+/// What a listing shows of one object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectSummary {
+    /// Size in bytes.
+    pub size: u64,
+    /// The quoted ETag.
+    pub etag: String,
+    /// When it was written.
+    pub modified: Timestamp,
+    /// The algorithms of the checksums stored with it (`CRC64NVME` …).
+    pub checksum_algorithms: Vec<String>,
+}
+
+/// What a listing ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Listed {
+    /// The page, in UTF-8 byte order of key.
+    Page(tessari_s3_core::objects::listing::Page<ObjectSummary>),
+    /// The bucket does not exist.
+    NoSuchBucket,
+}

@@ -12,6 +12,9 @@ use super::upload::Upload;
 use crate::data::{DataFiles, DataReader};
 use crate::{Error, Result};
 
+#[path = "list.rs"]
+mod list;
+
 /// Object operations.
 #[derive(Clone)]
 pub struct ObjectService {

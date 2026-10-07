@@ -12,6 +12,8 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::HeadBucket,
     Operation::HeadObject,
     Operation::ListBuckets,
+    Operation::ListObjects,
+    Operation::ListObjectsV2,
     Operation::PutObject,
 ];
 
