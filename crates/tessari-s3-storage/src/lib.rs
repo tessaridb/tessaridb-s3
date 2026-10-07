@@ -1,5 +1,6 @@
 //! Persistence, domain by domain: the metadata records in TessariDB and the data shards on local drives.
 
+mod answers;
 pub mod buckets;
 pub mod data;
 mod error;

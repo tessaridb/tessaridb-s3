@@ -26,6 +26,8 @@ pub enum ErrorCode {
     PreconditionFailed,
     /// 404: the key holds no object.
     NoSuchKey,
+    /// The multipart upload does not exist, or was completed or aborted.
+    NoSuchUpload,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -92,6 +94,7 @@ impl ErrorCode {
             Self::NotModified => "NotModified",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchKey => "NoSuchKey",
+            Self::NoSuchUpload => "NoSuchUpload",
             Self::ServiceUnavailable => "ServiceUnavailable",
             Self::NoSuchBucket => "NoSuchBucket",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
@@ -142,7 +145,7 @@ impl ErrorCode {
             | Self::MaxMessageLengthExceeded => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
-            Self::NoSuchKey => 404,
+            Self::NoSuchKey | Self::NoSuchUpload => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::InvalidRange => 416,
@@ -181,6 +184,7 @@ mod tests {
             (ErrorCode::NotModified, "NotModified", 304),
             (ErrorCode::PreconditionFailed, "PreconditionFailed", 412),
             (ErrorCode::NoSuchKey, "NoSuchKey", 404),
+            (ErrorCode::NoSuchUpload, "NoSuchUpload", 404),
             (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
             (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
             (

@@ -37,6 +37,9 @@ pub enum Error {
     /// An object needs a data file and no data directory is configured.
     #[error("no data directory is configured (TESSARIDB_S3_DATA_DIR)")]
     NoDataDirectory,
+    /// The operating system's random source failed, so no unguessable id could be drawn.
+    #[error("the random source failed")]
+    Randomness,
 }
 
 impl Error {
@@ -48,7 +51,8 @@ impl Error {
             Self::Malformed { .. }
             | Self::DataIo { .. }
             | Self::Corrupt { .. }
-            | Self::NoDataDirectory => ErrorCategory::Internal,
+            | Self::NoDataDirectory
+            | Self::Randomness => ErrorCategory::Internal,
         }
     }
 }

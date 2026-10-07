@@ -52,3 +52,11 @@ section records which TessariDB version its metadata runs on.
   or a checksum, which is checked before anything is removed. A request naming a
   version or a per-object condition is refused whole with `NotImplemented`, so it
   deletes nothing.
+- Multipart uploads, first half: CreateMultipartUpload (with its checksum
+  algorithm and type recorded), UploadPart (each part in its own verified data
+  file, a part number uploaded again replacing the earlier one), ListParts
+  (paged by part number) and AbortMultipartUpload. Upload ids are 128 random
+  bits, bound to their bucket, key and bucket incarnation; parts are never
+  listed or read as objects; every byte an abort or a replacement drops is
+  queued for reclamation, and the reclaimer never removes a file a part still
+  holds. CompleteMultipartUpload is not implemented yet.

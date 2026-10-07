@@ -821,6 +821,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "futures-util",
+ "getrandom 0.4.3",
  "tessari-s3-constants",
  "tessari-s3-core",
  "tessari-s3-infrastructure",

@@ -4,7 +4,9 @@ use super::catalog::Operation;
 
 /// Operations with a handler; every other catalog operation is refused with 501.
 const IMPLEMENTED: &[Operation] = &[
+    Operation::AbortMultipartUpload,
     Operation::CreateBucket,
+    Operation::CreateMultipartUpload,
     Operation::DeleteBucket,
     Operation::DeleteObject,
     Operation::DeleteObjects,
@@ -15,7 +17,9 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::ListBuckets,
     Operation::ListObjects,
     Operation::ListObjectsV2,
+    Operation::ListParts,
     Operation::PutObject,
+    Operation::UploadPart,
 ];
 
 /// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.

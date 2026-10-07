@@ -31,7 +31,7 @@ fn incomplete() -> Error {
 
 /// Streams the body (decoded when aws-chunked) into a new data file of exactly `length` bytes and checks the signed
 /// payload hash. Every failure here releases the file and its queue entry before it is returned.
-pub(super) async fn receive(
+pub(crate) async fn receive(
     call: &Call<'_>,
     body: Body,
     length: u64,
@@ -63,7 +63,7 @@ pub(super) async fn receive(
 }
 
 /// Releases data `id` after a write that will not commit; a failure leaves it queued for the reclaimer.
-pub(super) async fn release(objects: &ObjectService, id: [u8; 16]) {
+pub(crate) async fn release(objects: &ObjectService, id: [u8; 16]) {
     if let Err(error) = objects.release(id).await {
         tracing::warn!(error = %error, "an uncommitted data file was left for the reclaimer");
     }

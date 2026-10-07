@@ -6,6 +6,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 use super::entity::{read, record};
 use super::model::{Content, NewObject};
 use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
+use crate::answers::{first_record, incarnation_of};
 use crate::{Error, Result};
 
 #[path = "tessaridb_page.rs"]
@@ -27,41 +28,6 @@ impl TessariObjects {
 
 fn id(bucket: &BucketName, key: &ObjectKey) -> Value {
     Value::String(format!("{}/{}", bucket.as_str(), key.as_str()))
-}
-
-/// The first record of a records answer.
-fn first_record(answer: Option<Answer>) -> Result<Option<Value>> {
-    match answer {
-        Some(Answer::Records { records, .. }) => {
-            Ok(records.into_iter().next().map(|(_, value)| value))
-        }
-        Some(Answer::Value {
-            value: Value::None, ..
-        })
-        | None => Ok(None),
-        Some(Answer::Value { value, .. }) => Ok(Some(value)),
-        Some(_) => Err(Error::Malformed {
-            record: "object",
-            reason: "unexpected answer kind",
-        }),
-    }
-}
-
-fn incarnation_of(value: Option<Value>) -> Result<Option<[u8; 16]>> {
-    match value {
-        None => Ok(None),
-        Some(Value::Object(fields)) => match fields.get("incarnation") {
-            Some(Value::Uuid(bytes)) => Ok(Some(*bytes)),
-            _ => Err(Error::Malformed {
-                record: "bucket",
-                reason: "incarnation",
-            }),
-        },
-        Some(_) => Err(Error::Malformed {
-            record: "bucket",
-            reason: "not an object",
-        }),
-    }
 }
 
 /// A refusal that means the statement's own condition or target failed: `conflict` (the compare-and-set) or
@@ -229,10 +195,13 @@ impl ObjectRepository for TessariObjects {
 
     async fn referenced(&self, id: [u8; 16]) -> Result<bool> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        // `USING` makes a dropped or renamed index a refusal here rather than a full scan of every object.
-        let script = "SELECT key FROM objects WHERE data = $data LIMIT 1 USING INDEX by_data;";
-        let answers = self.pool.run(script, parameters).await?;
-        Ok(first_record(answers.into_iter().next())?.is_some())
+        // An object or a multipart part may hold the file. `USING` makes a dropped or renamed index a refusal here
+        // rather than a full scan.
+        let script = "SELECT key FROM objects WHERE data = $data LIMIT 1 USING INDEX by_data; \
+                      SELECT number FROM parts WHERE data = $data LIMIT 1 USING INDEX by_part_data;";
+        let mut answers = self.pool.run(script, parameters).await?.into_iter();
+        let by_object = first_record(answers.next())?.is_some();
+        Ok(by_object || first_record(answers.next())?.is_some())
     }
 
     async fn mark(&self, id: [u8; 16]) -> Result<bool> {

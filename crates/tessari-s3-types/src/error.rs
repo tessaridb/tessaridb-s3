@@ -23,6 +23,12 @@ pub enum Error {
         /// The key's length in bytes.
         len: usize,
     },
+    /// The upload id is not one this server could have issued; the S3 answer is `NoSuchUpload`.
+    #[error("not an upload id")]
+    InvalidUploadId,
+    /// The part number is not an integer from 1 to 10,000; the S3 answer is `InvalidArgument`.
+    #[error("a part number is an integer from 1 to 10000")]
+    InvalidPartNumber,
 }
 
 impl Error {
@@ -32,7 +38,9 @@ impl Error {
         match self {
             Self::InvalidBucketName { .. }
             | Self::EmptyObjectKey
-            | Self::ObjectKeyTooLong { .. } => ErrorCategory::Validation,
+            | Self::ObjectKeyTooLong { .. }
+            | Self::InvalidUploadId
+            | Self::InvalidPartNumber => ErrorCategory::Validation,
         }
     }
 }

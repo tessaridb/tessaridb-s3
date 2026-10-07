@@ -96,7 +96,7 @@ pub(crate) trait ObjectRepository: Send + Sync {
         grace_secs: u64,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<([u8; 16], bool)>>> + Send;
-    /// Whether any object record references data `id`.
+    /// Whether any object or multipart part record references data `id`.
     fn referenced(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
     /// Marks data `id` as being reclaimed; `false` when its entry is gone or already marked.
     fn mark(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;

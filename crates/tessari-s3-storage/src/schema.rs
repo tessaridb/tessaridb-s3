@@ -11,6 +11,8 @@ use crate::Result;
 /// The table definitions, run inside the configured namespace and database. `gc` holds the data ids whose files may
 /// be reclaimed: an upload's own id from before its file exists until the commit that references it, and — through
 /// the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it replaced.
+/// Multipart uploads keep their own records (`uploads`, `parts`), never seen by an object read or a listing, and a
+/// replaced or removed part queues its data the same way (`part_superseded`).
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -24,6 +26,18 @@ DEFINE TABLE IF NOT EXISTS objects (\
 DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime);
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
+WHEN $before.data != NONE AND $before.data != $after.data \
+THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
+DEFINE TABLE IF NOT EXISTS uploads (\
+ bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, initiated datetime REQUIRED,\
+ headers object REQUIRED, metadata object REQUIRED, checksum_algorithm string, checksum_type string,\
+ last_part datetime);
+DEFINE TABLE IF NOT EXISTS parts (\
+ upload uuid REQUIRED, number int REQUIRED, data uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
+ modified datetime REQUIRED, checksums object REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_upload ON parts FIELDS upload;
+DEFINE INDEX IF NOT EXISTS by_part_data ON parts FIELDS data;
+DEFINE EVENT IF NOT EXISTS part_superseded ON parts FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
 THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
 COMMIT;

@@ -1,9 +1,9 @@
 //! Object operations: PutObject, GetObject, HeadObject, DeleteObject and DeleteObjects.
 
-mod data;
+pub(crate) mod data;
 mod delete_many;
-mod headers;
-mod put;
+pub(crate) mod headers;
+pub(crate) mod put;
 mod read;
 
 use axum::body::Body;

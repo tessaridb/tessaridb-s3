@@ -98,3 +98,71 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
     );
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_queued_file_a_part_still_references_is_kept() {
+    let dir = scratch_dir();
+    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    assert_eq!(
+        call(&state, "PUT", "/parted", vec![], b"").await.status,
+        200
+    );
+    let created = call(&state, "POST", "/parted/k", vec![("uploads", None)], b"").await;
+    let upload = created
+        .body
+        .split_once("<UploadId>")
+        .and_then(|(_, rest)| rest.split_once("</UploadId>"))
+        .map(|(id, _)| id.to_owned())
+        .expect("an upload id");
+    let part = call(
+        &state,
+        "PUT",
+        "/parted/k",
+        vec![
+            ("partNumber", Some("1")),
+            ("uploadId", Some(upload.as_str())),
+        ],
+        &body(MIB, 5),
+    )
+    .await;
+    assert_eq!(part.status, 200, "{}", part.body);
+    assert_eq!(files(&dir).len(), 1);
+    // A stray queue entry for a file a part still holds (a crash between two steps could leave one).
+    let answers = planter
+        .run("SELECT data FROM parts;", Vec::new())
+        .await
+        .expect("parts read");
+    let Some(tessari_s3_infrastructure::tessaridb::Answer::Records { records, .. }) =
+        answers.into_iter().next()
+    else {
+        panic!("no parts answer");
+    };
+    let data = match records.first().map(|(_, record)| record) {
+        Some(tessari_s3_infrastructure::tessaridb::Value::Object(fields)) => {
+            fields.get("data").cloned()
+        }
+        _ => None,
+    }
+    .expect("a part's data");
+    planter
+        .run(
+            "UPSERT gc:$data SET data = $data, queued = time::now();",
+            vec![("data".to_owned(), data)],
+        )
+        .await
+        .expect("queue planted");
+    let reclaimed = state
+        .storage()
+        .objects()
+        .reclaim(0, 1000)
+        .await
+        .expect("reclaim");
+    assert_eq!(
+        (reclaimed.removed, reclaimed.kept),
+        (0, 1),
+        "the part's file is referenced"
+    );
+    assert_eq!(files(&dir).len(), 1);
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}

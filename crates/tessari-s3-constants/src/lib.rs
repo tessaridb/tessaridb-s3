@@ -101,3 +101,12 @@ pub const DELETE_OBJECTS_BODY_MAX: usize = DELETE_OBJECTS_MAX_KEYS * (OBJECT_KEY
 
 /// Keys of one DeleteObjects request removed at once; well under the metadata connection pool.
 pub const DELETE_OBJECTS_CONCURRENCY: usize = 8;
+
+/// Highest part number, and the most parts one multipart upload holds.
+pub const MULTIPART_MAX_PARTS: u16 = 10_000;
+
+/// Smallest size of every part but the last of a multipart upload, checked at completion.
+pub const MULTIPART_MIN_PART_SIZE: u64 = 5 * 1024 * 1024;
+
+/// Most parts one ListParts page carries, and the default.
+pub const LIST_PARTS_MAX: usize = 1000;

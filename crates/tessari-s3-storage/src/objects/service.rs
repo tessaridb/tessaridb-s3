@@ -66,6 +66,14 @@ impl ObjectService {
         self.repository.unqueue(id).await
     }
 
+    /// Whether data `id` is still queued and unclaimed, so a commit could still take it.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub(crate) async fn claimable(&self, id: [u8; 16]) -> Result<bool> {
+        self.repository.claimable(id).await
+    }
+
     async fn release_logged(&self, id: [u8; 16]) {
         if let Err(error) = self.release(id).await {
             let data = uuid::Uuid::from_bytes(id);

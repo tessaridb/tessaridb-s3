@@ -47,7 +47,7 @@ const fn is_chunked(payload: &PayloadHash) -> bool {
 
 /// The object's length as the request declares it: the decoded length of an aws-chunked body, the Content-Length
 /// of any other.
-fn declared_length(call: &Call<'_>) -> Result<u64> {
+pub(crate) fn declared_length(call: &Call<'_>) -> Result<u64> {
     if is_chunked(&call.verified.payload()) {
         header_number(call.headers, "x-amz-decoded-content-length")?.ok_or_else(|| {
             Error::new(
@@ -103,7 +103,7 @@ async fn read_inline(
 }
 
 /// Checks the Content-MD5 and the declared checksum against the digests; answers the algorithm to store.
-pub(super) fn check(
+pub(crate) fn check(
     integrity: &Integrity,
     digests: &Digests,
     trailer: Option<String>,

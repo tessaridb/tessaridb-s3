@@ -6,8 +6,8 @@ use tessari_s3_types::BucketName;
 
 use super::super::entity::list_row;
 use super::super::repository::Batch;
-use super::{first_record, incarnation_of};
 use crate::Result;
+use crate::answers::{first_record, incarnation_of};
 
 /// What a listing reads of each record: no inline bytes.
 const LIST_FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, checksums";

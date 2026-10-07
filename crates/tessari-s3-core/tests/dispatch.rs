@@ -223,7 +223,9 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         .map(|spec| spec.name)
         .collect();
     let expected = [
+        "AbortMultipartUpload",
         "CreateBucket",
+        "CreateMultipartUpload",
         "DeleteBucket",
         "DeleteObject",
         "DeleteObjects",
@@ -234,7 +236,9 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "ListBuckets",
         "ListObjects",
         "ListObjectsV2",
+        "ListParts",
         "PutObject",
+        "UploadPart",
     ];
     assert_eq!(implemented, expected);
 }

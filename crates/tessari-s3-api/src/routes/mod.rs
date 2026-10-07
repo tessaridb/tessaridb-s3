@@ -36,6 +36,10 @@ pub(crate) async fn route(
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
         Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,
         Operation::DeleteObjects => objects::delete_many(call, body).await,
+        Operation::CreateMultipartUpload => multipart::create(call, objects::key(call)?).await,
+        Operation::UploadPart => multipart::upload_part(call, objects::key(call)?, body).await,
+        Operation::AbortMultipartUpload => multipart::abort(call, objects::key(call)?).await,
+        Operation::ListParts => multipart::list_parts(call, objects::key(call)?).await,
         _ => Err(Error::new(
             ErrorCode::InternalError,
             "the operation has no handler",

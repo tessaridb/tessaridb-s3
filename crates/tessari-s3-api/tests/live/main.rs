@@ -10,6 +10,7 @@ mod buckets;
 mod delete_many;
 mod large;
 mod listing;
+mod multipart;
 mod objects;
 mod reclaim;
 #[path = "../wire/signer.rs"]
@@ -30,6 +31,9 @@ use tower::ServiceExt;
 
 pub(crate) const ACCESS_KEY: &str = "AKLIVETEST0000000001";
 pub(crate) const SECRET: &str = "live-test-secret-0123456789abcdef";
+/// Schema application, one test at a time.
+static SCHEMA_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub(crate) const IGNORED: &str =
     "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD";
 
@@ -82,10 +86,16 @@ pub(crate) async fn fresh_with(
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
     );
-    storage
-        .prepare()
-        .await
-        .expect("schema applies on the test node");
+    {
+        // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one
+        // store-wide catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not
+        // about concurrent start-up, so their setup takes turns; each still gets its own namespace.
+        let _turn = SCHEMA_TURN.lock().await;
+        storage
+            .prepare()
+            .await
+            .expect("schema applies on the test node");
+    }
     let planter = MetaPool::new(config.meta.clone()).expect("pool");
     (
         ApiState::new(&config, ApiState::system_clock(), storage),
