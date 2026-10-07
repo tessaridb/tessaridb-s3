@@ -35,6 +35,7 @@ pub(crate) async fn route(
         Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
         Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,
+        Operation::DeleteObjects => objects::delete_many(call, body).await,
         _ => Err(Error::new(
             ErrorCode::InternalError,
             "the operation has no handler",

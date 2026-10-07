@@ -7,7 +7,7 @@ use tessari_s3_core::objects::listing::{Entry, Page};
 use tessari_s3_storage::objects::ObjectSummary;
 use tessari_s3_types::ErrorCode;
 
-use crate::xml::{S3_NAMESPACE, escape};
+use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
 
 /// A page and the request it answers.
@@ -48,17 +48,6 @@ fn url_encode(text: &str) -> String {
         }
     }
     out
-}
-
-/// `text` as XML 1.0 character data, or `None` when it holds a character XML 1.0 cannot carry. A carriage return is
-/// written as a reference, because a parser turns a literal one into a line feed.
-fn xml_text(text: &str) -> Option<String> {
-    let allowed = |c: char| {
-        matches!(c, '\t' | '\n' | '\r') || (c >= ' ' && c != '\u{FFFE}' && c != '\u{FFFF}')
-    };
-    text.chars()
-        .all(allowed)
-        .then(|| escape(text).replace('\r', "&#13;"))
 }
 
 /// A key, prefix or marker as this listing writes it.
@@ -206,20 +195,11 @@ pub(super) fn render(
 
 #[cfg(test)]
 mod tests {
-    use super::{url_encode, xml_text};
+    use super::url_encode;
 
     #[test]
     fn url_encoding_keeps_unreserved_and_slash_and_encodes_the_rest() {
         assert_eq!(url_encode("a b/ü+&~._-"), "a+b/%C3%BC%2B%26~._-");
         assert_eq!(url_encode("x\u{1}y"), "x%01y");
-    }
-
-    #[test]
-    fn xml_text_refuses_what_xml_cannot_carry_and_keeps_a_carriage_return() {
-        assert_eq!(xml_text("a<&>\t\n").as_deref(), Some("a&lt;&amp;&gt;\t\n"));
-        assert_eq!(xml_text("a\rb").as_deref(), Some("a&#13;b"));
-        for refused in ["x\u{1}y", "x\u{FFFF}", "\u{0}"] {
-            assert_eq!(xml_text(refused), None, "{refused:?}");
-        }
     }
 }

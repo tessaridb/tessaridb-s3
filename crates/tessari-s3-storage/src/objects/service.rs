@@ -2,6 +2,7 @@
 //! statement; a read sees an object only if it belongs to the bucket's current incarnation. A data file is queued for
 //! reclamation before it exists and leaves the queue only in the transaction that commits an object pointing at it.
 
+use tessari_s3_constants::DELETE_OBJECTS_CONCURRENCY;
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
@@ -229,6 +230,34 @@ impl ObjectService {
         Ok(Ok(existing
             .filter(|(record, _)| *record == incarnation)
             .map(|(_, object)| object)))
+    }
+
+    /// Removes each of `keys`, a few at a time, one outcome per key in order; `None` when the bucket does not exist.
+    /// A missing key is removed successfully, as in S3.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage while reading the bucket; a key's own failure is its outcome.
+    pub async fn delete_many(
+        &self,
+        bucket: &BucketName,
+        keys: &[ObjectKey],
+    ) -> Result<Option<Vec<Result<()>>>> {
+        use futures_util::StreamExt;
+        if self.repository.incarnation(bucket).await?.is_none() {
+            return Ok(None);
+        }
+        // Each removal owns its inputs: a future borrowing from the iterator's closure argument is not provably
+        // `Send` for every lifetime, which the server's handler future must be.
+        let removals = keys.iter().cloned().map(|key| {
+            let repository = self.repository.clone();
+            let bucket = bucket.clone();
+            async move { repository.remove(&bucket, &key).await }
+        });
+        let outcomes = futures_util::stream::iter(removals)
+            .buffered(DELETE_OBJECTS_CONCURRENCY)
+            .collect()
+            .await;
+        Ok(Some(outcomes))
     }
 
     /// Removes the object at `bucket/key`; deleting a missing key succeeds, as in S3.

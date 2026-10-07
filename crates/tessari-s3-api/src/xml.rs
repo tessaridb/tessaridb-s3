@@ -27,6 +27,18 @@ pub fn escape(text: &str) -> String {
     out
 }
 
+/// `text` as XML 1.0 character data, or `None` when it holds a character XML 1.0 cannot carry. A carriage return is
+/// written as a reference, because a parser turns a literal one into a line feed.
+#[must_use]
+pub fn xml_text(text: &str) -> Option<String> {
+    let allowed = |c: char| {
+        matches!(c, '\t' | '\n' | '\r') || (c >= ' ' && c != '\u{FFFE}' && c != '\u{FFFF}')
+    };
+    text.chars()
+        .all(allowed)
+        .then(|| escape(text).replace('\r', "&#13;"))
+}
+
 /// The text of the first `<element>` under a root called `root`; `Ok(None)` for an empty body or an absent element.
 /// Element names compare by local name, so a body with or without the S3 namespace reads the same.
 ///
@@ -86,7 +98,7 @@ pub fn element_text(body: &[u8], root: &str, element: &str) -> Result<Option<Str
 
 #[cfg(test)]
 mod tests {
-    use super::{element_text, escape};
+    use super::{element_text, escape, xml_text};
     use tessari_s3_types::ErrorCode;
 
     const ROOT: &str = "CreateBucketConfiguration";
@@ -129,5 +141,14 @@ mod tests {
     #[test]
     fn markup_cannot_escape_an_element() {
         assert_eq!(escape("a<b>&\"c'"), "a&lt;b&gt;&amp;&quot;c&apos;");
+    }
+
+    #[test]
+    fn xml_text_refuses_what_xml_cannot_carry_and_keeps_a_carriage_return() {
+        assert_eq!(xml_text("a<&>\t\n").as_deref(), Some("a&lt;&amp;&gt;\t\n"));
+        assert_eq!(xml_text("a\rb").as_deref(), Some("a&#13;b"));
+        for refused in ["x\u{1}y", "x\u{FFFF}", "\u{0}"] {
+            assert_eq!(xml_text(refused), None, "{refused:?}");
+        }
     }
 }

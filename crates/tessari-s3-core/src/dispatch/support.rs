@@ -7,6 +7,7 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::CreateBucket,
     Operation::DeleteBucket,
     Operation::DeleteObject,
+    Operation::DeleteObjects,
     Operation::GetBucketLocation,
     Operation::GetObject,
     Operation::HeadBucket,

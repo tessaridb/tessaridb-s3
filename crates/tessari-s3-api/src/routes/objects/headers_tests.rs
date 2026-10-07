@@ -121,7 +121,7 @@ fn one_checksum_is_declared_and_conflicting_ones_are_refused() {
         ("x-amz-sdk-checksum-algorithm", "CRC32"),
     ]))
     .expect("reads");
-    let declared = read.checksum.expect("declared");
+    let declared = read.integrity.checksum.expect("declared");
     assert_eq!(
         (declared.algorithm, declared.header_value.as_deref()),
         (ChecksumAlgorithm::Crc32, Some("NhCmhg=="))
@@ -129,7 +129,10 @@ fn one_checksum_is_declared_and_conflicting_ones_are_refused() {
     let trailer = read_put_headers(&headers(&[("x-amz-trailer", "x-amz-checksum-crc64nvme")]))
         .expect("reads");
     assert_eq!(
-        trailer.checksum.map(|d| (d.algorithm, d.header_value)),
+        trailer
+            .integrity
+            .checksum
+            .map(|d| (d.algorithm, d.header_value)),
         Some((ChecksumAlgorithm::Crc64Nvme, None))
     );
     assert_eq!(
@@ -162,6 +165,7 @@ fn conditions_and_content_md5_parse() {
     );
     let md5 = read_put_headers(&headers(&[("content-md5", "XUFAKrxLKna5cZ2REBfFkg==")]))
         .expect("reads")
+        .integrity
         .content_md5;
     assert_eq!(md5.map(|m| m[0]), Some(0x5d));
 }

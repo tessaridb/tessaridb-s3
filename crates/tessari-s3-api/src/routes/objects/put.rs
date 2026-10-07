@@ -12,7 +12,7 @@ use tessari_s3_storage::objects::{Content, NewObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use super::data;
-use super::headers::{PutHeaders, read_put_headers};
+use super::headers::{Integrity, PutHeaders, read_put_headers};
 use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::empty_response;
@@ -103,8 +103,8 @@ async fn read_inline(
 }
 
 /// Checks the Content-MD5 and the declared checksum against the digests; answers the algorithm to store.
-fn check(
-    headers: &PutHeaders,
+pub(super) fn check(
+    integrity: &Integrity,
     digests: &Digests,
     trailer: Option<String>,
 ) -> Result<ChecksumAlgorithm> {
@@ -114,10 +114,10 @@ fn check(
             format!("the {what} you specified did not match the body"),
         )
     };
-    if headers.content_md5.is_some_and(|md5| md5 != digests.md5) {
+    if integrity.content_md5.is_some_and(|md5| md5 != digests.md5) {
         return Err(bad_digest("Content-MD5"));
     }
-    match &headers.checksum {
+    match &integrity.checksum {
         Some(declared) => {
             let value = declared.header_value.clone().or(trailer).ok_or_else(|| {
                 Error::new(
@@ -154,7 +154,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
             let mut hashes = Hashes::new();
             hashes.update(&data);
             let digests = hashes.finish();
-            let algorithm = check(&headers, &digests, trailer)?;
+            let algorithm = check(&headers.integrity, &digests, trailer)?;
             commit(
                 call,
                 key,
@@ -175,7 +175,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
                 ));
             }
             let (uploaded, trailer) = data::receive(call, body, length).await?;
-            let algorithm = match check(&headers, &uploaded.digests, trailer) {
+            let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
                 Ok(algorithm) => algorithm,
                 Err(error) => {
                     data::release(objects, uploaded.id).await;
@@ -209,7 +209,7 @@ async fn commit(
     content: Content,
 ) -> Result<Response<Body>> {
     let etag = format!("\"{}\"", digests.md5_hex);
-    let declared_checksum = headers.checksum.is_some();
+    let declared_checksum = headers.integrity.checksum.is_some();
     let object = NewObject {
         size,
         etag: etag.clone(),

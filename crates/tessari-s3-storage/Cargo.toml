@@ -17,6 +17,7 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["time", "fs"] }
 blake3.workspace = true
 uuid.workspace = true
+futures-util = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "fs", "macros", "rt-multi-thread"] }

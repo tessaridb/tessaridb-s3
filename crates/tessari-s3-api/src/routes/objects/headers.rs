@@ -36,8 +36,7 @@ pub(crate) struct DeclaredChecksum {
 pub(crate) struct PutHeaders {
     pub(crate) system: BTreeMap<String, String>,
     pub(crate) metadata: BTreeMap<String, String>,
-    pub(crate) content_md5: Option<[u8; 16]>,
-    pub(crate) checksum: Option<DeclaredChecksum>,
+    pub(crate) integrity: Integrity,
     pub(crate) condition: WriteCondition,
 }
 
@@ -64,7 +63,6 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
     let mut system = BTreeMap::new();
     let mut metadata = BTreeMap::new();
     let mut metadata_bytes: usize = 0;
-    let mut header_checksums = Vec::new();
     for (name, value) in headers {
         let name = name.as_str();
         let value = value
@@ -92,16 +90,6 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
                 ErrorCode::AccessControlListNotSupported,
                 "the bucket does not allow ACLs",
             ));
-        } else if name.starts_with("x-amz-checksum-")
-            && name != "x-amz-checksum-type"
-            && name != "x-amz-checksum-mode"
-        {
-            match ChecksumAlgorithm::parse(name) {
-                Some(Declared::Supported(algorithm)) => {
-                    header_checksums.push((algorithm, value.trim().to_owned()))
-                }
-                _ => return Err(not_implemented(&format!("the checksum header {name}"))),
-            }
         }
     }
     if metadata_bytes > USER_METADATA_MAX {
@@ -133,6 +121,61 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         *encoding = kept.join(", ");
     }
     system.retain(|_, value| !value.is_empty());
+    let integrity = read_integrity(headers)?;
+    let condition = match (text("if-none-match"), text("if-match")) {
+        (None, None) => WriteCondition::None,
+        (Some("*"), None) => WriteCondition::IfNoneMatch,
+        (Some(_), None) => return Err(not_implemented("If-None-Match with a value other than *")),
+        (None, Some(etag)) => WriteCondition::IfMatch(format!("\"{}\"", etag.trim_matches('"'))),
+        (Some(_), Some(_)) => {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                "If-Match and If-None-Match cannot be combined",
+            ));
+        }
+    };
+    Ok(PutHeaders {
+        system,
+        metadata,
+        integrity,
+        condition,
+    })
+}
+
+/// The integrity values a request with a body declares: its Content-MD5 and its one checksum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Integrity {
+    pub(crate) content_md5: Option<[u8; 16]>,
+    pub(crate) checksum: Option<DeclaredChecksum>,
+}
+
+/// Reads Content-MD5 and the declared checksum; a checksum header for an algorithm this server does not support is
+/// refused rather than ignored.
+pub(crate) fn read_integrity(headers: &HeaderMap) -> Result<Integrity> {
+    let text = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+    };
+    let mut header_checksums = Vec::new();
+    for (name, value) in headers {
+        let name = name.as_str();
+        if name.starts_with("x-amz-checksum-")
+            && name != "x-amz-checksum-type"
+            && name != "x-amz-checksum-mode"
+        {
+            let value = value
+                .to_str()
+                .map_err(|_| Error::new(ErrorCode::InvalidArgument, "a header is not ASCII"))?;
+            match ChecksumAlgorithm::parse(name) {
+                Some(Declared::Supported(algorithm)) => {
+                    header_checksums.push((algorithm, value.trim().to_owned()));
+                }
+                _ => return Err(not_implemented(&format!("the checksum header {name}"))),
+            }
+        }
+    }
     let checksum = declared_checksum(
         text("x-amz-sdk-checksum-algorithm"),
         text("x-amz-trailer"),
@@ -152,24 +195,9 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
                 })
         })
         .transpose()?;
-    let condition = match (text("if-none-match"), text("if-match")) {
-        (None, None) => WriteCondition::None,
-        (Some("*"), None) => WriteCondition::IfNoneMatch,
-        (Some(_), None) => return Err(not_implemented("If-None-Match with a value other than *")),
-        (None, Some(etag)) => WriteCondition::IfMatch(format!("\"{}\"", etag.trim_matches('"'))),
-        (Some(_), Some(_)) => {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                "If-Match and If-None-Match cannot be combined",
-            ));
-        }
-    };
-    Ok(PutHeaders {
-        system,
-        metadata,
+    Ok(Integrity {
         content_md5,
         checksum,
-        condition,
     })
 }
 

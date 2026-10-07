@@ -7,6 +7,7 @@
 #![cfg(test)]
 
 mod buckets;
+mod delete_many;
 mod large;
 mod listing;
 mod objects;

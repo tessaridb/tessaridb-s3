@@ -47,3 +47,8 @@ section records which TessariDB version its metadata runs on.
   keys and prefixes; without it, a key XML cannot carry is refused rather than
   written as invalid XML. Objects of an earlier life of the bucket are not
   listed.
+- DeleteObjects: up to 1,000 keys per request, each removed and reported on its
+  own (a missing key counts as deleted), Quiet. The body must carry Content-MD5
+  or a checksum, which is checked before anything is removed. A request naming a
+  version or a per-object condition is refused whole with `NotImplemented`, so it
+  deletes nothing.

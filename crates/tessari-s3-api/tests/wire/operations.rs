@@ -1,7 +1,9 @@
 //! Every operation of the catalog, signed and sent, is answered `NotImplemented` (501) on the wire; AWS's own
 //! published requests authenticate and reach the same answer.
 
-use tessari_s3_core::dispatch::{CATALOG, DispatchRequest, Target, dispatch, is_implemented};
+use tessari_s3_core::dispatch::{
+    CATALOG, DispatchRequest, Operation, Target, dispatch, is_implemented,
+};
 
 use crate::signer::{EMPTY_SHA256, Unsigned, sign};
 use crate::{ACCESS_KEY, AMZ_DATE, NOW, SECRET, request, send, state};
@@ -56,7 +58,10 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
             header_names: spec.required_headers,
         })
         .map_or(spec.operation, |answering| answering.operation);
-        let (status, code) = if is_implemented(answering) {
+        let (status, code) = if answering == Operation::DeleteObjects {
+            // Its handler refuses a body with neither Content-MD5 nor a checksum before reading the store.
+            (400, "InvalidRequest")
+        } else if is_implemented(answering) {
             (503, "ServiceUnavailable")
         } else {
             (501, "NotImplemented")

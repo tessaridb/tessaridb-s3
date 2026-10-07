@@ -91,3 +91,13 @@ pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 
 /// Most entries (keys and common prefixes) one ListObjects page carries, and the default.
 pub const LIST_MAX_KEYS: usize = 1000;
+
+/// Most keys one DeleteObjects request may name.
+pub const DELETE_OBJECTS_MAX_KEYS: usize = 1000;
+
+/// The largest DeleteObjects body read: the maximum keys, each at the key limit with every byte escaped (`&quot;`
+/// is six bytes) plus its element tags.
+pub const DELETE_OBJECTS_BODY_MAX: usize = DELETE_OBJECTS_MAX_KEYS * (OBJECT_KEY_MAX_LEN * 6 + 128);
+
+/// Keys of one DeleteObjects request removed at once; well under the metadata connection pool.
+pub const DELETE_OBJECTS_CONCURRENCY: usize = 8;

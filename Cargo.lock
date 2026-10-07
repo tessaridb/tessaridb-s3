@@ -820,6 +820,7 @@ name = "tessari-s3-storage"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "futures-util",
  "tessari-s3-constants",
  "tessari-s3-core",
  "tessari-s3-infrastructure",
