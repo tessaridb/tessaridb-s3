@@ -39,6 +39,7 @@ pub(crate) async fn route(
         Operation::DeleteObjects => objects::delete_many(call, body).await,
         Operation::CreateMultipartUpload => multipart::create(call, objects::key(call)?).await,
         Operation::UploadPart => multipart::upload_part(call, objects::key(call)?, body).await,
+        Operation::UploadPartCopy => multipart::copy_part(call, objects::key(call)?).await,
         Operation::AbortMultipartUpload => multipart::abort(call, objects::key(call)?).await,
         Operation::ListParts => multipart::list_parts(call, objects::key(call)?).await,
         Operation::ListMultipartUploads => multipart::list_uploads(call).await,

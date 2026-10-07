@@ -67,6 +67,7 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
         } else if matches!(
             answering,
             Operation::UploadPart
+                | Operation::UploadPartCopy
                 | Operation::AbortMultipartUpload
                 | Operation::ListParts
                 | Operation::CompleteMultipartUpload

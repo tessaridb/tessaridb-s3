@@ -50,6 +50,44 @@ impl CopySource {
     }
 }
 
+/// Why an `x-amz-copy-source-range` was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyRangeError {
+    /// It is not `bytes=first-last` with `first <= last`.
+    Malformed,
+    /// It reaches past the source.
+    OutOfRange,
+}
+
+/// Reads `x-amz-copy-source-range` against a source of `size` bytes: exactly `bytes=first-last`, zero-based and
+/// inclusive — unlike a GET's Range there is no suffix, no open end and no list, so anything else is refused rather
+/// than answered with the whole object.
+///
+/// # Errors
+/// [`CopyRangeError::Malformed`] for any other form or `first > last`; [`CopyRangeError::OutOfRange`] when `last`
+/// is not a byte of the source.
+pub fn copy_range(header: &str, size: u64) -> Result<(u64, u64), CopyRangeError> {
+    let spec = header
+        .trim()
+        .strip_prefix("bytes=")
+        .ok_or(CopyRangeError::Malformed)?;
+    let (first, last) = spec.split_once('-').ok_or(CopyRangeError::Malformed)?;
+    let number = |text: &str| {
+        (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| text.parse::<u64>().ok())
+            .flatten()
+            .ok_or(CopyRangeError::Malformed)
+    };
+    let (first, last) = (number(first)?, number(last)?);
+    if first > last {
+        return Err(CopyRangeError::Malformed);
+    }
+    if last >= size {
+        return Err(CopyRangeError::OutOfRange);
+    }
+    Ok((first, last))
+}
+
 /// A metadata or tagging directive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Directive {

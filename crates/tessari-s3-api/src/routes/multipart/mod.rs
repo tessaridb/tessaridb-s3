@@ -1,5 +1,5 @@
-//! Multipart uploads: CreateMultipartUpload, UploadPart, AbortMultipartUpload and ListParts (CompleteMultipartUpload
-//! and ListMultipartUploads in their own modules). An upload id that is
+//! Multipart uploads: CreateMultipartUpload, UploadPart, AbortMultipartUpload and ListParts (CompleteMultipartUpload,
+//! ListMultipartUploads and UploadPartCopy in their own modules). An upload id that is
 //! malformed, unknown, or issued for another key answers `NoSuchUpload`; a part's body streams into its own data file
 //! exactly as a large PutObject's does.
 
@@ -21,10 +21,12 @@ use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
 
 mod complete;
+mod copy_part;
 mod declared;
 mod uploads;
 
 pub(crate) use complete::complete;
+pub(crate) use copy_part::copy_part;
 use declared::declared_checksum;
 pub(crate) use uploads::list_uploads;
 
@@ -40,6 +42,16 @@ fn upload_id(call: &Call<'_>) -> Result<UploadId> {
     call.query_value("uploadId")
         .and_then(|text| UploadId::parse(text).ok())
         .ok_or_else(no_such_upload)
+}
+
+/// The `partNumber` query parameter, 1 to 10,000.
+fn part_number(call: &Call<'_>) -> Result<PartNumber> {
+    PartNumber::parse(call.query_value("partNumber").unwrap_or("")).map_err(|_| {
+        Error::new(
+            ErrorCode::InvalidArgument,
+            "partNumber must be an integer from 1 to 10000",
+        )
+    })
 }
 
 /// A non-negative integer query parameter, at most `max`.
@@ -120,12 +132,7 @@ pub(crate) async fn upload_part(
     body: Body,
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
-    let number = PartNumber::parse(call.query_value("partNumber").unwrap_or("")).map_err(|_| {
-        Error::new(
-            ErrorCode::InvalidArgument,
-            "partNumber must be an integer from 1 to 10000",
-        )
-    })?;
+    let number = part_number(call)?;
     let integrity = read_integrity(call.headers)?;
     let length = declared_length(call)?;
     if length > SINGLE_PUT_MAX {

@@ -242,6 +242,7 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "ListParts",
         "PutObject",
         "UploadPart",
+        "UploadPartCopy",
     ];
     assert_eq!(implemented, expected);
 }

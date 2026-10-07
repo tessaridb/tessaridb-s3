@@ -4,20 +4,18 @@
 //! checksum is recomputed over them and — when the source holds a whole-object value of the same algorithm — checked
 //! against the source's before anything commits.
 
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::http::{HeaderMap, Response, StatusCode};
 use futures_util::StreamExt;
-use futures_util::stream::BoxStream;
 use tessari_s3_constants::{INLINE_OBJECT_MAX, SINGLE_PUT_MAX};
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests, Hashes};
-use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
-use tessari_s3_core::objects::copy::{CopySource, CopySourceError, Directive};
+use tessari_s3_core::objects::copy::Directive;
 use tessari_s3_storage::objects::{Content, NewObject, ObjectService, StoredObject, Written};
-use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
+use tessari_s3_types::{ErrorCode, ObjectKey};
 
-use super::data;
 use super::headers::read_put_headers;
 use super::put::not_written;
+use super::{data, source};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
 use crate::xml::{S3_NAMESPACE, escape};
@@ -27,136 +25,29 @@ fn invalid(code: ErrorCode, message: &str) -> Error {
     Error::new(code, message)
 }
 
-fn text<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-}
-
-/// The object `x-amz-copy-source` names.
-fn source_of(headers: &HeaderMap) -> Result<(BucketName, ObjectKey)> {
-    let malformed = || {
-        invalid(
-            ErrorCode::InvalidArgument,
-            "x-amz-copy-source is not bucket/key",
-        )
-    };
-    let source =
-        CopySource::parse(text(headers, "x-amz-copy-source").unwrap_or("")).map_err(|error| {
-            match error {
-                CopySourceError::Version => invalid(
-                    ErrorCode::NotImplemented,
-                    "copying a version is not implemented",
-                ),
-                CopySourceError::Malformed => malformed(),
-            }
-        })?;
-    let bucket = BucketName::new(&source.bucket).map_err(|_| malformed())?;
-    let key = ObjectKey::new(&source.key).map_err(|_| malformed())?;
-    Ok((bucket, key))
-}
-
-/// The copy-source conditions, which S3 answers 412 whenever they do not all hold.
-fn source_holds(headers: &HeaderMap, object: &StoredObject) -> bool {
-    let conditions = ReadConditions {
-        if_match: text(headers, "x-amz-copy-source-if-match"),
-        if_none_match: text(headers, "x-amz-copy-source-if-none-match"),
-        if_modified_since: text(headers, "x-amz-copy-source-if-modified-since"),
-        if_unmodified_since: text(headers, "x-amz-copy-source-if-unmodified-since"),
-    };
-    evaluate(&conditions, &object.etag, object.modified) == ReadVerdict::Proceed
-}
-
-/// The source's verified bytes, in order.
-async fn source_bytes(
-    objects: &ObjectService,
-    object: &StoredObject,
-) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
-    let last = object.size.saturating_sub(1);
-    Ok(match &object.content {
-        _ if object.size == 0 => futures_util::stream::empty().boxed(),
-        Content::Inline(bytes) => {
-            let bytes = Bytes::copy_from_slice(bytes);
-            futures_util::stream::once(async move { Ok(bytes) }).boxed()
-        }
-        Content::Data(id) => data::blocks(objects, *id, object.size, 0, last).await?,
-        Content::Parts(multipart) => {
-            let parts: Vec<([u8; 16], u64)> = multipart
-                .parts
-                .iter()
-                .map(|part| (part.data, part.size))
-                .collect();
-            data::stream_parts(objects, &parts, 0, last).await?
-        }
-    })
-}
-
-fn read_failed(error: &std::io::Error) -> Error {
-    tracing::error!(error = %error, "a copy source could not be read whole");
-    invalid(
-        ErrorCode::InternalError,
-        "we encountered an internal error; please try again",
-    )
-}
-
 /// The copy's bytes: inline up to the inline size, as PutObject would store them; otherwise a new data file.
 async fn copy_bytes(objects: &ObjectService, object: &StoredObject) -> Result<(Content, Digests)> {
-    let mut stream = source_bytes(objects, object).await?;
+    let last = object.size.saturating_sub(1);
+    let mut stream = source::bytes(objects, object, 0, last).await?;
     let inline = usize::try_from(object.size)
         .ok()
         .filter(|size| *size <= INLINE_OBJECT_MAX);
-    if let Some(size) = inline {
-        let mut bytes = Vec::with_capacity(size);
-        while let Some(chunk) = stream.next().await {
-            bytes.extend_from_slice(&chunk.map_err(|error| read_failed(&error))?);
-        }
-        let mut hashes = Hashes::new();
-        hashes.update(&bytes);
-        return Ok((Content::Inline(bytes), hashes.finish()));
-    }
-    if !objects.stores_data() {
-        return Err(invalid(
-            ErrorCode::NotImplemented,
-            "objects larger than 128 KiB need a data directory (TESSARIDB_S3_DATA_DIR)",
-        ));
-    }
-    let mut upload = objects.upload().await?;
-    let id = upload.id();
-    let mut written = Ok(());
-    while let Some(chunk) = stream.next().await {
-        written = match chunk {
-            Ok(bytes) => upload.append(&bytes).await.map_err(Error::from),
-            Err(error) => Err(read_failed(&error)),
-        };
-        if written.is_err() {
-            break;
-        }
-    }
-    let finished = match written {
-        Ok(()) => upload.finish().await.map_err(Error::from),
-        Err(error) => {
-            drop(upload);
-            Err(error)
-        }
+    let Some(size) = inline else {
+        let uploaded = source::into_file(objects, stream, object.size).await?;
+        return Ok((Content::Data(uploaded.id), uploaded.digests));
     };
-    match finished {
-        Ok(uploaded) if uploaded.size == object.size => Ok((Content::Data(id), uploaded.digests)),
-        outcome => {
-            data::release(objects, id).await;
-            Err(outcome.err().unwrap_or_else(|| {
-                invalid(
-                    ErrorCode::InternalError,
-                    "the copy is not the source's length",
-                )
-            }))
-        }
+    let mut bytes = Vec::with_capacity(size);
+    while let Some(chunk) = stream.next().await {
+        bytes.extend_from_slice(&chunk.map_err(|error| source::read_failed(&error))?);
     }
+    let mut hashes = Hashes::new();
+    hashes.update(&bytes);
+    Ok((Content::Inline(bytes), hashes.finish()))
 }
 
 /// The algorithm the copy carries: the request's `x-amz-checksum-algorithm`, else the source's, else CRC64NVME.
 fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumAlgorithm> {
-    if let Some(name) = text(headers, "x-amz-checksum-algorithm") {
+    if let Some(name) = source::text(headers, "x-amz-checksum-algorithm") {
         return match ChecksumAlgorithm::parse(name) {
             Some(Declared::Supported(algorithm)) => Ok(algorithm),
             _ => Err(invalid(
@@ -177,16 +68,7 @@ fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumA
 
 /// `PUT /{bucket}/{key}` with `x-amz-copy-source`.
 pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
-    // `read_put_headers` refuses `x-amz-server-side-encryption*`, not the copy source's own customer-key headers.
-    if call.headers.keys().any(|name| {
-        name.as_str()
-            .starts_with("x-amz-copy-source-server-side-encryption")
-    }) {
-        return Err(invalid(
-            ErrorCode::NotImplemented,
-            "server-side encryption is not implemented",
-        ));
-    }
+    source::refuse_encrypted_source(call.headers)?;
     let headers = read_put_headers(call.headers)?;
     if headers.integrity.content_md5.is_some() || headers.integrity.checksum.is_some() {
         return Err(invalid(
@@ -194,9 +76,9 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             "a copy has no body for Content-MD5 or a checksum to describe",
         ));
     }
-    let (source_bucket, source_key) = source_of(call.headers)?;
+    let (source_bucket, source_key) = source::source_of(call.headers)?;
     let directive = |name: &str| {
-        Directive::parse(text(call.headers, name)).ok_or_else(|| {
+        Directive::parse(source::text(call.headers, name)).ok_or_else(|| {
             invalid(
                 ErrorCode::InvalidArgument,
                 "a directive must be COPY or REPLACE",
@@ -214,27 +96,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         ));
     }
     let objects = call.state.storage().objects();
-    let object = match objects.get(&source_bucket, &source_key).await? {
-        Err(()) => {
-            return Err(invalid(
-                ErrorCode::NoSuchBucket,
-                "the source bucket does not exist",
-            ));
-        }
-        Ok(None) => {
-            return Err(invalid(
-                ErrorCode::NoSuchKey,
-                "the source key does not exist",
-            ));
-        }
-        Ok(Some(object)) => object,
-    };
-    if !source_holds(call.headers, &object) {
-        return Err(invalid(
-            ErrorCode::PreconditionFailed,
-            "at least one of the preconditions you specified did not hold",
-        ));
-    }
+    let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
     if object.size > SINGLE_PUT_MAX {
         return Err(invalid(
             ErrorCode::InvalidRequest,

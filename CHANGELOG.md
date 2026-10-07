@@ -80,3 +80,7 @@ section records which TessariDB version its metadata runs on.
   COPY or REPLACE, the copy-source conditions (412 when one does not hold), the
   destination's If-None-Match / If-Match, and copying onto itself only with
   REPLACE. A version, SSE-C and a source past 5 GiB are refused by name.
+- UploadPartCopy: a part made of a source object's bytes — `x-amz-copy-source-range`
+  (`bytes=first-last` only) or the whole source — with the copy-source
+  conditions, an MD5 ETag of the copied bytes and a data file of its own; the
+  upload is checked before the source is read.

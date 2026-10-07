@@ -23,6 +23,7 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::ListParts,
     Operation::PutObject,
     Operation::UploadPart,
+    Operation::UploadPartCopy,
 ];
 
 /// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.

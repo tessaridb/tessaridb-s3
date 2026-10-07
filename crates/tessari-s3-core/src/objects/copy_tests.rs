@@ -1,4 +1,4 @@
-use super::{CopySource, CopySourceError, Directive};
+use super::{CopyRangeError, CopySource, CopySourceError, Directive, copy_range};
 
 fn parsed(header: &str) -> Result<(String, String), CopySourceError> {
     CopySource::parse(header).map(|source| (source.bucket, source.key))
@@ -48,4 +48,44 @@ fn a_directive_is_copy_unless_it_says_replace() {
     for bad in ["copy", "replace", "", "MOVE"] {
         assert_eq!(Directive::parse(Some(bad)), None, "{bad:?}");
     }
+}
+
+#[test]
+fn a_copy_range_is_first_to_last_inside_the_source() {
+    assert_eq!(copy_range("bytes=0-9", 100), Ok((0, 9)));
+    assert_eq!(copy_range("bytes=99-99", 100), Ok((99, 99)));
+    assert_eq!(copy_range(" bytes=5-20 ", 100), Ok((5, 20)));
+    for malformed in [
+        "",
+        "bytes=",
+        "bytes=-5",
+        "bytes=5-",
+        "bytes=9-0",
+        "bytes=0-1,2-3",
+        "bytes=a-b",
+        "0-9",
+        "bytes=+1-2",
+    ] {
+        assert_eq!(
+            copy_range(malformed, 100),
+            Err(CopyRangeError::Malformed),
+            "{malformed:?}"
+        );
+    }
+    for past in [
+        "bytes=0-100",
+        "bytes=100-100",
+        "bytes=0-18446744073709551615",
+    ] {
+        assert_eq!(
+            copy_range(past, 100),
+            Err(CopyRangeError::OutOfRange),
+            "{past:?}"
+        );
+    }
+    assert_eq!(
+        copy_range("bytes=0-0", 0),
+        Err(CopyRangeError::OutOfRange),
+        "nothing to copy from"
+    );
 }

@@ -6,6 +6,7 @@ mod delete_many;
 pub(crate) mod headers;
 pub(crate) mod put;
 mod read;
+pub(crate) mod source;
 
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
