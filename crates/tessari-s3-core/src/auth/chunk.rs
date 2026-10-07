@@ -80,6 +80,30 @@ impl ChunkChain {
         Ok(())
     }
 
+    /// Verifies the signed trailer that follows the final chunk: `trailer` is the trailer's `name:value` text as
+    /// signed (without line ends), `signature_hex` the `x-amz-trailer-signature` value.
+    ///
+    /// # Errors
+    /// [`AuthError::MalformedChunk`] before the final chunk; [`AuthError::SignatureMismatch`].
+    pub fn verify_trailer(&mut self, trailer: &str, signature_hex: &str) -> AuthResult<()> {
+        if !self.finished {
+            return Err(AuthError::MalformedChunk {
+                reason: "a trailer before the final chunk",
+            });
+        }
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256-TRAILER\n{}\n{}\n{}\n{}",
+            self.verified.datetime.as_str(),
+            self.verified.scope.to_line(),
+            hex_lower(&self.verified.signature),
+            hex_lower(&Sha256::digest(format!("{trailer}\n").as_bytes())),
+        );
+        let computed = self.verified.signing_key.sign(string_to_sign.as_bytes())?;
+        check_signature(&computed, signature_hex)?;
+        self.verified.signature = computed;
+        Ok(())
+    }
+
     /// Ends the body; the final zero-length chunk must have been verified.
     ///
     /// # Errors

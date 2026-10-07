@@ -4,6 +4,7 @@
 
 mod canonical;
 mod chunk;
+mod chunked;
 mod encode;
 mod error;
 mod header;
@@ -15,6 +16,7 @@ mod verified;
 
 pub use canonical::SignedRequest;
 pub use chunk::{ChunkChain, parse_chunk_header};
+pub use chunked::{ChunkedDecoder, Trailer};
 pub use encode::percent_decode;
 pub use error::{AuthError, AuthResult};
 pub use header::{AuthorizationHeader, verify_header};
