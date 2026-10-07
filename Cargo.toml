@@ -26,6 +26,9 @@ anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tower = { version = "0.5", features = ["limit", "load-shed", "util"] }
+uuid = { version = "1", features = ["v4"] }
 hmac = "0.12"
 sha2 = "0.10"
 subtle = "2"

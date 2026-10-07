@@ -119,10 +119,11 @@ mod tests {
     use super::{ChunkChain, EMPTY_SHA256};
     use crate::auth::AuthError;
     use crate::auth::encode::hex_lower;
-    use crate::auth::signing::{CredentialScope, SecretKey, SigningKey};
+    use crate::auth::signing::{CredentialScope, SigningKey};
     use crate::auth::time::AmzDateTime;
     use crate::auth::verified::{PayloadHash, Verified};
     use sha2::{Digest, Sha256};
+    use tessari_s3_types::SecretKey;
 
     fn seeded() -> Verified {
         let scope =

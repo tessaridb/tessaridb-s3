@@ -10,7 +10,7 @@ A clustered, S3-compatible object store written in Rust. Objects live on the
 storage nodes' drives; every bucket, key, version, upload and policy lives in a
 TessariDB cluster.
 
-[![status](https://img.shields.io/badge/status-design-D98E33?style=flat-square)](#status)
+[![status](https://img.shields.io/badge/status-pre--alpha-D98E33?style=flat-square)](#status)
 [![licence](https://img.shields.io/badge/licence-BUSL--1.1-6B5FD1?style=flat-square)](LICENSE)
 [![rust](https://img.shields.io/badge/rust-1.98%2B-6B5FD1?style=flat-square)](#building)
 
@@ -20,11 +20,11 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **Nothing here runs yet.** TessariDB S3 is at the design stage. There is no
-> release, no image and no server to start. This page says what the project is
-> for and which promises it intends to keep. It does not describe a working
-> system, and the [Status](#status) section is the only part of it that reports
-> on the present.
+> **It stores nothing yet.** The server starts, verifies SigV4 signatures and
+> resolves every request to one of the 116 S3 operations, then answers each of
+> them `NotImplemented`. There is no release and no image. Apart from the
+> [Status](#status) section and the items marked as tested below, this page
+> describes what the project is for, not a working system.
 
 ## What it is for
 
@@ -43,15 +43,19 @@ to it as they would talk to S3. Behind the API it runs as a cluster:
 
 ## The promises it is being designed to keep
 
-These are design commitments, not features that exist today. Each will be backed
-by a test before any release claims it:
+These are design commitments. Each will be backed by a test before any release
+claims it; the two marked **tested** already are:
 
 - **An operation it does not implement is refused** with `NotImplemented`. It is
-  never routed to a neighbouring operation.
+  never routed to a neighbouring operation. **Tested:** each of the 116
+  operations of the AWS S3 model is signed, sent, and answered `NotImplemented`,
+  and an unknown or misplaced parameter is refused before any operation runs.
 - **Every signature and every declared checksum is verified.** That covers SigV4
   header, presigned and streaming authentication, and Content-MD5 and the
   `x-amz-checksum-*` family, before a write is acknowledged. Each checksum is
-  stored so that a read can return it.
+  stored so that a read can return it. **Tested for SigV4:** header, presigned
+  and streaming signatures reproduce AWS's published examples, and each example
+  altered in one place is refused. The checksum half comes with the object core.
 - **Strong read-after-write**, for listings too, with keys listed in byte-wise
   UTF-8 order and continuation tokens that neither skip nor repeat a key.
 - **A write is acknowledged only when it is durable** on its quorum, with its data
@@ -65,23 +69,39 @@ by a test before any release claims it:
 
 | | |
 |---|---|
-| Stage | design |
-| Server | workspace scaffold; no S3 operation yet |
+| Stage | pre-alpha |
+| Server | authenticates SigV4 and answers every S3 operation `NotImplemented`; stores nothing |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
 ## Building
 
-A Cargo workspace on Rust 1.98 (edition 2024). It builds one process, `tessaridb-s3`, which starts, logs and
-stops cleanly on SIGINT or SIGTERM. It does not serve S3 yet.
+A Cargo workspace on Rust 1.98 (edition 2024). It builds one process, `tessaridb-s3`.
 
 ```sh
 cargo build --workspace
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --tests
+cargo lint        # clippy on every target and feature, warnings denied
+cargo t           # every library and integration test
 cargo deny check
 ```
+
+## Running
+
+The process reads its configuration from the environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TESSARIDB_S3_ROOT_ACCESS_KEY` | — (required) | the root credential's access key |
+| `TESSARIDB_S3_ROOT_SECRET_KEY` | — (required, ≥ 16 bytes) | the root credential's secret |
+| `TESSARIDB_S3_LISTEN` | `127.0.0.1:9100` | the address the S3 API listens on |
+| `TESSARIDB_S3_REGION` | `us-east-1` | the region requests must be signed for |
+| `TESSARIDB_S3_DOMAINS` | empty | comma-separated endpoint domains for `<bucket>.<domain>` addressing; path-style always works |
+| `TESSARIDB_S3_MAX_INFLIGHT` | `1024` | requests served at once before new ones get `503 SlowDown` |
+| `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` | `30` | how long in-flight requests get after SIGTERM |
+
+Anonymous requests are refused. SIGINT or SIGTERM stops the server after the
+grace period.
 
 ## Branches
 

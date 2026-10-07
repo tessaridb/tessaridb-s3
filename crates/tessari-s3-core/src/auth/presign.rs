@@ -4,10 +4,12 @@ use tessari_s3_constants::{
     PRESIGN_MAX_EXPIRES_SECS, PRESIGN_MIN_EXPIRES_SECS, SIGV4_MAX_CLOCK_SKEW_SECS,
 };
 
+use tessari_s3_types::SecretKey;
+
 use super::canonical::{SignedRequest, check_required_signed};
 use super::encode::percent_decode;
 use super::signing::{
-    ALGORITHM, CredentialScope, SecretKey, SignatureClaim, is_signature_hex, parse_credential,
+    ALGORITHM, CredentialScope, SignatureClaim, is_signature_hex, parse_credential,
     parse_signed_headers, verify_signature,
 };
 use super::time::AmzDateTime;

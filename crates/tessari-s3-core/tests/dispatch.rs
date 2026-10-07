@@ -8,6 +8,7 @@ use tessari_s3_core::dispatch::{
     CATALOG, DispatchError, DispatchRequest, Method, OperationSpec, Target, dispatch,
     is_implemented,
 };
+use tessari_s3_types::ErrorCode;
 
 fn resolve(
     method: Method,
@@ -226,20 +227,17 @@ fn until_the_object_core_lands_every_operation_is_refused_with_not_implemented()
 
 #[test]
 fn every_refusal_carries_a_catalog_code() {
-    assert_eq!(
-        DispatchError::MethodNotAllowed.s3_code(),
-        "MethodNotAllowed"
-    );
-    assert_eq!(
-        DispatchError::UnknownQueryParameter {
-            name: String::new()
-        }
-        .s3_code(),
-        "InvalidArgument"
-    );
+    let unknown = DispatchError::UnknownQueryParameter {
+        name: String::new(),
+    };
     let missing = DispatchError::MissingParameter {
         operation: "",
         missing: "",
     };
-    assert_eq!(missing.s3_code(), "InvalidRequest");
+    assert_eq!(
+        DispatchError::MethodNotAllowed.s3_code(),
+        ErrorCode::MethodNotAllowed
+    );
+    assert_eq!(unknown.s3_code(), ErrorCode::InvalidArgument);
+    assert_eq!(missing.s3_code(), ErrorCode::InvalidRequest);
 }

@@ -14,6 +14,15 @@ tessari-s3-constants.workspace = true
 tessari-s3-infrastructure.workspace = true
 tessari-s3-observability.workspace = true
 thiserror.workspace = true
+axum.workspace = true
+tower.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+hmac.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

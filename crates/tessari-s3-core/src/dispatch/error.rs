@@ -1,6 +1,6 @@
 //! A request the dispatcher cannot resolve to exactly one operation.
 
-use tessari_s3_types::ErrorCategory;
+use tessari_s3_types::{ErrorCategory, ErrorCode};
 
 /// Why a request resolves to no operation. None of these ever falls through to a data-mutating handler.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -35,12 +35,12 @@ pub enum DispatchError {
 impl DispatchError {
     /// The S3 error code the request is answered with.
     #[must_use]
-    pub const fn s3_code(&self) -> &'static str {
+    pub const fn s3_code(&self) -> ErrorCode {
         match self {
-            Self::MethodNotAllowed => "MethodNotAllowed",
-            Self::UnknownQueryParameter { .. } => "InvalidArgument",
-            Self::MissingParameter { .. } => "InvalidRequest",
-            Self::Ambiguous { .. } => "InternalError",
+            Self::MethodNotAllowed => ErrorCode::MethodNotAllowed,
+            Self::UnknownQueryParameter { .. } => ErrorCode::InvalidArgument,
+            Self::MissingParameter { .. } => ErrorCode::InvalidRequest,
+            Self::Ambiguous { .. } => ErrorCode::InternalError,
         }
     }
 

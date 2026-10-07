@@ -34,3 +34,19 @@ pub const PRESIGN_MAX_EXPIRES_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Smallest size, in bytes, of every aws-chunked data chunk except the last (8 KiB).
 pub const STREAMING_MIN_CHUNK_LEN: u64 = 8 * 1024;
+
+/// Address the S3 API listens on when `TESSARIDB_S3_LISTEN` is unset: loopback only, so an unconfigured node is not
+/// reachable from the network.
+pub const DEFAULT_LISTEN: &str = "127.0.0.1:9100";
+
+/// Region the server signs for when `TESSARIDB_S3_REGION` is unset; the region every SDK assumes by default.
+pub const DEFAULT_REGION: &str = "us-east-1";
+
+/// Requests served at once before new ones are answered `SlowDown` (503), when `TESSARIDB_S3_MAX_INFLIGHT` is unset.
+pub const DEFAULT_MAX_INFLIGHT: usize = 1024;
+
+/// Seconds in-flight requests get to finish after SIGTERM, when `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` is unset.
+pub const DEFAULT_SHUTDOWN_GRACE_SECS: u64 = 30;
+
+/// Shortest root secret key accepted, in bytes; AWS secret keys are 40 characters.
+pub const MIN_SECRET_KEY_LEN: usize = 16;

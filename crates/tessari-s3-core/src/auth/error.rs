@@ -3,7 +3,7 @@
 //! Codes come from the core S3 error catalog only. Where AWS answers with a code outside that catalog, the closest
 //! catalog code is used and named here, so a client's retry logic sees a code it knows.
 
-use tessari_s3_types::ErrorCategory;
+use tessari_s3_types::{ErrorCategory, ErrorCode};
 
 /// A request that does not authenticate.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -73,26 +73,26 @@ pub enum AuthError {
 impl AuthError {
     /// The S3 error code the request is answered with.
     #[must_use]
-    pub const fn s3_code(&self) -> &'static str {
+    pub const fn s3_code(&self) -> ErrorCode {
         match self {
             // AWS answers AuthorizationHeaderMalformed / AuthorizationQueryParametersError, outside the core catalog.
             Self::Malformed { .. }
             | Self::InvalidPercentEncoding
-            | Self::PresignExpiresOutOfRange => "InvalidArgument",
-            Self::UnsupportedAlgorithm => "UnsupportedSignature",
+            | Self::PresignExpiresOutOfRange => ErrorCode::InvalidArgument,
+            Self::UnsupportedAlgorithm => ErrorCode::UnsupportedSignature,
             Self::InvalidDate | Self::HeaderNotSigned { .. } | Self::PresignExpired => {
-                "AccessDenied"
+                ErrorCode::AccessDenied
             }
             Self::ScopeMismatch { .. }
             | Self::SignedHeaderMissing { .. }
-            | Self::SignatureMismatch => "SignatureDoesNotMatch",
-            Self::MissingContentSha256 => "MissingSecurityHeader",
-            Self::ClockSkew => "RequestTimeTooSkewed",
+            | Self::SignatureMismatch => ErrorCode::SignatureDoesNotMatch,
+            Self::MissingContentSha256 => ErrorCode::MissingSecurityHeader,
+            Self::ClockSkew => ErrorCode::RequestTimeTooSkewed,
             // AWS answers XAmzContentSHA256Mismatch, outside the core catalog.
-            Self::PayloadHashMismatch => "BadDigest",
+            Self::PayloadHashMismatch => ErrorCode::BadDigest,
             // AWS answers InvalidChunkSizeError for a short chunk, outside the core catalog.
-            Self::MalformedChunk { .. } => "InvalidRequest",
-            Self::DecodedLengthMismatch => "IncompleteBody",
+            Self::MalformedChunk { .. } => ErrorCode::InvalidRequest,
+            Self::DecodedLengthMismatch => ErrorCode::IncompleteBody,
         }
     }
 

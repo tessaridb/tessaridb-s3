@@ -3,6 +3,7 @@
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use tessari_s3_types::SecretKey;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::canonical::{SignedRequest, canonical_request};
@@ -12,25 +13,6 @@ use super::{AuthError, AuthResult};
 
 /// The only SigV4 algorithm S3 uses.
 pub const ALGORITHM: &str = "AWS4-HMAC-SHA256";
-
-/// A secret access key. SigV4 is symmetric, so the server holds it to compute HMACs; it is scrubbed on drop and its
-/// `Debug` shows nothing.
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
-pub struct SecretKey(String);
-
-impl SecretKey {
-    /// Wraps a secret access key.
-    #[must_use]
-    pub const fn new(secret: String) -> Self {
-        Self(secret)
-    }
-}
-
-impl std::fmt::Debug for SecretKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SecretKey(..)")
-    }
-}
 
 /// The derived key for one (secret, date, region, `s3`) scope; scrubbed on drop.
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -48,9 +30,9 @@ impl SigningKey {
     /// # Errors
     /// [`AuthError::SignatureMismatch`] if the HMAC cannot be keyed, which RFC 2104 rules out; it fails closed.
     pub fn derive(secret: &SecretKey, scope: &CredentialScope) -> AuthResult<Self> {
-        let mut seed = Vec::with_capacity(secret.0.len().saturating_add(4));
+        let mut seed = Vec::with_capacity(secret.expose().len().saturating_add(4));
         seed.extend_from_slice(b"AWS4");
-        seed.extend_from_slice(secret.0.as_bytes());
+        seed.extend_from_slice(secret.expose().as_bytes());
         let date_key = hmac(&seed, scope.date.as_bytes());
         seed.zeroize();
         let region_key = hmac(&date_key?, scope.region.as_bytes())?;

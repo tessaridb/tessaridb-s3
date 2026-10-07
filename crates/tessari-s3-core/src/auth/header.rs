@@ -2,10 +2,12 @@
 
 use tessari_s3_constants::SIGV4_MAX_CLOCK_SKEW_SECS;
 
+use tessari_s3_types::SecretKey;
+
 use super::canonical::{SignedRequest, check_required_signed};
 use super::payload::parse_payload_hash;
 use super::signing::{
-    ALGORITHM, CredentialScope, SecretKey, SignatureClaim, is_signature_hex, parse_credential,
+    ALGORITHM, CredentialScope, SignatureClaim, is_signature_hex, parse_credential,
     parse_signed_headers, verify_signature,
 };
 use super::time::AmzDateTime;
