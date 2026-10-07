@@ -15,6 +15,7 @@ tessari-s3-observability.workspace = true
 tessari-s3-infrastructure.workspace = true
 tessari-s3-api.workspace = true
 tessari-s3-storage.workspace = true
+tessari-s3-daemons.workspace = true
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "time", "sync"] }
 tracing.workspace = true

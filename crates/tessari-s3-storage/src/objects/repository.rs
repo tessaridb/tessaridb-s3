@@ -65,6 +65,19 @@ pub(crate) trait ObjectRepository: Send + Sync {
     fn queue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Takes data `id` off the reclamation queue, after its file was removed.
     fn unqueue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
+    /// Queue entries older than `grace_secs` by the store's clock, at most `limit`, each with whether a reclaimer
+    /// already marked it.
+    fn due(
+        &self,
+        grace_secs: u64,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<([u8; 16], bool)>>> + Send;
+    /// Whether any object record references data `id`.
+    fn referenced(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
+    /// Marks data `id` as being reclaimed; `false` when its entry is gone or already marked.
+    fn mark(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
+    /// Whether data `id` is still queued and not being reclaimed — a data commit can still take it.
+    fn claimable(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
     /// Removes the record at `bucket/key`, if any.
     fn remove(
         &self,

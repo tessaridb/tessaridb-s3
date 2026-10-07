@@ -9,6 +9,7 @@
 mod buckets;
 mod large;
 mod objects;
+mod reclaim;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,

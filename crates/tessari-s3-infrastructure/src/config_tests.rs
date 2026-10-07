@@ -131,3 +131,29 @@ fn the_secret_never_appears_in_debug_output() {
         "{printed}"
     );
 }
+
+#[test]
+fn reclamation_defaults_and_overrides() {
+    let config = load(&CREDENTIALS).expect("loads");
+    assert_eq!(
+        (config.reclaim_grace_secs, config.reclaim_interval_secs),
+        (86_400, 300)
+    );
+    let mut vars = CREDENTIALS.to_vec();
+    vars.push(("TESSARIDB_S3_RECLAIM_GRACE_SECS", "3600"));
+    vars.push(("TESSARIDB_S3_RECLAIM_INTERVAL_SECS", "60"));
+    let config = load(&vars).expect("loads");
+    assert_eq!(
+        (config.reclaim_grace_secs, config.reclaim_interval_secs),
+        (3600, 60)
+    );
+    let mut zero = CREDENTIALS.to_vec();
+    zero.push(("TESSARIDB_S3_RECLAIM_INTERVAL_SECS", "0"));
+    assert!(matches!(
+        load(&zero).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_RECLAIM_INTERVAL_SECS",
+            ..
+        })
+    ));
+}

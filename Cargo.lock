@@ -772,6 +772,8 @@ dependencies = [
  "tessari-s3-storage",
  "tessari-s3-types",
  "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -794,6 +796,7 @@ dependencies = [
  "anyhow",
  "axum",
  "tessari-s3-api",
+ "tessari-s3-daemons",
  "tessari-s3-infrastructure",
  "tessari-s3-observability",
  "tessari-s3-storage",

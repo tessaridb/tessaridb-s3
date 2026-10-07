@@ -4,8 +4,8 @@
 use std::net::SocketAddr;
 
 use tessari_s3_constants::{
-    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_REGION,
-    DEFAULT_SHUTDOWN_GRACE_SECS, MIN_SECRET_KEY_LEN,
+    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_RECLAIM_GRACE_SECS,
+    DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS, MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::SecretKey;
 
@@ -34,6 +34,10 @@ pub struct S3Config {
     pub meta: MetaSettings,
     /// `TESSARIDB_S3_DATA_DIR` — where objects above the inline size are stored; unset, they are refused.
     pub data_dir: Option<std::path::PathBuf>,
+    /// `TESSARIDB_S3_RECLAIM_GRACE_SECS` — how long a queued data file is kept before it may be removed.
+    pub reclaim_grace_secs: u64,
+    /// `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` — time between reclamation passes (positive).
+    pub reclaim_interval_secs: u64,
 }
 
 impl S3Config {
@@ -98,6 +102,23 @@ impl S3Config {
         let meta = meta_settings(&get)?;
         Ok(Self {
             meta,
+            reclaim_grace_secs: match get("TESSARIDB_S3_RECLAIM_GRACE_SECS") {
+                None => DEFAULT_RECLAIM_GRACE_SECS,
+                Some(text) => text.trim().parse().map_err(|_| Error::InvalidConfig {
+                    key: "TESSARIDB_S3_RECLAIM_GRACE_SECS",
+                    reason: "not a whole number of seconds",
+                })?,
+            },
+            reclaim_interval_secs: parse_positive(
+                get("TESSARIDB_S3_RECLAIM_INTERVAL_SECS"),
+                "TESSARIDB_S3_RECLAIM_INTERVAL_SECS",
+            )?
+            .map_or(Ok(DEFAULT_RECLAIM_INTERVAL_SECS), |secs| {
+                u64::try_from(secs).map_err(|_| Error::InvalidConfig {
+                    key: "TESSARIDB_S3_RECLAIM_INTERVAL_SECS",
+                    reason: "too large",
+                })
+            })?,
             data_dir: get("TESSARIDB_S3_DATA_DIR").map(|dir| std::path::PathBuf::from(dir.trim())),
             listen,
             region,

@@ -1,16 +1,20 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
-//! Order: tracing, configuration, the metadata pool and schema, the API state and router, the listener, then serving
-//! until SIGINT or SIGTERM,
-//! after which in-flight requests get the configured grace period before the process exits.
+//! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
+//! configured), the API state and router, the listener, then serving until SIGINT or SIGTERM, after which in-flight
+//! requests and the daemons' current runs get the configured grace period before the process exits.
 
 use std::time::Duration;
 
+use std::sync::Arc;
 use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
+
+use tessari_s3_daemons::{Reclaimer, run};
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
+use tokio::task::JoinSet;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
@@ -29,12 +33,22 @@ async fn main() -> anyhow::Result<()> {
     // start, rather than answering every request 503.
     storage.prepare().await?;
     tracing::info!(meta = %config.meta.address, namespace = %config.meta.namespace, "metadata schema ready");
+    let (stop_tx, stop_rx) = watch::channel(false);
+    let mut daemons = JoinSet::new();
+    if storage.objects().stores_data() {
+        let reclaimer = Reclaimer::new(
+            storage.objects().clone(),
+            config.reclaim_grace_secs,
+            Duration::from_secs(config.reclaim_interval_secs),
+        );
+        daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
+    }
     let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
-    let (stop_tx, mut stop_rx) = watch::channel(false);
+    let mut server_stop = stop_rx;
     let server = axum::serve(listener, app).with_graceful_shutdown(async move {
         // A closed sender also means stop: the select below has returned.
-        let _closed = stop_rx.changed().await;
+        let _closed = server_stop.changed().await;
     });
     let mut server = std::pin::pin!(server.into_future());
     tokio::select! {
@@ -44,9 +58,16 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!(grace_secs = config.shutdown_grace_secs, "tessaridb-s3 stopping");
             let _receivers_gone = stop_tx.send(true);
             let grace = Duration::from_secs(config.shutdown_grace_secs);
-            match tokio::time::timeout(grace, &mut server).await {
+            // The listener drains and the daemons finish their current run, all within the one grace period.
+            let drained = tokio::time::timeout(grace, async {
+                let served = (&mut server).await;
+                while daemons.join_next().await.is_some() {}
+                served
+            })
+            .await;
+            match drained {
                 Ok(result) => result?,
-                Err(_) => tracing::warn!("grace period over; abandoning in-flight requests"),
+                Err(_) => tracing::warn!("grace period over; abandoning in-flight work"),
             }
         }
         result = &mut server => result?,

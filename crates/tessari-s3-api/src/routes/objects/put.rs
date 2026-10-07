@@ -252,6 +252,10 @@ async fn commit(
             ErrorCode::NoSuchKey,
             "the specified key does not exist",
         )),
+        Written::DataReclaimed => Err(Error::new(
+            ErrorCode::InternalError,
+            "the upload took longer than its data is kept; please try again",
+        )),
         Written::PreconditionFailed => Err(Error::new(
             ErrorCode::PreconditionFailed,
             "at least one of the preconditions you specified did not hold",

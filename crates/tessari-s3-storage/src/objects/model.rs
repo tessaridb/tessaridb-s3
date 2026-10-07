@@ -71,6 +71,20 @@ pub enum Written {
     PreconditionFailed,
     /// `If-Match` named an object that does not exist: 404.
     NoSuchKey,
+    /// The object's data file was reclaimed before the commit (the upload outlived the grace period): nothing
+    /// was written.
+    DataReclaimed,
+}
+
+/// What one reclamation pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Reclaimed {
+    /// Queue entries past the grace period that were looked at.
+    pub examined: usize,
+    /// Files removed with their entries.
+    pub removed: usize,
+    /// Entries an object still references: the entry is dropped, the file kept.
+    pub kept: usize,
 }
 
 /// What a delete ended in.

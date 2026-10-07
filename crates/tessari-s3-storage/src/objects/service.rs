@@ -5,7 +5,7 @@
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
-use super::model::{Content, NewObject, Removed, StoredObject, WriteCondition, Written};
+use super::model::{Content, NewObject, Reclaimed, Removed, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use super::tessaridb::TessariObjects;
 use super::upload::Upload;
@@ -69,6 +69,38 @@ impl ObjectService {
         }
     }
 
+    /// One reclamation pass over at most `limit` queue entries older than `grace_secs`.
+    ///
+    /// # Errors
+    /// The metadata store's or the drive's failure.
+    pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
+        let files = self.files()?;
+        let due = self.repository.due(grace_secs, limit).await?;
+        let mut done = Reclaimed {
+            examined: due.len(),
+            ..Reclaimed::default()
+        };
+        for (id, marked) in due {
+            let data = uuid::Uuid::from_bytes(id);
+            if self.repository.referenced(id).await? {
+                // Not a state this server writes; keep the bytes and say so.
+                tracing::warn!(%data, "a queued data file is referenced by an object; kept");
+                self.repository.unqueue(id).await?;
+                done.kept = done.kept.saturating_add(1);
+                continue;
+            }
+            // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false
+            // mark means the commit got there first.
+            if !marked && !self.repository.mark(id).await? {
+                continue;
+            }
+            files.remove(id).await?;
+            self.repository.unqueue(id).await?;
+            done.removed = done.removed.saturating_add(1);
+        }
+        Ok(done)
+    }
+
     /// Opens data `id` holding an object of `size` bytes, its header and length checked.
     ///
     /// # Errors
@@ -91,6 +123,14 @@ impl ObjectService {
         condition: &WriteCondition,
     ) -> Result<Written> {
         let outcome = self.commit(bucket, key, object, condition).await?;
+        if let (Content::Data(id), false) =
+            (&object.content, matches!(outcome, Written::Committed(_)))
+        {
+            // A refusal may be the reclaimer's, not the condition's: the file is then already gone.
+            if !self.repository.claimable(*id).await? {
+                return Ok(Written::DataReclaimed);
+            }
+        }
         if let (Content::Data(id), false) =
             (&object.content, matches!(outcome, Written::Committed(_)))
         {

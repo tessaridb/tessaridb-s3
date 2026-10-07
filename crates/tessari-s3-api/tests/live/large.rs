@@ -14,7 +14,7 @@ fn header<'a>(seen: &'a Seen, name: &str) -> Option<&'a str> {
 }
 
 /// `size` bytes that differ block to block, so a misplaced block cannot read back as the right one.
-fn body(size: usize, seed: u8) -> Vec<u8> {
+pub(crate) fn body(size: usize, seed: u8) -> Vec<u8> {
     (0..size)
         .map(|i| {
             u8::try_from(
@@ -52,7 +52,7 @@ async fn records(planter: &MetaPool, script: &str, parameters: Vec<(String, Valu
 }
 
 /// The data ids queued in `gc`, sorted.
-async fn queued(planter: &MetaPool) -> Vec<[u8; 16]> {
+pub(crate) async fn queued(planter: &MetaPool) -> Vec<[u8; 16]> {
     let mut ids: Vec<[u8; 16]> = records(planter, "SELECT * FROM gc;", Vec::new())
         .await
         .into_iter()
@@ -69,7 +69,7 @@ async fn queued(planter: &MetaPool) -> Vec<[u8; 16]> {
 }
 
 /// The data id the object record at `bucket/key` points to.
-async fn data_of(planter: &MetaPool, bucket: &str, key: &str) -> Option<[u8; 16]> {
+pub(crate) async fn data_of(planter: &MetaPool, bucket: &str, key: &str) -> Option<[u8; 16]> {
     let id = vec![("id".to_owned(), Value::String(format!("{bucket}/{key}")))];
     records(planter, "SELECT * FROM ONLY objects:$id;", id)
         .await
@@ -85,7 +85,7 @@ async fn data_of(planter: &MetaPool, bucket: &str, key: &str) -> Option<[u8; 16]
 }
 
 /// Every data file under `dir` (temporary names included).
-fn files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn files(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(next) = stack.pop() {

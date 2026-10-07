@@ -75,3 +75,16 @@ pub const DATA_BLOCK_SIZE: u32 = 1 << 20;
 
 /// Largest object one PutObject may carry (5 GiB, S3's limit; EntityTooLarge beyond it).
 pub const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;
+
+/// Seconds a queued data file is kept before the reclaimer may remove it (24 h), when
+/// `TESSARIDB_S3_RECLAIM_GRACE_SECS` is unset: longer than any upload and any read in flight.
+pub const DEFAULT_RECLAIM_GRACE_SECS: u64 = 24 * 60 * 60;
+
+/// Seconds between reclamation passes, when `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` is unset.
+pub const DEFAULT_RECLAIM_INTERVAL_SECS: u64 = 300;
+
+/// Queue entries one reclamation pass looks at.
+pub const RECLAIM_BATCH: usize = 1000;
+
+/// Longest one daemon run may take before it is abandoned and reported.
+pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;

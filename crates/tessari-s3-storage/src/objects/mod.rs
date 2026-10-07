@@ -7,7 +7,7 @@ mod service;
 mod tessaridb;
 mod upload;
 
-pub use model::{Content, NewObject, Removed, StoredObject, WriteCondition, Written};
+pub use model::{Content, NewObject, Reclaimed, Removed, StoredObject, WriteCondition, Written};
 pub use service::ObjectService;
 pub use tessaridb::TessariObjects;
 pub use upload::{Upload, Uploaded};

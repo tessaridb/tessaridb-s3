@@ -21,7 +21,8 @@ DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
  inline bytes, data uuid);
-DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime);
+DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
 THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };

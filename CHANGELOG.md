@@ -35,3 +35,6 @@ section records which TessariDB version its metadata runs on.
   TessariDB before the file exists and leaves the queue only in the transaction
   that commits the object; an overwrite or a delete queues the data it replaces
   in that same transaction. The metadata schema is applied as one transaction.
+- A reclaimer removes queued data files once they are past a grace period
+  (24 h by default), never a file an object references; a commit that comes
+  after its file was reclaimed is refused instead of pointing at nothing.
