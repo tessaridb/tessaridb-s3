@@ -1,0 +1,52 @@
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# `wildcards = "deny"` exists to stop a dependency being pinned to "any version",
+# which is a registry problem: it lets a publisher change what we build without us
+# changing anything. A workspace path dependency has no version to range over and
+# no publisher but us, and cargo-deny cannot tell the two apart — it reads the four
+# internal crates as wildcards and fails.
+#
+# This narrows the exemption to path dependencies only. A registry wildcard is
+# still refused, which is the case the rule was written for.
+allow-wildcard-paths = true
+
+[licenses]
+version = 2
+# Licences acceptable in third-party dependencies. This list governs what may be
+# pulled in as a dependency; it does not describe this work's own licence, which is
+# BUSL-1.1 converting to Apache 2.0 on the Change Date (see LICENSE).
+#
+# A copyleft dependency is a blocking finding rather than a warning, and more firmly so
+# under BUSL than it was under a closed licence: the eventual Apache 2.0 conversion has
+# to be honourable, and a copyleft dependency would make it impossible.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+]
+private = { ignore = true }
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# The database client does not publish to a registry, so it arrives by git. The
+# allowance names the one repository rather than the organisation or a wildcard:
+# an org-wide allowance would silently cover every future repository somebody adds
+# under that name, which is the same door left open for a different reason.
+#
+# `unknown-git` above stays `deny`, and correctly refused this dependency the first
+# time it appeared. The entry below is the answer to that refusal, not its removal.
+allow-git = ["https://github.com/tessaridb/tessaridb-sdk-rust.git"]

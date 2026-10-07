@@ -1,0 +1,19 @@
+[package]
+name = "tessari-s3-daemons"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tessari-s3-storage.workspace = true
+tessari-s3-core.workspace = true
+tessari-s3-types.workspace = true
+tessari-s3-constants.workspace = true
+tessari-s3-infrastructure.workspace = true
+tessari-s3-observability.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

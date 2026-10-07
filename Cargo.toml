@@ -1,0 +1,59 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "BUSL-1.1"
+authors = ["boogvar"]
+repository = "https://github.com/tessaridb/tessaridb-s3"
+publish = false
+
+[workspace.dependencies]
+tessari-s3-constants = { path = "crates/tessari-s3-constants" }
+tessari-s3-types = { path = "crates/tessari-s3-types" }
+tessari-s3-core = { path = "crates/tessari-s3-core" }
+tessari-s3-observability = { path = "crates/tessari-s3-observability" }
+tessari-s3-infrastructure = { path = "crates/tessari-s3-infrastructure" }
+tessari-s3-storage = { path = "crates/tessari-s3-storage" }
+tessari-s3-api = { path = "crates/tessari-s3-api" }
+tessari-s3-daemons = { path = "crates/tessari-s3-daemons" }
+
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cast_precision_loss = "deny"
+unwrap_used = "deny"
+panic = "deny"
+expect_used = "deny"
+arithmetic_side_effects = "deny"
+todo = "warn"
+unimplemented = "warn"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+debug = "line-tables-only"
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.build-override]
+opt-level = 3

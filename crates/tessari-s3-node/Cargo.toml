@@ -1,0 +1,20 @@
+[package]
+name = "tessari-s3-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "tessaridb-s3"
+path = "src/main.rs"
+
+[dependencies]
+tessari-s3-observability.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

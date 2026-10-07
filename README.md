@@ -66,16 +66,22 @@ by a test before any release claims it:
 | | |
 |---|---|
 | Stage | design |
-| Server | not started |
+| Server | workspace scaffold; no S3 operation yet |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
 ## Building
 
-There is nothing to build yet. The workspace will be a Cargo workspace on Rust
-1.98 (edition 2024), and its gates are `cargo fmt --all --check`,
-`cargo clippy --workspace --all-targets --all-features -- -D warnings` and
-`cargo test --workspace --tests`.
+A Cargo workspace on Rust 1.98 (edition 2024). It builds one process, `tessaridb-s3`, which starts, logs and
+stops cleanly on SIGINT or SIGTERM. It does not serve S3 yet.
+
+```sh
+cargo build --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --tests
+cargo deny check
+```
 
 ## Branches
 
