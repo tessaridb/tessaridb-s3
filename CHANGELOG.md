@@ -19,3 +19,11 @@ section records which TessariDB version its metadata runs on.
   this server's region), HeadBucket, DeleteBucket (refused while it holds
   objects), ListBuckets (prefix, region filter and pages) and GetBucketLocation.
   The metadata schema is applied on start-up.
+- Objects up to 128 KiB, stored with their metadata in TessariDB: PutObject,
+  GetObject, HeadObject and DeleteObject. The MD5 ETag; Content-MD5 and the
+  CRC32, CRC32C, CRC64NVME, SHA1 and SHA256 checksums validated and stored, with
+  CRC64NVME computed when none is sent; aws-chunked bodies with their signed or
+  unsigned trailers; If-None-Match `*` and If-Match as one compare-and-set;
+  conditional reads, a single Range and the `response-*` overrides. Headers for
+  features not implemented here (tagging, encryption, Object Lock, ACLs other
+  than owner-only) are refused rather than ignored.

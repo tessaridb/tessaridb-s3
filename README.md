@@ -20,10 +20,10 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **It stores no objects yet.** The server verifies SigV4 signatures, resolves
-> every request to one of the 116 S3 operations, keeps buckets in TessariDB, and
-> answers every object operation `NotImplemented`. There is no release and no
-> image. Apart from the
+> **It stores small objects only, on one node.** The server verifies SigV4
+> signatures, keeps buckets and objects up to 128 KiB in TessariDB, and answers
+> larger objects and every operation it does not implement `NotImplemented`.
+> There is no release and no image. Apart from the
 > [Status](#status) section and the items marked as tested below, this page
 > describes what the project is for, not a working system.
 
@@ -71,7 +71,7 @@ claims it; the two marked **tested** already are:
 | | |
 |---|---|
 | Stage | pre-alpha |
-| Server | SigV4; buckets in TessariDB (CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation); every other operation `NotImplemented` |
+| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and objects ≤ 128 KiB in TessariDB: CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, GetObject, HeadObject, DeleteObject; every other operation `NotImplemented` |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 

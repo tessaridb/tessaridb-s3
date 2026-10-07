@@ -55,7 +55,17 @@ pub const MIN_SECRET_KEY_LEN: usize = 16;
 pub const DEFAULT_META_CONNECTIONS: usize = 32;
 
 /// Times the start-up schema is attempted when the store answers `retry` (another node is defining it at once).
-pub const SCHEMA_RETRY_ATTEMPTS: u32 = 8;
+pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 
 /// Milliseconds of back-off per attempt between schema retries (20, 40, 60 … ms).
 pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
+
+/// Largest object stored inline in its metadata record, in bytes (128 KiB, ADR-0002 §1). Larger objects go to the
+/// data store.
+pub const INLINE_OBJECT_MAX: usize = 128 * 1024;
+
+/// Largest sum of user metadata names and values, in UTF-8 bytes (2 KB, S3's limit; MetadataTooLarge beyond it).
+pub const USER_METADATA_MAX: usize = 2 * 1024;
+
+/// Framing allowance on top of the decoded length when reading an aws-chunked body (headers, signatures, trailer).
+pub const CHUNKED_FRAMING_ALLOWANCE: usize = 64 * 1024;

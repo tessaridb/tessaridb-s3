@@ -6,9 +6,13 @@ use super::catalog::Operation;
 const IMPLEMENTED: &[Operation] = &[
     Operation::CreateBucket,
     Operation::DeleteBucket,
+    Operation::DeleteObject,
     Operation::GetBucketLocation,
+    Operation::GetObject,
     Operation::HeadBucket,
+    Operation::HeadObject,
     Operation::ListBuckets,
+    Operation::PutObject,
 ];
 
 /// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.

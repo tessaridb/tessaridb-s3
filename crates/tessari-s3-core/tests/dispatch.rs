@@ -225,9 +225,13 @@ fn exactly_the_operations_with_handlers_are_implemented() {
     let expected = [
         "CreateBucket",
         "DeleteBucket",
+        "DeleteObject",
         "GetBucketLocation",
+        "GetObject",
         "HeadBucket",
+        "HeadObject",
         "ListBuckets",
+        "PutObject",
     ];
     assert_eq!(implemented, expected);
 }

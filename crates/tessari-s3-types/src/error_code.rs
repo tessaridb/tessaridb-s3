@@ -6,6 +6,24 @@
 /// An S3 error code from the core catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorCode {
+    /// 400: the bucket does not allow ACLs.
+    AccessControlListNotSupported,
+    /// 400: the Content-MD5 or checksum value is not well formed.
+    InvalidDigest,
+    /// 400: the storage class is not one this server offers.
+    InvalidStorageClass,
+    /// 411: the request needs a Content-Length.
+    MissingContentLength,
+    /// 400: user metadata exceeds 2 KB.
+    MetadataTooLarge,
+    /// 416: the requested range cannot be satisfied.
+    InvalidRange,
+    /// 304: the object has not changed since the condition named.
+    NotModified,
+    /// 412: a condition the request named does not hold.
+    PreconditionFailed,
+    /// 404: the key holds no object.
+    NoSuchKey,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -62,6 +80,15 @@ impl ErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AccessDenied => "AccessDenied",
+            Self::AccessControlListNotSupported => "AccessControlListNotSupported",
+            Self::InvalidDigest => "InvalidDigest",
+            Self::InvalidStorageClass => "InvalidStorageClass",
+            Self::MissingContentLength => "MissingContentLength",
+            Self::MetadataTooLarge => "MetadataTooLarge",
+            Self::InvalidRange => "InvalidRange",
+            Self::NotModified => "NotModified",
+            Self::PreconditionFailed => "PreconditionFailed",
+            Self::NoSuchKey => "NoSuchKey",
             Self::ServiceUnavailable => "ServiceUnavailable",
             Self::NoSuchBucket => "NoSuchBucket",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
@@ -112,6 +139,15 @@ impl ErrorCode {
             | Self::MaxMessageLengthExceeded => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
+            Self::NoSuchKey => 404,
+            Self::PreconditionFailed => 412,
+            Self::NotModified => 304,
+            Self::InvalidRange => 416,
+            Self::MissingContentLength => 411,
+            Self::MetadataTooLarge
+            | Self::InvalidStorageClass
+            | Self::InvalidDigest
+            | Self::AccessControlListNotSupported => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
             Self::SlowDown => 503,
@@ -128,6 +164,19 @@ mod tests {
     fn every_code_has_its_catalog_status() {
         let catalog = [
             (ErrorCode::AccessDenied, "AccessDenied", 403),
+            (
+                ErrorCode::AccessControlListNotSupported,
+                "AccessControlListNotSupported",
+                400,
+            ),
+            (ErrorCode::InvalidDigest, "InvalidDigest", 400),
+            (ErrorCode::InvalidStorageClass, "InvalidStorageClass", 400),
+            (ErrorCode::MissingContentLength, "MissingContentLength", 411),
+            (ErrorCode::MetadataTooLarge, "MetadataTooLarge", 400),
+            (ErrorCode::InvalidRange, "InvalidRange", 416),
+            (ErrorCode::NotModified, "NotModified", 304),
+            (ErrorCode::PreconditionFailed, "PreconditionFailed", 412),
+            (ErrorCode::NoSuchKey, "NoSuchKey", 404),
             (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
             (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
             (

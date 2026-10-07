@@ -98,6 +98,7 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         addressed: &addressed,
         query: &query,
         verified: &verified,
+        headers: &parts.headers,
     };
     routes::route(spec.operation, &call, body).await
 }

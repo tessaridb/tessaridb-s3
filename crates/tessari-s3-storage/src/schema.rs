@@ -32,13 +32,24 @@ pub async fn apply(pool: &MetaPool) -> Result<()> {
                 if error.is_class(RefusalClass::Retry) && attempt < SCHEMA_RETRY_ATTEMPTS =>
             {
                 tracing::debug!(attempt, error = %error, "schema contended; retrying");
-                let backoff = u64::from(attempt).saturating_mul(SCHEMA_RETRY_BACKOFF_MS);
+                let step = u64::from(attempt).saturating_mul(SCHEMA_RETRY_BACKOFF_MS);
+                // Jitter, so nodes (or tests) that collided once do not retry in lockstep and collide again.
+                let backoff = step.saturating_add(jitter(step));
                 tokio::time::sleep(Duration::from_millis(backoff)).await;
                 attempt = attempt.saturating_add(1);
             }
             outcome => return outcome,
         }
     }
+}
+
+/// A random value in `0..bound` from the standard library's randomly keyed hasher; no dependency needed for a
+/// back-off spread.
+fn jitter(bound: u64) -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u64(bound);
+    hasher.finish().checked_rem(bound).unwrap_or(0)
 }
 
 async fn apply_once(pool: &MetaPool) -> Result<()> {

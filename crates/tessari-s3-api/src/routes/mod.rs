@@ -28,6 +28,10 @@ pub(crate) async fn route(
         Operation::DeleteBucket => buckets::delete(call).await,
         Operation::ListBuckets => buckets::list(call).await,
         Operation::GetBucketLocation => buckets::location(call).await,
+        Operation::PutObject => objects::put(call, objects::key(call)?, body).await,
+        Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
+        Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
+        Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,
         _ => Err(Error::new(
             ErrorCode::InternalError,
             "the operation has no handler",

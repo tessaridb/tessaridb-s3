@@ -1,5 +1,6 @@
 //! What an operation handler receives: the request resolved, decoded and authenticated.
 
+use axum::http::HeaderMap;
 use tessari_s3_core::auth::Verified;
 use tessari_s3_types::{BucketName, ErrorCode};
 
@@ -17,6 +18,8 @@ pub struct Call<'a> {
     pub query: &'a [(String, Option<String>)],
     /// Who signed it, and how its body is protected.
     pub verified: &'a Verified,
+    /// The request's headers.
+    pub headers: &'a HeaderMap,
 }
 
 impl Call<'_> {

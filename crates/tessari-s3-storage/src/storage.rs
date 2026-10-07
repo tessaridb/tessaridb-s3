@@ -4,11 +4,13 @@ use tessari_s3_infrastructure::tessaridb::MetaPool;
 
 use crate::Result;
 use crate::buckets::{BucketService, TessariBuckets};
+use crate::objects::{ObjectService, TessariObjects};
 
 /// Every storage service, built over one metadata pool.
 #[derive(Clone)]
 pub struct Storage {
     buckets: BucketService,
+    objects: ObjectService,
     pool: MetaPool,
 }
 
@@ -18,6 +20,7 @@ impl Storage {
     pub fn new(pool: MetaPool) -> Self {
         Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
+            objects: ObjectService::new(TessariObjects::new(pool.clone())),
             pool,
         }
     }
@@ -28,6 +31,12 @@ impl Storage {
     /// The metadata store's refusal or outage.
     pub async fn prepare(&self) -> Result<()> {
         crate::schema::apply(&self.pool).await
+    }
+
+    /// Object operations.
+    #[must_use]
+    pub const fn objects(&self) -> &ObjectService {
+        &self.objects
     }
 
     /// Bucket operations.

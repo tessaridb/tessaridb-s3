@@ -83,7 +83,11 @@ async fn an_invalid_bucket_name_is_refused_before_authentication() {
 async fn a_head_refusal_carries_its_status_and_no_body() {
     let (target, headers) = signed("HEAD", "/bucket/key", Vec::new(), ACCESS_KEY);
     let seen = send(state(NOW, 64), request("HEAD", &target, &headers)).await;
-    assert_eq!((seen.status, seen.body.as_str()), (501, ""));
+    assert_eq!(
+        (seen.status, seen.body.as_str()),
+        (503, ""),
+        "HeadObject reaches the unreachable metadata store"
+    );
     assert!(seen.request_id.is_some(), "the request id is on HEAD too");
 }
 

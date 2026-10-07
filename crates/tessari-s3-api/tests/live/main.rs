@@ -7,6 +7,7 @@
 #![cfg(test)]
 
 mod buckets;
+mod objects;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,
@@ -98,20 +99,32 @@ pub(crate) async fn call(
     query: Vec<(&str, Option<&str>)>,
     body: &[u8],
 ) -> Seen {
+    call_with(state, method, path, query, Vec::new(), body).await
+}
+
+/// As [`call`], with extra headers that are signed (as every `x-amz-*` header must be).
+pub(crate) async fn call_with(
+    state: &ApiState,
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Seen {
     let amz_date = amz_now_for_tests();
     let unsigned = signer::Unsigned {
         method,
         host: "localhost:9100",
         path,
         query,
-        headers: Vec::new(),
+        headers,
         access_key: ACCESS_KEY,
         secret: SECRET,
         region: "us-east-1",
         amz_date: &amz_date,
     };
     let (target, mut headers) = signer::sign_with_body(&unsigned, body);
-    headers.sort();
+    headers.push(("content-length".to_owned(), body.len().to_string()));
     let mut builder = Request::builder().method(method).uri(target);
     for (name, value) in &headers {
         builder = builder.header(name.as_str(), value.as_str());
@@ -123,13 +136,9 @@ pub(crate) async fn call(
         .expect("infallible router");
     let status = response.status().as_u16();
     let headers = response.headers().clone();
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), 1 << 20)
-            .await
-            .expect("body")
-            .to_vec(),
-    )
-    .expect("utf-8");
+    let body =
+        String::from_utf8_lossy(&to_bytes(response.into_body(), 1 << 20).await.expect("body"))
+            .into_owned();
     let code = body
         .split_once("<Code>")
         .and_then(|(_, rest)| rest.split_once("</Code>"))

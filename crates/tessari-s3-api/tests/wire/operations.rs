@@ -36,6 +36,9 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
             amz_date: AMZ_DATE,
         };
         let (target, signed) = sign(&unsigned);
+        // Every client sends Content-Length (0 here): PutObject refuses a body of unknown length before anything else.
+        let mut signed = signed;
+        signed.push(("content-length".to_owned(), "0".to_owned()));
         let seen = send(state(NOW, 64), request(&method, &target, &signed)).await;
         // An implemented operation reaches its handler, which meets the unreachable metadata store and answers
         // 503 ServiceUnavailable — fail closed, never a guess.
@@ -75,7 +78,7 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
 }
 
 #[tokio::test]
-async fn the_published_get_object_request_authenticates_and_is_refused_as_not_implemented() {
+async fn the_published_get_object_request_authenticates_and_reaches_its_handler() {
     let authorization = "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,\
         SignedHeaders=host;range;x-amz-content-sha256;x-amz-date,\
         Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41";
@@ -93,12 +96,12 @@ async fn the_published_get_object_request_authenticates_and_is_refused_as_not_im
     let seen = send(state(NOW, 64), request("GET", "/test.txt", &headers)).await;
     assert_eq!(
         (seen.status, seen.code.as_deref()),
-        (501, Some("NotImplemented")),
+        (503, Some("ServiceUnavailable")),
         "{}",
         seen.body
     );
     assert!(
-        seen.body.contains("GetObject is not implemented"),
+        seen.body.contains("metadata store is unavailable"),
         "{}",
         seen.body
     );
@@ -118,7 +121,7 @@ async fn the_published_get_object_request_authenticates_and_is_refused_as_not_im
 }
 
 #[tokio::test]
-async fn the_published_presigned_url_authenticates_and_is_refused_as_not_implemented() {
+async fn the_published_presigned_url_authenticates_and_reaches_its_handler() {
     let target = "/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256\
         &X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request\
         &X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host\
@@ -130,7 +133,7 @@ async fn the_published_presigned_url_authenticates_and_is_refused_as_not_impleme
     let seen = send(state(NOW + 3600, 64), request("GET", target, &headers)).await;
     assert_eq!(
         (seen.status, seen.code.as_deref()),
-        (501, Some("NotImplemented")),
+        (503, Some("ServiceUnavailable")),
         "{}",
         seen.body
     );
