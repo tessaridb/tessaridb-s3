@@ -1,0 +1,6 @@
+# A test that panics is a failing test, which is the point of it. Production code is a different
+# question, and `unwrap_used`, `expect_used` and `panic` are denied at the workspace so that the
+# difference is held by the build rather than by whoever is reading the diff.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

@@ -26,6 +26,10 @@ anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+zeroize = { version = "1", features = ["derive"] }
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "warn"
