@@ -5,6 +5,7 @@ use super::catalog::Operation;
 /// Operations with a handler; every other catalog operation is refused with 501.
 const IMPLEMENTED: &[Operation] = &[
     Operation::AbortMultipartUpload,
+    Operation::CompleteMultipartUpload,
     Operation::CreateBucket,
     Operation::CreateMultipartUpload,
     Operation::DeleteBucket,

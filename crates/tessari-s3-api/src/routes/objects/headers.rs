@@ -161,9 +161,13 @@ pub(crate) fn read_integrity(headers: &HeaderMap) -> Result<Integrity> {
     let mut header_checksums = Vec::new();
     for (name, value) in headers {
         let name = name.as_str();
+        // Three `x-amz-checksum-` headers carry no checksum value: the type and the algorithm an upload declares, and
+        // the read mode.
         if name.starts_with("x-amz-checksum-")
-            && name != "x-amz-checksum-type"
-            && name != "x-amz-checksum-mode"
+            && !matches!(
+                name,
+                "x-amz-checksum-type" | "x-amz-checksum-mode" | "x-amz-checksum-algorithm"
+            )
         {
             let value = value
                 .to_str()

@@ -4,13 +4,15 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalC
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::{read, record};
-use super::model::{Content, NewObject};
+use super::model::{Content, NewObject, Part};
 use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
 use crate::answers::{first_record, incarnation_of};
 use crate::{Error, Result};
 
 #[path = "tessaridb_page.rs"]
 mod page;
+#[path = "tessaridb_parts.rs"]
+mod parts;
 
 /// The TessariDB object repository.
 #[derive(Clone)]
@@ -112,6 +114,26 @@ impl ObjectRepository for TessariObjects {
         // follows `BEGIN`.
         let (script, answer_at) = match &object.content {
             Content::Inline(_) => (statement.to_owned(), 0),
+            // A completed upload: the upload must still exist (the `UPDATE` refuses the whole transaction once an
+            // abort or another completion took it), the unlisted parts go (their event queues their files), and the
+            // upload ends — all in the commit that makes the object visible.
+            Content::Parts(multipart) => {
+                let listed = multipart
+                    .parts
+                    .iter()
+                    .map(|part| Value::from(i64::from(part.number)))
+                    .collect();
+                parameters.push(("upload".to_owned(), Value::Uuid(multipart.upload)));
+                parameters.push(("listed".to_owned(), Value::Array(listed)));
+                (
+                    format!(
+                        "BEGIN; UPDATE uploads:$upload SET last_part = time::now(); {statement} \
+                         DELETE FROM parts WHERE upload = $upload AND NOT (number IN $listed) LIMIT ALL; \
+                         DELETE uploads:$upload; COMMIT;"
+                    ),
+                    2,
+                )
+            }
             Content::Data(data) => {
                 parameters.push(("data".to_owned(), Value::Uuid(*data)));
                 (
@@ -237,6 +259,15 @@ impl ObjectRepository for TessariObjects {
         limit: usize,
     ) -> Result<Batch> {
         page::page(&self.pool, bucket, at, after, limit).await
+    }
+
+    async fn parts_of(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        upload: [u8; 16],
+    ) -> Result<Option<Vec<Part>>> {
+        parts::parts_of(&self.pool, id(bucket, key), upload).await
     }
 
     async fn remove(&self, bucket: &BucketName, key: &ObjectKey) -> Result<()> {

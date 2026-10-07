@@ -11,6 +11,29 @@ pub enum Content {
     Inline(Vec<u8>),
     /// In the data file with this id.
     Data([u8; 16]),
+    /// In the part files of a completed multipart upload.
+    Parts(Multipart),
+}
+
+/// The parts a completed multipart upload left as an object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Multipart {
+    /// The upload the parts belonged to; its parts records are the object's for as long as the object is.
+    pub upload: [u8; 16],
+    /// The parts in object order. A record read from the store leaves this empty until the object service fills it
+    /// from the parts records, so outside this crate it is always complete.
+    pub parts: Vec<Part>,
+}
+
+/// One part of a multipart object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Part {
+    /// The part number it was uploaded as.
+    pub number: u16,
+    /// The data file holding it.
+    pub data: [u8; 16],
+    /// Size in bytes.
+    pub size: u64,
 }
 
 /// A new object's metadata and where its bytes are, ready to commit.

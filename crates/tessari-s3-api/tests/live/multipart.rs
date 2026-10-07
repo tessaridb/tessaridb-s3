@@ -6,7 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Value};
 use crate::large::{body, queued};
 use crate::{IGNORED, Seen, call, fresh};
 
-fn text(body: &str, tag: &str) -> Option<String> {
+pub(crate) fn text(body: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}>");
     let close = format!("</{tag}>");
     body.split_once(&open)
@@ -14,14 +14,14 @@ fn text(body: &str, tag: &str) -> Option<String> {
         .map(|(text, _)| text.replace("&quot;", "\"").replace("&amp;", "&"))
 }
 
-fn texts(body: &str, parent: &str, tag: &str) -> Vec<String> {
+pub(crate) fn texts(body: &str, parent: &str, tag: &str) -> Vec<String> {
     body.split(&format!("<{parent}>"))
         .skip(1)
         .filter_map(|part| text(part, tag))
         .collect()
 }
 
-fn etag(seen: &Seen) -> String {
+pub(crate) fn etag(seen: &Seen) -> String {
     seen.headers
         .get("etag")
         .and_then(|v| v.to_str().ok())
@@ -29,13 +29,13 @@ fn etag(seen: &Seen) -> String {
         .to_owned()
 }
 
-async fn create(state: &tessari_s3_api::ApiState, path: &str) -> String {
+pub(crate) async fn create(state: &tessari_s3_api::ApiState, path: &str) -> String {
     let created = call(state, "POST", path, vec![("uploads", None)], b"").await;
     assert_eq!(created.status, 200, "{}", created.body);
     text(&created.body, "UploadId").expect("an upload id")
 }
 
-async fn part(
+pub(crate) async fn part(
     state: &tessari_s3_api::ApiState,
     path: &str,
     upload: &str,
@@ -53,7 +53,7 @@ async fn part(
 }
 
 /// The data ids of an upload's part records.
-async fn part_data(planter: &MetaPool) -> Vec<[u8; 16]> {
+pub(crate) async fn part_data(planter: &MetaPool) -> Vec<[u8; 16]> {
     let answers = planter
         .run("SELECT data FROM parts;", Vec::new())
         .await
@@ -162,7 +162,7 @@ async fn parts_are_uploaded_replaced_listed_and_dropped_by_an_abort() {
     assert_eq!(again.code.as_deref(), Some("NoSuchUpload"));
 }
 
-fn md5_hex(bytes: &[u8]) -> String {
+pub(crate) fn md5_hex(bytes: &[u8]) -> String {
     let mut hashes = tessari_s3_core::objects::checksum::Hashes::new();
     hashes.update(bytes);
     hashes.finish().md5_hex

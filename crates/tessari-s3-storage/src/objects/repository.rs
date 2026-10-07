@@ -4,7 +4,7 @@ use std::future::Future;
 
 use tessari_s3_types::{BucketName, ObjectKey};
 
-use super::model::{NewObject, ObjectSummary, StoredObject};
+use super::model::{NewObject, ObjectSummary, Part, StoredObject};
 use crate::Result;
 
 /// What one write statement requires of the record already at the key.
@@ -112,6 +112,14 @@ pub(crate) trait ObjectRepository: Send + Sync {
         after: &str,
         limit: usize,
     ) -> impl Future<Output = Result<Batch>> + Send;
+    /// The parts of the multipart object at `bucket/key` in number order, read in one snapshot with the object — or
+    /// `None` when the object there is no longer the one completed from `upload`.
+    fn parts_of(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        upload: [u8; 16],
+    ) -> impl Future<Output = Result<Option<Vec<Part>>>> + Send;
     /// Removes the record at `bucket/key`, if any.
     fn remove(
         &self,

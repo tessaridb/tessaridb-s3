@@ -2,7 +2,7 @@
 //! statement; a read sees an object only if it belongs to the bucket's current incarnation. A data file is queued for
 //! reclamation before it exists and leaves the queue only in the transaction that commits an object pointing at it.
 
-use tessari_s3_constants::DELETE_OBJECTS_CONCURRENCY;
+use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, MULTIPART_READ_ATTEMPTS};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
@@ -228,16 +228,33 @@ impl ObjectService {
         bucket: &BucketName,
         key: &ObjectKey,
     ) -> Result<std::result::Result<Option<StoredObject>, ()>> {
-        let Snapshot {
-            bucket: current,
-            object: existing,
-        } = self.repository.read(bucket, key).await?;
-        let Some(incarnation) = current else {
-            return Ok(Err(()));
-        };
-        Ok(Ok(existing
-            .filter(|(record, _)| *record == incarnation)
-            .map(|(_, object)| object)))
+        // A multipart object's parts are read in a second snapshot that also checks the key still holds the same
+        // upload; an upload's parts never change, they only go when the object does — then the key is read again.
+        for _ in 0..MULTIPART_READ_ATTEMPTS {
+            let Snapshot {
+                bucket: current,
+                object: existing,
+            } = self.repository.read(bucket, key).await?;
+            let Some(incarnation) = current else {
+                return Ok(Err(()));
+            };
+            let Some((_, mut object)) = existing.filter(|(record, _)| *record == incarnation)
+            else {
+                return Ok(Ok(None));
+            };
+            let Content::Parts(multipart) = &mut object.content else {
+                return Ok(Ok(Some(object)));
+            };
+            if let Some(parts) = self
+                .repository
+                .parts_of(bucket, key, multipart.upload)
+                .await?
+            {
+                multipart.parts = parts;
+                return Ok(Ok(Some(object)));
+            }
+        }
+        Err(Error::Contended)
     }
 
     /// Removes each of `keys`, a few at a time, one outcome per key in order; `None` when the bucket does not exist.

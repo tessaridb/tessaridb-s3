@@ -108,5 +108,13 @@ pub const MULTIPART_MAX_PARTS: u16 = 10_000;
 /// Smallest size of every part but the last of a multipart upload, checked at completion.
 pub const MULTIPART_MIN_PART_SIZE: u64 = 5 * 1024 * 1024;
 
+/// Largest CompleteMultipartUpload body read: 10,000 parts at 512 bytes each, room for a part number, an ETag and
+/// every checksum element.
+pub const COMPLETE_MULTIPART_BODY_MAX: usize = 10_000 * 512;
+
+/// Reads of a multipart object's key before giving up when it is overwritten between reading the object and its parts
+/// every time.
+pub const MULTIPART_READ_ATTEMPTS: u32 = 3;
+
 /// Most parts one ListParts page carries, and the default.
 pub const LIST_PARTS_MAX: usize = 1000;

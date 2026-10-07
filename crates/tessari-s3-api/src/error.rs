@@ -57,7 +57,8 @@ impl From<tessari_s3_storage::Error> for Error {
             Storage::Meta(MetaError::Refused {
                 class: Some(RefusalClass::Retry | RefusalClass::Unavailable),
                 ..
-            }) => {
+            })
+            | Storage::Contended => {
                 tracing::warn!(error = %error, "metadata store asked for a retry");
                 Self::new(
                     ErrorCode::ServiceUnavailable,

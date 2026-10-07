@@ -7,12 +7,21 @@ use tessari_s3_types::{BucketName, ObjectKey, PartNumber, UploadId};
 use super::model::{NewPart, NewUpload, StoredPart};
 use crate::Result;
 
-/// An upload record: what it is bound to.
+/// An upload record: what it is bound to and what its Create fixed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UploadRecord {
     pub(crate) bucket: String,
     pub(crate) key: String,
     pub(crate) incarnation: [u8; 16],
+    pub(crate) declared: NewUpload,
+}
+
+/// A part as Complete reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PartRow {
+    pub(crate) number: u16,
+    pub(crate) data: [u8; 16],
+    pub(crate) record: tessari_s3_core::objects::multipart::PartRecord,
 }
 
 /// Multipart queries.
@@ -49,6 +58,8 @@ pub(crate) trait MultipartRepository: Send + Sync {
         after: u16,
         limit: usize,
     ) -> impl Future<Output = Result<(Vec<StoredPart>, bool)>> + Send;
+    /// Every part of upload `id`.
+    fn all_parts(&self, id: UploadId) -> impl Future<Output = Result<Vec<PartRow>>> + Send;
     /// Removes the upload and every part record of it, in one transaction; each part's data is queued by the
     /// `part_superseded` event.
     fn abort(&self, id: UploadId) -> impl Future<Output = Result<()>> + Send;

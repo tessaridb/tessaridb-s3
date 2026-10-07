@@ -40,6 +40,9 @@ pub(crate) async fn route(
         Operation::UploadPart => multipart::upload_part(call, objects::key(call)?, body).await,
         Operation::AbortMultipartUpload => multipart::abort(call, objects::key(call)?).await,
         Operation::ListParts => multipart::list_parts(call, objects::key(call)?).await,
+        Operation::CompleteMultipartUpload => {
+            multipart::complete(call, objects::key(call)?, body).await
+        }
         _ => Err(Error::new(
             ErrorCode::InternalError,
             "the operation has no handler",

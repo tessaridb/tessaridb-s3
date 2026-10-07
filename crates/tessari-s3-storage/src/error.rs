@@ -40,6 +40,10 @@ pub enum Error {
     /// The operating system's random source failed, so no unguessable id could be drawn.
     #[error("the random source failed")]
     Randomness,
+    /// A key kept changing under a read that needs two snapshots (a multipart object's record, then its parts);
+    /// retryable.
+    #[error("the key changed under every read attempt")]
+    Contended,
 }
 
 impl Error {
@@ -53,6 +57,7 @@ impl Error {
             | Self::Corrupt { .. }
             | Self::NoDataDirectory
             | Self::Randomness => ErrorCategory::Internal,
+            Self::Contended => ErrorCategory::Conflict,
         }
     }
 }

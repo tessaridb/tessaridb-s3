@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode};
 use tessari_s3_constants::{LIST_PARTS_MAX, SINGLE_PUT_MAX};
-use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
+use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_storage::multipart::{Created, NewPart, NewUpload, PartWritten};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber, UploadId};
 
@@ -18,6 +18,12 @@ use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, xml_response};
 use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
+
+mod complete;
+mod declared;
+
+pub(crate) use complete::complete;
+use declared::declared_checksum;
 
 fn no_such_upload() -> Error {
     Error::new(
@@ -58,34 +64,6 @@ fn key_text(key: &ObjectKey) -> Result<String> {
             "the key cannot be carried in an XML response",
         )
     })
-}
-
-/// The checksum declaration of a new upload: an algorithm this server supports, and a type it knows.
-fn declared_checksum(call: &Call<'_>) -> Result<(Option<String>, Option<String>)> {
-    let header = |name: &str| call.headers.get(name).and_then(|v| v.to_str().ok());
-    let algorithm = match header("x-amz-checksum-algorithm") {
-        None => None,
-        Some(text) => match ChecksumAlgorithm::parse(text) {
-            Some(Declared::Supported(algorithm)) => Some(algorithm.name().to_owned()),
-            _ => {
-                return Err(Error::new(
-                    ErrorCode::NotImplemented,
-                    format!("the checksum algorithm {text} is not implemented"),
-                ));
-            }
-        },
-    };
-    let kind = match header("x-amz-checksum-type") {
-        None => None,
-        Some(kind @ ("COMPOSITE" | "FULL_OBJECT")) => Some(kind.to_owned()),
-        Some(_) => {
-            return Err(Error::new(
-                ErrorCode::InvalidRequest,
-                "x-amz-checksum-type must be COMPOSITE or FULL_OBJECT",
-            ));
-        }
-    };
-    Ok((algorithm, kind))
 }
 
 /// `POST /{bucket}/{key}?uploads`.
@@ -178,11 +156,16 @@ pub(crate) async fn upload_part(
         data: uploaded.id,
         size: uploaded.size,
         etag: etag.clone(),
-        checksums: [(
-            algorithm.name().to_owned(),
-            uploaded.digests.value(algorithm).to_owned(),
-        )]
-        .into(),
+        // Every algorithm, whichever the client checked: Complete builds the object's checksum from them.
+        checksums: ChecksumAlgorithm::ALL
+            .into_iter()
+            .map(|each| {
+                (
+                    each.name().to_owned(),
+                    uploaded.digests.value(each).to_owned(),
+                )
+            })
+            .collect(),
     };
     match storage
         .multipart()
@@ -228,9 +211,9 @@ pub(crate) async fn list_parts(call: &Call<'_>, key: &ObjectKey) -> Result<Respo
     let marker = u16::try_from(marker).map_err(|_| no_such_upload())?;
     let bucket = call.bucket()?;
     let multipart = call.state.storage().multipart();
-    if !multipart.exists(bucket, key, id).await? {
+    let Some(declared) = multipart.find(bucket, key, id).await? else {
         return Err(no_such_upload());
-    }
+    };
     let page = multipart.parts(id, marker, max).await?;
     let owner = escape(call.verified.access_key());
     let mut out = format!(
@@ -261,7 +244,12 @@ pub(crate) async fn list_parts(call: &Call<'_>, key: &ObjectKey) -> Result<Respo
             escape(&part.etag),
             part.size
         );
-        for (algorithm, value) in &part.checksums {
+        // A part holds every algorithm's value; the listing shows the one the upload declared.
+        let shown = part
+            .checksums
+            .iter()
+            .filter(|(algorithm, _)| declared.checksum_algorithm.as_ref() == Some(*algorithm));
+        for (algorithm, value) in shown {
             let _ = write!(
                 out,
                 "<Checksum{0}>{1}</Checksum{0}>",

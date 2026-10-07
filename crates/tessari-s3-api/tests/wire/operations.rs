@@ -63,7 +63,10 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
             (400, "InvalidRequest")
         } else if matches!(
             answering,
-            Operation::UploadPart | Operation::AbortMultipartUpload | Operation::ListParts
+            Operation::UploadPart
+                | Operation::AbortMultipartUpload
+                | Operation::ListParts
+                | Operation::CompleteMultipartUpload
         ) {
             // `uploadId=1` is not an id this server could have issued: refused before reading the store.
             (404, "NoSuchUpload")

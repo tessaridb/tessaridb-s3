@@ -2,7 +2,11 @@
 
 use std::collections::BTreeMap;
 
+use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
+use tessari_s3_core::objects::multipart::{ListedPart, Refusal};
 use tessari_s3_types::{PartNumber, Timestamp, UploadId};
+
+use crate::objects::{WriteCondition, Written};
 
 /// What CreateMultipartUpload fixes for the object the upload will become.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -72,4 +76,41 @@ pub struct PartsPage {
     pub parts: Vec<StoredPart>,
     /// Whether more parts follow.
     pub truncated: bool,
+}
+
+/// What a CompleteMultipartUpload asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Completion {
+    /// The parts that form the object, as listed.
+    pub parts: Vec<ListedPart>,
+    /// The condition the object is written under.
+    pub condition: WriteCondition,
+    /// A checksum of the whole object the client sent with the request, to be checked against the computed one.
+    pub checksum: Option<(ChecksumAlgorithm, String)>,
+    /// The object size the client declared (`x-amz-mp-object-size`).
+    pub size: Option<u64>,
+}
+
+/// What a CompleteMultipartUpload ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Completed {
+    /// The object is visible.
+    Done {
+        /// Its quoted multipart ETag.
+        etag: String,
+        /// Its checksum algorithm and value.
+        checksum: (ChecksumAlgorithm, String),
+        /// Whether the checksum is composite (otherwise it covers the whole object).
+        composite: bool,
+    },
+    /// The upload does not exist for this bucket and key (never did, aborted, or completed).
+    NoSuchUpload,
+    /// The listed parts cannot form the object.
+    Refused(Refusal),
+    /// The declared object size is not the parts' total.
+    SizeMismatch,
+    /// The whole-object checksum the client sent is not the computed one.
+    ChecksumMismatch,
+    /// The object write did not commit, for the reason given (bucket gone, condition false).
+    NotWritten(Written),
 }

@@ -67,9 +67,57 @@ pub fn resolve(header: Option<&str>, size: u64) -> RangeRequest {
     }
 }
 
+/// One part's share of a byte range of an object made of consecutive parts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Segment {
+    /// The part's position among the object's parts, from 0.
+    pub index: usize,
+    /// First byte within the part.
+    pub start: u64,
+    /// Last byte within the part, inclusive.
+    pub end: u64,
+}
+
+/// The parts, in order, holding bytes `start..=end` of an object whose parts have `sizes`; empty parts are skipped.
+#[must_use]
+pub fn segments(sizes: &[u64], start: u64, end: u64) -> Vec<Segment> {
+    let mut found = Vec::new();
+    let mut offset: u64 = 0;
+    for (index, size) in sizes.iter().copied().enumerate() {
+        let Some(last) = offset
+            .checked_add(size)
+            .and_then(|next| next.checked_sub(1))
+        else {
+            continue;
+        };
+        if size > 0 && start <= last && end >= offset {
+            found.push(Segment {
+                index,
+                start: start.saturating_sub(offset),
+                end: end.min(last).saturating_sub(offset),
+            });
+        }
+        offset = offset.saturating_add(size);
+    }
+    found
+}
+
+/// Bytes `start..=end` of the object that part `number` (from 1) covers, by position; `None` past the last part or
+/// for an empty one.
+#[must_use]
+pub fn part_bytes(sizes: &[u64], number: usize) -> Option<(u64, u64)> {
+    let index = number.checked_sub(1)?;
+    let size = sizes.get(index).copied().filter(|size| *size > 0)?;
+    let start = sizes
+        .get(..index)?
+        .iter()
+        .try_fold(0_u64, |sum, s| sum.checked_add(*s))?;
+    Some((start, start.checked_add(size)?.checked_sub(1)?))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{RangeRequest, resolve};
+    use super::{RangeRequest, Segment, part_bytes, resolve, segments};
 
     fn part(start: u64, end: u64) -> RangeRequest {
         RangeRequest::Part { start, end }
@@ -118,5 +166,28 @@ mod tests {
         ] {
             assert_eq!(resolve(header, 100), RangeRequest::Whole, "{header:?}");
         }
+    }
+
+    #[test]
+    fn a_range_splits_across_the_parts_it_covers() {
+        let sizes = [10, 0, 5, 10];
+        let seg = |index, start, end| Segment { index, start, end };
+        assert_eq!(
+            segments(&sizes, 0, 24),
+            [seg(0, 0, 9), seg(2, 0, 4), seg(3, 0, 9)]
+        );
+        assert_eq!(
+            segments(&sizes, 8, 11),
+            [seg(0, 8, 9), seg(2, 0, 1)],
+            "straddles a boundary"
+        );
+        assert_eq!(segments(&sizes, 15, 15), [seg(3, 0, 0)]);
+        assert_eq!(segments(&sizes, 12, 13), [seg(2, 2, 3)], "inside one part");
+        assert_eq!(part_bytes(&sizes, 1), Some((0, 9)));
+        assert_eq!(part_bytes(&sizes, 3), Some((10, 14)));
+        assert_eq!(part_bytes(&sizes, 4), Some((15, 24)));
+        assert_eq!(part_bytes(&sizes, 2), None, "an empty part covers no bytes");
+        assert_eq!(part_bytes(&sizes, 5), None);
+        assert_eq!(part_bytes(&sizes, 0), None);
     }
 }

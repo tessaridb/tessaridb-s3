@@ -3,11 +3,13 @@
 
 use std::collections::BTreeMap;
 
+use tessari_s3_constants::MULTIPART_MAX_PARTS;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 
+use super::entity::complete_row;
 use super::model::{NewPart, NewUpload, StoredPart};
-use super::repository::{MultipartRepository, UploadRecord};
+use super::repository::{MultipartRepository, PartRow, UploadRecord};
 use crate::answers::{first_record, incarnation_of};
 use crate::{Error, Result};
 
@@ -25,7 +27,7 @@ impl TessariMultipart {
     }
 }
 
-fn malformed(reason: &'static str) -> Error {
+pub(super) fn malformed(reason: &'static str) -> Error {
     Error::Malformed {
         record: "part",
         reason,
@@ -45,7 +47,7 @@ fn strings(map: &BTreeMap<String, String>) -> Value {
     )
 }
 
-fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
+pub(super) fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
     let Some(Value::Object(map)) = value else {
         return Err(malformed("checksums"));
     };
@@ -150,7 +152,8 @@ impl MultipartRepository for TessariMultipart {
         let answers = self
             .pool
             .run(
-                "SELECT bucket_name, key, incarnation FROM ONLY uploads:$upload;",
+                "SELECT bucket_name, key, incarnation, headers, metadata, checksum_algorithm, checksum_type \
+                 FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -164,9 +167,19 @@ impl MultipartRepository for TessariMultipart {
                 reason: field,
             }),
         };
+        let optional = |field: &'static str| match fields.get(field) {
+            Some(Value::String(text)) => Some(text.clone()),
+            _ => None,
+        };
         Ok(Some(UploadRecord {
             bucket: text("bucket_name")?,
             key: text("key")?,
+            declared: NewUpload {
+                headers: string_map(fields.get("headers"))?,
+                metadata: string_map(fields.get("metadata"))?,
+                checksum_algorithm: optional("checksum_algorithm"),
+                checksum_type: optional("checksum_type"),
+            },
             incarnation: match fields.get("incarnation") {
                 Some(Value::Uuid(bytes)) => *bytes,
                 _ => {
@@ -245,6 +258,23 @@ impl MultipartRepository for TessariMultipart {
         let more = parts.len() > limit;
         parts.truncate(limit);
         Ok((parts, more))
+    }
+
+    async fn all_parts(&self, id: UploadId) -> Result<Vec<PartRow>> {
+        let parameters = vec![("upload".to_owned(), Value::Uuid(id.bytes()))];
+        // `LIMIT` takes a literal; this is the server's own constant.
+        let script = format!(
+            "SELECT number, data, size, etag, checksums FROM parts WHERE upload = $upload \
+             LIMIT {MULTIPART_MAX_PARTS} USING INDEX by_upload;"
+        );
+        let answers = self.pool.run(&script, parameters).await?;
+        let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+            return Ok(Vec::new());
+        };
+        records
+            .iter()
+            .map(|(_, value)| complete_row(value))
+            .collect()
     }
 
     async fn abort(&self, id: UploadId) -> Result<()> {

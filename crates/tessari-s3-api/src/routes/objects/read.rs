@@ -5,9 +5,9 @@ use axum::body::Body;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, header};
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
-use tessari_s3_core::objects::range::{RangeRequest, resolve};
+use tessari_s3_core::objects::range::{RangeRequest, part_bytes, resolve};
 use tessari_s3_storage::objects::{Content, StoredObject};
-use tessari_s3_types::{ErrorCode, ObjectKey};
+use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::data;
 use crate::pipeline::call::Call;
@@ -34,15 +34,30 @@ fn set(headers: &mut HeaderMap, name: &str, value: &str) {
 
 /// `GET` or `HEAD /{bucket}/{key}`; `head` answers the headers and no body.
 pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result<Response<Body>> {
-    for unsupported in ["versionId", "partNumber"] {
-        if call.query_value(unsupported).is_some()
-            || call.query.iter().any(|(name, _)| name == unsupported)
-        {
-            return Err(Error::new(
-                ErrorCode::NotImplemented,
-                format!("{unsupported} is not implemented"),
-            ));
-        }
+    if call.query.iter().any(|(name, _)| name == "versionId") {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "versionId is not implemented",
+        ));
+    }
+    let part_number = call
+        .query
+        .iter()
+        .find(|(name, _)| name == "partNumber")
+        .map(|(_, value)| {
+            PartNumber::parse(value.as_deref().unwrap_or("")).map_err(|_| {
+                Error::new(
+                    ErrorCode::InvalidArgument,
+                    "partNumber must be an integer from 1 to 10000",
+                )
+            })
+        })
+        .transpose()?;
+    if part_number.is_some() && call.headers.contains_key(header::RANGE) {
+        return Err(Error::new(
+            ErrorCode::InvalidRequest,
+            "Range and partNumber cannot both be specified",
+        ));
     }
     let object = match call
         .state
@@ -92,7 +107,19 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         }
         ReadVerdict::Proceed => {}
     }
-    let range = resolve(text("range"), object.size);
+    let sizes: Vec<u64> = match &object.content {
+        Content::Parts(multipart) => multipart.parts.iter().map(|part| part.size).collect(),
+        Content::Inline(_) | Content::Data(_) => vec![object.size],
+    };
+    let range = match part_number {
+        None => resolve(text("range"), object.size),
+        // A single-part object is its own part 1.
+        Some(number) if sizes.len() == 1 && number.get() == 1 => RangeRequest::Whole,
+        Some(number) => match part_bytes(&sizes, usize::from(number.get())) {
+            Some((start, end)) => RangeRequest::Part { start, end },
+            None => RangeRequest::Unsatisfiable,
+        },
+    };
     let (status, slice) = match range {
         RangeRequest::Whole => (StatusCode::OK, None),
         RangeRequest::Part { start, end } => (StatusCode::PARTIAL_CONTENT, Some((start, end))),
@@ -119,6 +146,15 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
                 data::send(call.state.storage().objects(), *id, object.size, start, end).await?
             }
+            Content::Parts(multipart) => {
+                let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
+                let parts: Vec<([u8; 16], u64)> = multipart
+                    .parts
+                    .iter()
+                    .map(|part| (part.data, part.size))
+                    .collect();
+                data::send_parts(call.state.storage().objects(), &parts, start, end).await?
+            }
         }
     };
     let mut response = Response::new(body);
@@ -136,6 +172,9 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             "content-range",
             &format!("bytes {start}-{end}/{}", object.size),
         );
+    }
+    if part_number.is_some() && sizes.len() > 1 {
+        set(headers, "x-amz-mp-parts-count", &sizes.len().to_string());
     }
     Ok(response)
 }
@@ -179,7 +218,13 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
         for (name, value) in &object.checksums {
             if let Some(Declared::Supported(algorithm)) = ChecksumAlgorithm::parse(name) {
                 set(headers, algorithm.header(), value);
-                set(headers, "x-amz-checksum-type", "FULL_OBJECT");
+                // A composite value carries its part count after `-`, which base64 never contains.
+                let kind = if value.contains('-') {
+                    "COMPOSITE"
+                } else {
+                    "FULL_OBJECT"
+                };
+                set(headers, "x-amz-checksum-type", kind);
             }
         }
     }

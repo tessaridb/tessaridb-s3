@@ -59,4 +59,14 @@ section records which TessariDB version its metadata runs on.
   bits, bound to their bucket, key and bucket incarnation; parts are never
   listed or read as objects; every byte an abort or a replacement drops is
   queued for reclamation, and the reclaimer never removes a file a part still
-  holds. CompleteMultipartUpload is not implemented yet.
+  holds.
+- CompleteMultipartUpload: the listed parts are checked (ascending order,
+  ETag and any listed checksum, 5 MiB for every part but the last) and become
+  the object in one commit that also drops the unlisted parts and ends the
+  upload; `If-None-Match` and `If-Match` apply. The object carries the
+  multipart ETag (`MD5 of the part MD5s-N`) and a full-object CRC combined from
+  the parts' CRCs, or the composite checksum its upload declared. GetObject and
+  HeadObject read it across its part files, with a Range or `partNumber`;
+  overwriting or deleting it queues every part's file. CreateMultipartUpload
+  now accepts a declared checksum algorithm (it was refused as an unknown
+  checksum header) and refuses a type the algorithm does not allow.

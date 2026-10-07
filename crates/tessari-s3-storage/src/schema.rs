@@ -12,7 +12,9 @@ use crate::Result;
 /// be reclaimed: an upload's own id from before its file exists until the commit that references it, and — through
 /// the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it replaced.
 /// Multipart uploads keep their own records (`uploads`, `parts`), never seen by an object read or a listing, and a
-/// replaced or removed part queues its data the same way (`part_superseded`).
+/// replaced or removed part queues its data the same way (`part_superseded`). A completed upload's parts become an
+/// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
+/// removal queues its file.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -22,7 +24,7 @@ DEFINE TABLE IF NOT EXISTS buckets (\
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
- inline bytes, data uuid);
+ inline bytes, data uuid, upload uuid, parts int);
 DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime);
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
@@ -40,6 +42,9 @@ DEFINE INDEX IF NOT EXISTS by_part_data ON parts FIELDS data;
 DEFINE EVENT IF NOT EXISTS part_superseded ON parts FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
 THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
+DEFINE EVENT IF NOT EXISTS parts_released ON objects FOR UPDATE, DELETE \
+WHEN $before.upload != NONE AND $before.upload != $after.upload \
+THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
 COMMIT;
 ";
 

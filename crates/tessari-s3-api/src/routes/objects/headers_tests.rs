@@ -169,3 +169,13 @@ fn conditions_and_content_md5_parse() {
         .content_md5;
     assert_eq!(md5.map(|m| m[0]), Some(0x5d));
 }
+
+#[test]
+fn an_upload_declaring_its_algorithm_and_type_declares_no_checksum_value() {
+    let read = read_put_headers(&headers(&[
+        ("x-amz-checksum-algorithm", "SHA256"),
+        ("x-amz-checksum-type", "COMPOSITE"),
+    ]))
+    .expect("an upload's declaration is not a checksum header");
+    assert_eq!(read.integrity.checksum, None);
+}

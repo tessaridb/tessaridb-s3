@@ -8,8 +8,8 @@ mod tessaridb;
 mod upload;
 
 pub use model::{
-    Content, Listed, NewObject, ObjectSummary, Reclaimed, Removed, StoredObject, WriteCondition,
-    Written,
+    Content, Listed, Multipart, NewObject, ObjectSummary, Part, Reclaimed, Removed, StoredObject,
+    WriteCondition, Written,
 };
 pub use service::ObjectService;
 pub use tessaridb::TessariObjects;

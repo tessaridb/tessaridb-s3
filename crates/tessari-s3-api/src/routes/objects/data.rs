@@ -3,8 +3,10 @@
 
 use axum::body::{Body, Bytes};
 use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use tessari_s3_constants::{CHUNKED_FRAMING_ALLOWANCE, STREAMING_MIN_CHUNK_LEN};
 use tessari_s3_core::auth::{ChunkedDecoder, PayloadHash, verify_payload_digest};
+use tessari_s3_core::objects::range::segments;
 use tessari_s3_storage::data::DataReader;
 use tessari_s3_storage::objects::{ObjectService, Upload, Uploaded};
 use tessari_s3_types::ErrorCode;
@@ -187,6 +189,57 @@ pub(super) async fn send(
     start: u64,
     end: u64,
 ) -> Result<Body> {
+    Ok(Body::from_stream(
+        blocks(objects, id, size, start, end).await?,
+    ))
+}
+
+/// The body for bytes `start..=end` of an object made of `parts` — `(data id, size)` in object order. The first part's
+/// first block is verified before this returns, as for one data file; each later part's file is opened when the body
+/// reaches it, and a failure there ends the body early.
+pub(super) async fn send_parts(
+    objects: &ObjectService,
+    parts: &[([u8; 16], u64)],
+    start: u64,
+    end: u64,
+) -> Result<Body> {
+    let sizes: Vec<u64> = parts.iter().map(|(_, size)| *size).collect();
+    let mut wanted = segments(&sizes, start, end)
+        .into_iter()
+        .filter_map(|segment| {
+            parts
+                .get(segment.index)
+                .map(|(id, size)| (*id, *size, segment.start, segment.end))
+        });
+    let Some((id, size, from, to)) = wanted.next() else {
+        return Ok(Body::empty());
+    };
+    let first = blocks(objects, id, size, from, to).await?;
+    let objects = objects.clone();
+    let rest: Vec<([u8; 16], u64, u64, u64)> = wanted.collect();
+    let later = futures_util::stream::iter(rest)
+        .then(move |(id, size, from, to)| {
+            let objects = objects.clone();
+            async move { blocks(&objects, id, size, from, to).await }
+        })
+        .flat_map(|opened| match opened {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::error!(error = %error, "a part file of a multipart object could not be opened");
+                futures_util::stream::once(async move { Err(std::io::Error::other(error.message)) }).boxed()
+            }
+        });
+    Ok(Body::from_stream(first.chain(later)))
+}
+
+/// The verified blocks holding bytes `start..=end` of data `id`, the first already read.
+async fn blocks(
+    objects: &ObjectService,
+    id: [u8; 16],
+    size: u64,
+    start: u64,
+    end: u64,
+) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
     let reader = objects.open(id, size).await?;
     let block_size = u64::from(reader.block_size());
     let block_of = |offset: u64| {
@@ -226,7 +279,9 @@ pub(super) async fn send(
             }
         }
     });
-    let stream =
-        futures_util::stream::once(async move { Ok::<_, std::io::Error>(head) }).chain(rest);
-    Ok(Body::from_stream(stream))
+    Ok(
+        futures_util::stream::once(async move { Ok::<_, std::io::Error>(head) })
+            .chain(rest)
+            .boxed(),
+    )
 }

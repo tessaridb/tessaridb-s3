@@ -58,6 +58,12 @@ pub enum ErrorCode {
     InvalidBucketName,
     /// 400: the request is invalid as a whole.
     InvalidRequest,
+    /// 400: a listed part is not stored, or its ETag or checksum differs.
+    InvalidPart,
+    /// 400: the listed parts are not in ascending part-number order.
+    InvalidPartOrder,
+    /// 400: a part other than the last is under the minimum part size.
+    EntityTooSmall,
     /// 400: the URI cannot be parsed.
     InvalidUri,
     /// 400: the object key is longer than 1,024 bytes.
@@ -95,6 +101,9 @@ impl ErrorCode {
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchKey => "NoSuchKey",
             Self::NoSuchUpload => "NoSuchUpload",
+            Self::InvalidPart => "InvalidPart",
+            Self::InvalidPartOrder => "InvalidPartOrder",
+            Self::EntityTooSmall => "EntityTooSmall",
             Self::ServiceUnavailable => "ServiceUnavailable",
             Self::NoSuchBucket => "NoSuchBucket",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
@@ -154,6 +163,9 @@ impl ErrorCode {
             | Self::InvalidStorageClass
             | Self::InvalidDigest
             | Self::EntityTooLarge
+            | Self::InvalidPart
+            | Self::InvalidPartOrder
+            | Self::EntityTooSmall
             | Self::AccessControlListNotSupported => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
@@ -185,6 +197,9 @@ mod tests {
             (ErrorCode::PreconditionFailed, "PreconditionFailed", 412),
             (ErrorCode::NoSuchKey, "NoSuchKey", 404),
             (ErrorCode::NoSuchUpload, "NoSuchUpload", 404),
+            (ErrorCode::InvalidPart, "InvalidPart", 400),
+            (ErrorCode::InvalidPartOrder, "InvalidPartOrder", 400),
+            (ErrorCode::EntityTooSmall, "EntityTooSmall", 400),
             (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
             (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
             (

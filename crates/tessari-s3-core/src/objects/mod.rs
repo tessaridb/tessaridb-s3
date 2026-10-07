@@ -2,6 +2,8 @@
 
 pub mod checksum;
 pub mod conditions;
+pub mod crc_combine;
 pub mod listing;
+pub mod multipart;
 pub mod range;
 pub mod token;
