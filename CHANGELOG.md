@@ -5,6 +5,8 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Metadata runs on TessariDB `0.33.2-beta` or later: bucket and upload listings page with a bound `AFTER` cursor,
+  which that release is the first to accept.
 - Repository, licence (BUSL-1.1 with an object-storage-service and resale
   restriction) and mark.
 - SigV4 verification: `Authorization` header, presigned URLs and the aws-chunked
