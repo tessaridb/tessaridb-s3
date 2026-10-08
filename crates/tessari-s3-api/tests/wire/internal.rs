@@ -49,6 +49,7 @@ pub(crate) fn storage_at(dir: std::path::PathBuf) -> Storage {
         ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:1"),
         ("TESSARIDB_S3_META_USER", "s3"),
         ("TESSARIDB_S3_META_PASSWORD", "unused-password"),
+        ("TESSARIDB_S3_DATA_DIR", "/nonexistent/tessari-s3-wire"),
     ];
     let config = S3Config::from_lookup(|key| {
         vars.iter()
@@ -56,10 +57,7 @@ pub(crate) fn storage_at(dir: std::path::PathBuf) -> Storage {
             .map(|(_, v)| (*v).to_owned())
     })
     .expect("test configuration loads");
-    Storage::new(
-        MetaPool::new(config.meta).expect("pool settings"),
-        Some(dir),
-    )
+    Storage::new(MetaPool::new(config.meta).expect("pool settings"), dir)
 }
 
 /// 2.5 blocks of 64 bytes.

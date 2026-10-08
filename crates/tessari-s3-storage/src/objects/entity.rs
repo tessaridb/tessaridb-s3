@@ -45,7 +45,6 @@ pub(crate) fn record(
 ) -> Result<Value> {
     let size = i64::try_from(object.size).map_err(|_| malformed("size beyond i64"))?;
     let content: Vec<(&str, Value)> = match &object.content {
-        Content::Inline(bytes) => vec![("inline", Value::Bytes(bytes.clone()))],
         Content::Data(id) => vec![("data", Value::Uuid(*id))],
         Content::Parts(multipart) => {
             let count = i64::try_from(multipart.parts.len()).map_err(|_| malformed("parts"))?;
@@ -117,19 +116,21 @@ fn fields_of(value: &Value) -> Result<&Fields> {
 /// A stored record's incarnation and the object it holds.
 pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
     let fields = fields_of(value)?;
-    let content = match (
-        fields.get("data"),
-        fields.get("inline"),
-        fields.get("upload"),
-    ) {
-        (Some(Value::Uuid(id)), _, _) => Content::Data(*id),
-        (_, Some(Value::Bytes(bytes)), _) => Content::Inline(bytes.clone()),
+    // A record a build before ADR-0008 wrote may still hold the object's bytes; it is converted at start and never
+    // served from here.
+    if fields.contains_key("inline") {
+        return Err(malformed(
+            "holds object bytes; the store is converted at start (ADR-0008)",
+        ));
+    }
+    let content = match (fields.get("data"), fields.get("upload")) {
+        (Some(Value::Uuid(id)), _) => Content::Data(*id),
         // The parts are read separately (`ObjectService::get`).
-        (_, _, Some(Value::Uuid(upload))) => Content::Parts(Multipart {
+        (_, Some(Value::Uuid(upload))) => Content::Parts(Multipart {
             upload: *upload,
             parts: Vec::new(),
         }),
-        _ => return Err(malformed("neither inline bytes, a data id nor an upload")),
+        _ => return Err(malformed("neither a data id nor an upload")),
     };
     let object = StoredObject {
         size: size(fields)?,

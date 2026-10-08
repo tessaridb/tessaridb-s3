@@ -23,6 +23,8 @@ pub(super) fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState 
         ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:1"),
         ("TESSARIDB_S3_META_USER", "s3"),
         ("TESSARIDB_S3_META_PASSWORD", "unused-password"),
+        // Never written to: these tests reach no object store.
+        ("TESSARIDB_S3_DATA_DIR", "/nonexistent/tessari-s3-wire"),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101"),
         ("TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE", sign_ins),
         ("TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE", requests),
@@ -33,7 +35,10 @@ pub(super) fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState 
             .map(|(_, v)| (*v).to_owned())
     })
     .expect("configuration");
-    let storage = Storage::new(MetaPool::new(config.meta.clone()).expect("pool"), None);
+    let storage = Storage::new(
+        MetaPool::new(config.meta.clone()).expect("pool"),
+        config.data_dir.clone(),
+    );
     ConsoleState::new(&config, Arc::new(move || now), storage).expect("a console is configured")
 }
 

@@ -47,7 +47,7 @@ async fn a_listed_metadata_node_that_does_not_answer_is_passed_over() {
     let _why = IGNORED;
     // Nothing listens on this port during the suite: hand-run nodes use 47961/47962.
     let addresses = format!("127.0.0.1:47909,{}", test_node());
-    let (state, _, _) = fresh_at(addresses, Some("none"), None).await;
+    let (state, _, _) = fresh_at(addresses, Some("none"), crate::scratch_dir()).await;
     assert_eq!(
         call(&state, "PUT", "/failover", vec![], b"").await.status,
         200
@@ -144,6 +144,11 @@ async fn a_statement_whose_node_stops_answering_ends_at_the_statement_deadline()
             need("TESSARIDB_S3_TEST_META_PASSWORD"),
         ),
         ("TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS", "2".to_owned()),
+        // Never written to: the test talks to the metadata store alone.
+        (
+            "TESSARIDB_S3_DATA_DIR",
+            crate::scratch_dir().display().to_string(),
+        ),
     ];
     let config =
         S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))

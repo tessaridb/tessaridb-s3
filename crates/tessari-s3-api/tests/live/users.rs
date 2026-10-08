@@ -43,7 +43,7 @@ fn names(listed: Vec<User>) -> Vec<String> {
 
 /// Storage over a fresh namespace with the space `alpha` and its member `ann`, and a pool into the same namespace.
 pub(crate) async fn with_ann() -> (Storage, MetaPool) {
-    let config = live_config(test_node(), None, None);
+    let config = live_config(test_node(), None, &crate::scratch_dir());
     let storage = prepared(&config).await;
     assert!(matches!(
         storage

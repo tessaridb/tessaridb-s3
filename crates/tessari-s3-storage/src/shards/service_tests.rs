@@ -17,7 +17,7 @@ fn scratch() -> PathBuf {
 
 fn service(root: &Path) -> (ShardService, DataFiles) {
     let files = DataFiles::new(root.to_path_buf(), DATA_BLOCK_SIZE);
-    (ShardService::new(Some(files.clone())), files)
+    (ShardService::new(files.clone()), files)
 }
 
 /// 2.5 blocks of distinct bytes.
@@ -133,13 +133,4 @@ async fn a_body_shorter_than_declared_is_refused_and_leaves_nothing() {
     );
     nothing_left(&files, 2);
     std::fs::remove_dir_all(root).ok();
-}
-
-#[tokio::test]
-async fn without_a_data_directory_nothing_is_written() {
-    let shards = ShardService::new(None);
-    assert!(matches!(
-        shards.write(ID, 0, BLOCK, 1).await,
-        Err(Error::NoDataDirectory)
-    ));
 }

@@ -4,11 +4,9 @@ use std::collections::BTreeMap;
 
 use tessari_s3_types::Timestamp;
 
-/// Where an object's bytes are.
+/// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
-    /// In the metadata record itself (objects up to the inline size).
-    Inline(Vec<u8>),
     /// In the data file with this id.
     Data([u8; 16]),
     /// In the part files of a completed multipart upload.

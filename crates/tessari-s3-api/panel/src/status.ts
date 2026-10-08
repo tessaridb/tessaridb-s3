@@ -73,7 +73,7 @@ function storedTile(usage: Answer<Usage>): HTMLElement {
     "buckets",
     "Stored",
     size(measured.bytes),
-    `${objects} · ${size(measured.raw_bytes)} on the drives, ${size(measured.inline_bytes)} in the metadata · measured ${moment(measured.taken)}`,
+    `${objects} · ${size(measured.raw_bytes)} on the drives · measured ${moment(measured.taken)}`,
   );
 }
 

@@ -63,9 +63,6 @@ pub enum Error {
         /// What failed verification.
         reason: &'static str,
     },
-    /// An object needs a data file and no data directory is configured.
-    #[error("no data directory is configured (TESSARIDB_S3_DATA_DIR)")]
-    NoDataDirectory,
     /// A shard request the shard store does not take: a block size of zero or past a data block, or an index past
     /// the widest code.
     #[error("the shard request is not valid: {reason}")]
@@ -132,7 +129,6 @@ impl Error {
             Self::Malformed { .. }
             | Self::DataIo { .. }
             | Self::Corrupt { .. }
-            | Self::NoDataDirectory
             | Self::Randomness
             | Self::Unsealable
             | Self::NoIamKey

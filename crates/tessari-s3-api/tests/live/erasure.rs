@@ -73,7 +73,7 @@ async fn peer(config: &S3Config) -> Peer {
     let dir = scratch_dir();
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
-        Some(dir.clone()),
+        dir.clone(),
     );
     let state = InternalState::new(
         SecretKey::new(CLUSTER_SECRET.to_owned()),
@@ -187,7 +187,7 @@ pub(crate) async fn count(pool: &MetaPool, table: &str) -> usize {
     }
 }
 
-/// 300 KiB: past the inline size, inside one stripe.
+/// 300 KiB: inside one stripe.
 fn large() -> Vec<u8> {
     (0..300 * 1024_u32)
         .map(|i| u8::try_from(i % 251).expect("small"))

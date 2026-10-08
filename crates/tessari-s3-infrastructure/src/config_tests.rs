@@ -12,7 +12,7 @@ pub(crate) fn load(vars: &[(&str, &str)]) -> crate::Result<S3Config> {
     S3Config::from_lookup(|key| map.get(key).cloned())
 }
 
-pub(crate) const CREDENTIALS: [(&str, &str); 5] = [
+pub(crate) const CREDENTIALS: [(&str, &str); 6] = [
     ("TESSARIDB_S3_ROOT_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
     (
         "TESSARIDB_S3_ROOT_SECRET_KEY",
@@ -21,6 +21,7 @@ pub(crate) const CREDENTIALS: [(&str, &str); 5] = [
     ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:9080"),
     ("TESSARIDB_S3_META_USER", "s3"),
     ("TESSARIDB_S3_META_PASSWORD", "meta-password-0123"),
+    ("TESSARIDB_S3_DATA_DIR", "/srv/s3"),
 ];
 
 #[test]
@@ -62,13 +63,28 @@ fn a_tenancy_name_that_is_not_an_identifier_is_refused() {
 }
 
 #[test]
-fn the_data_directory_is_optional_and_taken_as_given() {
-    assert_eq!(load(&CREDENTIALS).expect("loads").data_dir, None);
-    let mut vars = CREDENTIALS.to_vec();
+fn the_data_directory_is_required_and_taken_as_given() {
+    // Every object byte lives on the drives (ADR-0008), so a node with nowhere to put them does not start.
+    let without: Vec<_> = CREDENTIALS
+        .iter()
+        .copied()
+        .filter(|(key, _)| *key != "TESSARIDB_S3_DATA_DIR")
+        .collect();
+    let refusal = load(&without).expect_err("refused");
+    assert!(
+        matches!(
+            refusal,
+            Error::MissingConfig {
+                key: "TESSARIDB_S3_DATA_DIR"
+            }
+        ),
+        "{refusal:?}"
+    );
+    let mut vars = without;
     vars.push(("TESSARIDB_S3_DATA_DIR", " /srv/s3 "));
     assert_eq!(
         load(&vars).expect("loads").data_dir,
-        Some(std::path::PathBuf::from("/srv/s3"))
+        std::path::PathBuf::from("/srv/s3")
     );
 }
 

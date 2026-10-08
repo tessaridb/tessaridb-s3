@@ -59,10 +59,9 @@ impl UsageRepository for TessariUsage {
 
     async fn measure(&self) -> Result<Measured> {
         // Whole-table folds: they read every object and part record by design, once per pass, never per request.
-        // A data file's stripes are `ceil(size / stripe)`; an inline object has no data file.
+        // A data file's stripes are `ceil(size / stripe)`.
         const SCRIPT: &str = "\
             SELECT bucket_name, count(*) AS objects, sum(size) AS bytes, \
-             sum(IF inline != NONE THEN size ELSE 0 END) AS inline_bytes, \
              sum(IF data != NONE THEN size ELSE 0 END) AS data_bytes, \
              sum(IF data != NONE THEN math::ceil(size / $stripe) ELSE 0 END) AS data_stripes \
              FROM objects GROUP BY bucket_name; \
@@ -164,7 +163,6 @@ fn object_fold(value: &Value) -> Result<ObjectFold> {
         bucket: text(row, "bucket_name")?,
         objects: count(row, "objects")?,
         bytes: count(row, "bytes")?,
-        inline_bytes: count(row, "inline_bytes")?,
         data_bytes: count(row, "data_bytes")?,
         data_stripes: count(row, "data_stripes")?,
     })

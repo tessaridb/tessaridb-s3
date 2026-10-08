@@ -1,19 +1,17 @@
-//! PutObject. The declared length decides where the bytes go: up to the inline size the body is read whole (bounded)
-//! into the metadata record; above it the body streams into a data file. Either way it is decoded if aws-chunked,
-//! hashed in one pass, checked against every value the request declared, and committed with its condition as one
-//! statement.
+//! PutObject. The body streams into a data file whatever its size — no object byte is held in the metadata record
+//! (ADR-0008) — decoded if aws-chunked, hashed in one pass, checked against every value the request declared, and
+//! committed with its condition as one statement.
 
-use axum::body::{Body, to_bytes};
+use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
-use tessari_s3_constants::{CHUNKED_FRAMING_ALLOWANCE, INLINE_OBJECT_MAX, SINGLE_PUT_MAX};
-use tessari_s3_core::auth::{ChunkedDecoder, PayloadHash};
-use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Digests, Hashes};
+use tessari_s3_constants::SINGLE_PUT_MAX;
+use tessari_s3_core::auth::PayloadHash;
+use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Digests};
 use tessari_s3_storage::objects::{Content, NewObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use super::data;
 use super::headers::{Integrity, PutHeaders, read_put_headers};
-use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::empty_response;
 use crate::routes::quota;
@@ -66,43 +64,6 @@ pub(crate) fn declared_length(call: &Call<'_>) -> Result<u64> {
     }
 }
 
-/// The decoded body of an object no larger than the inline size, with its trailing checksum when one was sent.
-async fn read_inline(
-    call: &Call<'_>,
-    body: Body,
-    length: usize,
-) -> Result<(Vec<u8>, Option<String>)> {
-    if is_chunked(&call.verified.payload()) {
-        let raw = to_bytes(body, length.saturating_add(CHUNKED_FRAMING_ALLOWANCE))
-            .await
-            .map_err(|_| {
-                Error::new(
-                    ErrorCode::IncompleteBody,
-                    "the aws-chunked body is longer than declared",
-                )
-            })?;
-        let trailer_header = call
-            .headers
-            .get("x-amz-trailer")
-            .and_then(|v| v.to_str().ok());
-        let declared = u64::try_from(length).unwrap_or(u64::MAX);
-        let mut decoder = ChunkedDecoder::new(call.verified.clone(), declared, trailer_header)?;
-        let mut data = Vec::with_capacity(length);
-        decoder.push(&raw, &mut data)?;
-        let trailer = decoder.finish()?.map(|trailer| trailer.value);
-        Ok((data, trailer))
-    } else {
-        let data = read_verified(body, call.verified, INLINE_OBJECT_MAX).await?;
-        if data.len() != length {
-            return Err(Error::new(
-                ErrorCode::IncompleteBody,
-                "the body is shorter than its Content-Length",
-            ));
-        }
-        Ok((data.to_vec(), None))
-    }
-}
-
 /// Checks the Content-MD5 and the declared checksum against the digests; answers the algorithm to store.
 pub(crate) fn check(
     integrity: &Integrity,
@@ -150,53 +111,26 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
         ));
     }
     quota::admit(call, call.bucket()?, Some(key), length).await?;
-    match usize::try_from(length) {
-        Ok(inline) if inline <= INLINE_OBJECT_MAX => {
-            let (data, trailer) = read_inline(call, body, inline).await?;
-            let mut hashes = Hashes::new();
-            hashes.update(&data);
-            let digests = hashes.finish();
-            let algorithm = check(&headers.integrity, &digests, trailer)?;
-            commit(
-                call,
-                key,
-                headers,
-                &digests,
-                length,
-                algorithm,
-                Content::Inline(data),
-            )
-            .await
+    let objects = call.state.storage().objects();
+    let (uploaded, trailer) = data::receive(call, body, length).await?;
+    let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
+        Ok(algorithm) => algorithm,
+        Err(error) => {
+            data::release(objects, uploaded.id).await;
+            return Err(error);
         }
-        _ => {
-            let objects = call.state.storage().objects();
-            if !objects.stores_data() {
-                return Err(Error::new(
-                    ErrorCode::NotImplemented,
-                    "objects larger than 128 KiB need a data directory (TESSARIDB_S3_DATA_DIR)",
-                ));
-            }
-            let (uploaded, trailer) = data::receive(call, body, length).await?;
-            let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
-                Ok(algorithm) => algorithm,
-                Err(error) => {
-                    data::release(objects, uploaded.id).await;
-                    return Err(error);
-                }
-            };
-            let content = Content::Data(uploaded.id);
-            commit(
-                call,
-                key,
-                headers,
-                &uploaded.digests,
-                uploaded.size,
-                algorithm,
-                content,
-            )
-            .await
-        }
-    }
+    };
+    let content = Content::Data(uploaded.id);
+    commit(
+        call,
+        key,
+        headers,
+        &uploaded.digests,
+        uploaded.size,
+        algorithm,
+        content,
+    )
+    .await
 }
 
 /// Commits the object under its condition and answers as S3 does. A data object the store refused has already

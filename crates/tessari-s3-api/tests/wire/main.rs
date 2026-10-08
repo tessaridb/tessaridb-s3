@@ -37,6 +37,8 @@ pub(crate) fn state(now: i64, max_inflight: usize) -> ApiState {
         ("TESSARIDB_S3_META_ADDRESS", "127.0.0.1:1"),
         ("TESSARIDB_S3_META_USER", "s3"),
         ("TESSARIDB_S3_META_PASSWORD", "unused-password"),
+        // Never written to: these tests reach no object store.
+        ("TESSARIDB_S3_DATA_DIR", "/nonexistent/tessari-s3-wire"),
     ];
     let config = S3Config::from_lookup(|key| {
         vars.iter()
@@ -46,7 +48,7 @@ pub(crate) fn state(now: i64, max_inflight: usize) -> ApiState {
     .expect("test configuration loads");
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool settings"),
-        None,
+        config.data_dir.clone(),
     );
     ApiState::with_limit(
         &config,

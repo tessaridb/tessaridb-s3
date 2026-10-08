@@ -6,9 +6,8 @@
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Response, StatusCode};
-use futures_util::StreamExt;
-use tessari_s3_constants::{INLINE_OBJECT_MAX, SINGLE_PUT_MAX};
-use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests, Hashes};
+use tessari_s3_constants::SINGLE_PUT_MAX;
+use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests};
 use tessari_s3_core::objects::copy::Directive;
 use tessari_s3_storage::objects::{Content, NewObject, ObjectService, StoredObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
@@ -26,24 +25,12 @@ fn invalid(code: ErrorCode, message: &str) -> Error {
     Error::new(code, message)
 }
 
-/// The copy's bytes: inline up to the inline size, as PutObject would store them; otherwise a new data file.
+/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008).
 async fn copy_bytes(objects: &ObjectService, object: &StoredObject) -> Result<(Content, Digests)> {
     let last = object.size.saturating_sub(1);
-    let mut stream = source::bytes(objects, object, 0, last).await?;
-    let inline = usize::try_from(object.size)
-        .ok()
-        .filter(|size| *size <= INLINE_OBJECT_MAX);
-    let Some(size) = inline else {
-        let uploaded = source::into_file(objects, stream, object.size).await?;
-        return Ok((Content::Data(uploaded.id), uploaded.digests));
-    };
-    let mut bytes = Vec::with_capacity(size);
-    while let Some(chunk) = stream.next().await {
-        bytes.extend_from_slice(&chunk.map_err(|error| source::read_failed(&error))?);
-    }
-    let mut hashes = Hashes::new();
-    hashes.update(&bytes);
-    Ok((Content::Inline(bytes), hashes.finish()))
+    let stream = source::bytes(objects, object, 0, last).await?;
+    let uploaded = source::into_file(objects, stream, object.size).await?;
+    Ok((Content::Data(uploaded.id), uploaded.digests))
 }
 
 /// The algorithm the copy carries: the request's `x-amz-checksum-algorithm`, else the source's, else CRC64NVME.

@@ -119,10 +119,6 @@ pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
 /// one's snapshot): the next attempt sees the committed layout and reads it back.
 pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
 
-/// Largest object stored inline in its metadata record, in bytes (128 KiB, ADR-0002 §1). Larger objects go to the
-/// data store.
-pub const INLINE_OBJECT_MAX: usize = 128 * 1024;
-
 /// Largest sum of user metadata names and values, in UTF-8 bytes (2 KB, S3's limit; MetadataTooLarge beyond it).
 pub const USER_METADATA_MAX: usize = 2 * 1024;
 

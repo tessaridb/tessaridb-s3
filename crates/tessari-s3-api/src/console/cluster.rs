@@ -47,7 +47,7 @@ pub(super) async fn cluster(
     let storage = state.storage();
     let members = match state.node() {
         Some(this) => {
-            let drive = storage.shards().drive().await?;
+            let drive = Some(storage.shards().drive().await?);
             Some(
                 stream::iter(storage.cluster().members().await?)
                     .map(|member| view(&state, this, member, drive))

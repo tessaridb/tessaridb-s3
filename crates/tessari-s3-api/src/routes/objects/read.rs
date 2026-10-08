@@ -109,7 +109,7 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
     }
     let sizes: Vec<u64> = match &object.content {
         Content::Parts(multipart) => multipart.parts.iter().map(|part| part.size).collect(),
-        Content::Inline(_) | Content::Data(_) => vec![object.size],
+        Content::Data(_) => vec![object.size],
     };
     let range = match part_number {
         None => resolve(text("range"), object.size),
@@ -141,7 +141,8 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         Body::empty()
     } else {
         match &object.content {
-            Content::Inline(bytes) => Body::from(inline_part(bytes, slice)?),
+            // An empty object has no byte to read back.
+            _ if object.size == 0 => Body::empty(),
             Content::Data(id) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
                 body::send(call.state.storage().objects(), *id, object.size, start, end).await?
@@ -177,20 +178,6 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         set(headers, "x-amz-mp-parts-count", &sizes.len().to_string());
     }
     Ok(response)
-}
-
-/// The inline bytes of the whole object or of `slice`.
-fn inline_part(bytes: &[u8], slice: Option<(u64, u64)>) -> Result<Vec<u8>> {
-    let Some((start, end)) = slice else {
-        return Ok(bytes.to_vec());
-    };
-    let range = || Error::new(ErrorCode::InvalidRange, "range");
-    let start = usize::try_from(start).map_err(|_| range())?;
-    let end = usize::try_from(end).map_err(|_| range())?;
-    Ok(bytes
-        .get(start..=end)
-        .map(<[u8]>::to_vec)
-        .unwrap_or_default())
 }
 
 /// The headers that describe the stored object.

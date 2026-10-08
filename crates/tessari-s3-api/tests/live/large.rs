@@ -1,4 +1,4 @@
-//! Objects above the inline size: data files on the node's drive, the `gc` queue in TessariDB, bitrot on read.
+//! Objects in data files on the node's drive, the `gc` queue in TessariDB, bitrot on read.
 
 use std::path::{Path, PathBuf};
 
@@ -119,7 +119,7 @@ async fn bucket(state: &tessari_s3_api::ApiState, name: &str) {
 async fn large_objects_round_trip_through_data_files() {
     let _why = IGNORED;
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     bucket(&state, "large").await;
     for (key, size) in [
         ("one", MIB + 5),
@@ -180,7 +180,7 @@ async fn large_objects_round_trip_through_data_files() {
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn overwrite_and_delete_queue_the_superseded_data_in_the_same_commit() {
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     bucket(&state, "turn").await;
     assert_eq!(
         call(&state, "PUT", "/turn/k", vec![], &body(MIB + 1, 1))
@@ -213,7 +213,7 @@ async fn overwrite_and_delete_queue_the_superseded_data_in_the_same_commit() {
     assert_eq!(
         queued(&planter).await,
         both,
-        "replacing data with inline bytes queues it too"
+        "replacing data with a small object queues it too"
     );
     assert_eq!(
         call(&state, "PUT", "/turn/d", vec![], &body(MIB, 4))
@@ -236,7 +236,7 @@ async fn overwrite_and_delete_queue_the_superseded_data_in_the_same_commit() {
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn a_large_write_that_does_not_commit_leaves_no_file_and_no_pending_entry() {
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     bucket(&state, "keep").await;
     let original = body(MIB + 7, 9);
     assert_eq!(
@@ -283,7 +283,7 @@ async fn a_large_write_that_does_not_commit_leaves_no_file_and_no_pending_entry(
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn a_damaged_block_is_never_served() {
     let dir = scratch_dir();
-    let (state, _, _) = fresh_with(Some(dir.clone())).await;
+    let (state, _, _) = fresh_with(dir.clone()).await;
     bucket(&state, "rot").await;
     let bytes = body(3 * MIB, 7);
     assert_eq!(
@@ -316,46 +316,9 @@ async fn a_damaged_block_is_never_served() {
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn without_a_data_directory_a_large_object_is_refused_by_name() {
-    let (state, _, _) = fresh_with(None).await;
-    bucket(&state, "nodir").await;
-    let refused = call(
-        &state,
-        "PUT",
-        "/nodir/k",
-        vec![],
-        &vec![b'x'; 128 * 1024 + 1],
-    )
-    .await;
-    assert_eq!(
-        (refused.status, refused.code.as_deref()),
-        (501, Some("NotImplemented"))
-    );
-    assert!(
-        refused.body.contains("TESSARIDB_S3_DATA_DIR"),
-        "{}",
-        refused.body
-    );
-    assert_eq!(
-        call(
-            &state,
-            "PUT",
-            "/nodir/edge",
-            vec![],
-            &vec![b'x'; 128 * 1024]
-        )
-        .await
-        .status,
-        200,
-        "128 KiB is inline and needs no data directory"
-    );
-}
-
-#[tokio::test]
-#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn an_upload_cut_off_before_its_commit_leaves_a_queued_file_and_no_object() {
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     let objects = state.storage().objects();
     let bytes = body(MIB + 3, 2);
     let mut upload = objects

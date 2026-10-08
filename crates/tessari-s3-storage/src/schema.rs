@@ -44,7 +44,7 @@ DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
- inline bytes, data uuid, upload uuid, parts int);
+ data uuid, upload uuid, parts int);
 DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime);
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \

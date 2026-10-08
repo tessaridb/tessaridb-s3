@@ -104,15 +104,6 @@ pub(crate) async fn bytes(
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
     Ok(match &object.content {
         _ if object.size == 0 => futures_util::stream::empty().boxed(),
-        Content::Inline(inline) => {
-            let range = usize::try_from(start)
-                .ok()
-                .zip(usize::try_from(end).ok())
-                .and_then(|(from, to)| inline.get(from..=to))
-                .ok_or_else(|| Error::new(ErrorCode::InternalError, "a range past inline bytes"))?;
-            let slice = Bytes::copy_from_slice(range);
-            futures_util::stream::once(async move { Ok(slice) }).boxed()
-        }
         Content::Data(id) => body::blocks(objects, *id, object.size, start, end).await?,
         Content::Parts(multipart) => {
             let parts: Vec<([u8; 16], u64)> = multipart
@@ -139,12 +130,6 @@ pub(crate) async fn into_file(
     mut stream: BoxStream<'static, std::io::Result<Bytes>>,
     length: u64,
 ) -> Result<Uploaded> {
-    if !objects.stores_data() {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "objects larger than 128 KiB need a data directory (TESSARIDB_S3_DATA_DIR)",
-        ));
-    }
     let mut upload = objects.upload(length).await?;
     let id = upload.id();
     let mut written = Ok(());

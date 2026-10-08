@@ -91,12 +91,9 @@ async fn answer() -> axum::http::StatusCode {
 }
 
 /// `GET {INTERNAL_DRIVE_PATH}`: this node's data drive space in the drive form, for the console of whichever member an
-/// operator signed in to; `404` on a node without a data directory.
+/// operator signed in to.
 async fn drive(
     axum::extract::State(state): axum::extract::State<InternalState>,
 ) -> Result<String, refusal::Refusal> {
-    match state.storage().shards().drive().await? {
-        Some(space) => Ok(space.to_wire()),
-        None => Err(refusal::Refusal::NoDrive),
-    }
+    Ok(state.storage().shards().drive().await?.to_wire())
 }

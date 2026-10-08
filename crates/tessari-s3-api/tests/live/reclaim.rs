@@ -16,7 +16,7 @@ const MIB: usize = 1 << 20;
 async fn queued_files_are_reclaimed_after_the_grace_period_and_live_ones_are_not() {
     let _why = IGNORED;
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     let objects = state.storage().objects();
     assert_eq!(call(&state, "PUT", "/keep", vec![], b"").await.status, 200);
     assert_eq!(
@@ -65,7 +65,7 @@ async fn queued_files_are_reclaimed_after_the_grace_period_and_live_ones_are_not
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     assert_eq!(call(&state, "PUT", "/race", vec![], b"").await.status, 200);
     let objects = state.storage().objects();
     let bytes = body(MIB, 4);
@@ -111,7 +111,7 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn a_queued_file_a_part_still_references_is_kept() {
     let dir = scratch_dir();
-    let (state, planter, _) = fresh_with(Some(dir.clone())).await;
+    let (state, planter, _) = fresh_with(dir.clone()).await;
     assert_eq!(
         call(&state, "PUT", "/parted", vec![], b"").await.status,
         200

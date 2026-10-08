@@ -1,4 +1,4 @@
-//! Object bytes above the inline size: a request body streamed into a data file without holding more than one body
+//! Object bytes: a request body streamed into a data file without holding more than one body
 //! frame in memory. Streaming the stored bytes back out is [`super::body`].
 
 use axum::body::Body;

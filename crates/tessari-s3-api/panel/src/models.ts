@@ -15,13 +15,12 @@ export type Status = {
   readonly heal_backlog: Backlog | null;
   readonly drive: Drive | null;
 };
-/** A bucket's figures as last measured: logical bytes, the part of them held inline in the metadata, and the bytes on
- * the drives (with erasure overhead on a cluster). */
+/** A bucket's figures as last measured: logical bytes and the bytes on the drives (with erasure overhead on a
+ * cluster). */
 export type BucketUsage = {
   readonly bucket: string;
   readonly objects: number;
   readonly bytes: number;
-  readonly inline_bytes: number;
   readonly raw_bytes: number;
 };
 export type Usage = {
@@ -29,7 +28,6 @@ export type Usage = {
   readonly buckets: readonly BucketUsage[];
   readonly objects: number;
   readonly bytes: number;
-  readonly inline_bytes: number;
   readonly raw_bytes: number;
 };
 export type Bucket = {
@@ -172,18 +170,18 @@ export function readStatus(v: unknown): Status | null {
 }
 
 const bucketUsage = (v: unknown): BucketUsage | null =>
-  record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["inline_bytes"]) && count(v["raw_bytes"])
-    ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], inline_bytes: v["inline_bytes"], raw_bytes: v["raw_bytes"] }
+  record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"])
+    ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] }
     : null;
 
 export function readUsage(v: unknown): Usage | null {
-  if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["inline_bytes"]) || !count(v["raw_bytes"])) {
+  if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
     return null;
   }
   const buckets = list(v["buckets"], bucketUsage);
   return buckets === null
     ? null
-    : { taken: v["taken"], buckets, objects: v["objects"], bytes: v["bytes"], inline_bytes: v["inline_bytes"], raw_bytes: v["raw_bytes"] };
+    : { taken: v["taken"], buckets, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
 }
 
 const bucket = (v: unknown): Bucket | null =>

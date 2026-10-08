@@ -1,4 +1,4 @@
-//! The `objects` domain: object records in TessariDB, small objects inline and larger ones in data files.
+//! The `objects` domain: object records in TessariDB, every object's bytes in data files (ADR-0008).
 
 mod entity;
 mod model;

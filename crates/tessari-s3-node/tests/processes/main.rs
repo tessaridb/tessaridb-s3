@@ -43,7 +43,7 @@ fn meta_from_env() -> Meta {
     }
 }
 
-/// 300 KiB: past the inline size, inside one stripe.
+/// 300 KiB: inside one stripe.
 fn large() -> Vec<u8> {
     (0..300 * 1024_u32)
         .map(|i| u8::try_from(i % 251).expect("small"))

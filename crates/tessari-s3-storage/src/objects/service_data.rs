@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::ObjectService;
-use crate::data::{DataFiles, hex};
+use crate::data::hex;
 use crate::objects::ObjectReader;
 use crate::objects::model::{HealBacklog, Healed, Reclaimed};
 use crate::objects::repository::ObjectRepository;
@@ -12,15 +12,11 @@ use crate::objects::upload::Upload;
 use crate::{Error, Result};
 
 impl ObjectService {
-    fn files(&self) -> Result<&DataFiles> {
-        self.data.as_ref().ok_or(Error::NoDataDirectory)
-    }
-
     /// Starts writing `size` bytes under a new data id: the id is queued for reclamation first (on a cluster member
     /// with its layout), then the file or the shards are created.
     ///
     /// # Errors
-    /// [`Error::NoDataDirectory`], [`Error::NoLayout`], the metadata store's refusal or outage, or the drive's.
+    /// [`Error::NoLayout`], the metadata store's refusal or outage, or the drive's.
     pub async fn upload(&self, size: u64) -> Result<Upload> {
         let id = *uuid::Uuid::new_v4().as_bytes();
         if let Some(writes) = &self.erasure {
@@ -32,9 +28,8 @@ impl ObjectService {
                 }
             };
         }
-        let files = self.files()?;
         self.repository.queue(id).await?;
-        match files.create(id).await {
+        match self.data.create(id).await {
             Ok(writer) => Ok(Upload::new(id, writer)),
             Err(error) => {
                 self.release_logged(id).await;
@@ -43,16 +38,12 @@ impl ObjectService {
         }
     }
 
-    /// Removes the temporary files of writes a crash cut short, and answers how many; a node without a data
-    /// directory holds none.
+    /// Removes the temporary files of writes a crash cut short, and answers how many.
     ///
     /// # Errors
     /// The drive's refusal.
     pub async fn recover(&self) -> Result<usize> {
-        match &self.data {
-            Some(files) => files.recover().await,
-            None => Ok(0),
-        }
+        self.data.recover().await
     }
 
     /// Removes data `id`'s bytes and then its queue entry; a failure leaves the entry for the reclaimer.
@@ -71,7 +62,7 @@ impl ObjectService {
         {
             return writes.remove(id, layout).await;
         }
-        self.files()?.remove(id).await
+        self.data.remove(id).await
     }
 
     /// Whether data `id` is still queued and unclaimed, so a commit could still take it.
@@ -152,7 +143,7 @@ impl ObjectService {
     /// Opens data `id` holding an object of `size` bytes, its header and length checked.
     ///
     /// # Errors
-    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] (also when a committed object's data is missing — on a cluster
+    /// [`Error::Corrupt`] (also when a committed object's data is missing — on a cluster
     /// member that includes a forgotten shard set) or the drive's failure; for erasure-coded data the store's refusal
     /// or a layout this node does not hold, and per block [`Error::Unreadable`].
     pub async fn open(&self, id: [u8; 16], size: u64) -> Result<ObjectReader> {
@@ -161,7 +152,7 @@ impl ObjectService {
         {
             return Ok(ObjectReader::Erasure(reader));
         }
-        match self.files()?.open(id, size).await {
+        match self.data.open(id, size).await {
             Ok(reader) => Ok(ObjectReader::File(reader)),
             // Only committed objects are opened here, so missing data is loss, never absence.
             Err(Error::DataIo {

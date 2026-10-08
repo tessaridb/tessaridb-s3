@@ -69,7 +69,7 @@ async fn a_bucket_from_before_spaces_moves_into_the_default_space() {
     let _why = IGNORED;
     // A namespace as an earlier release left it: the bucket table without `space_name`, and one bucket in it. Once the
     // current schema declares the field, its default fills every new write, so the record must exist first.
-    let config = live_config(test_node(), None, None);
+    let config = live_config(test_node(), None, &crate::scratch_dir());
     let pool = MetaPool::new(config.meta.clone()).expect("pool");
     let (namespace, database) = pool.scope();
     let replication = pool.replication().clause();

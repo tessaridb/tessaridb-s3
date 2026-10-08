@@ -17,7 +17,6 @@ pub(crate) struct BucketUsageEntity {
     pub(crate) bucket: String,
     pub(crate) objects: i64,
     pub(crate) bytes: i64,
-    pub(crate) inline_bytes: i64,
     pub(crate) raw_bytes: i64,
 }
 
@@ -44,7 +43,6 @@ impl BucketUsageEntity {
             bucket,
             objects: integer("objects")?,
             bytes: integer("bytes")?,
-            inline_bytes: later("inline_bytes")?,
             raw_bytes: later("raw_bytes")?,
         })
     }
@@ -61,10 +59,6 @@ impl BucketUsageEntity {
                 (
                     "bytes".to_owned(),
                     Value::Number(Number::Integer(self.bytes)),
-                ),
-                (
-                    "inline_bytes".to_owned(),
-                    Value::Number(Number::Integer(self.inline_bytes)),
                 ),
                 (
                     "raw_bytes".to_owned(),

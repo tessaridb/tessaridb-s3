@@ -24,14 +24,14 @@ mod list;
 #[derive(Clone)]
 pub struct ObjectService {
     repository: TessariObjects,
-    data: Option<DataFiles>,
+    data: DataFiles,
     erasure: Option<Arc<ErasureWrites>>,
 }
 
 impl ObjectService {
-    /// The service over `repository`, with data files in `data` when a data directory is configured.
+    /// The service over `repository`, with data files in `data`.
     #[must_use]
-    pub(crate) const fn new(repository: TessariObjects, data: Option<DataFiles>) -> Self {
+    pub(crate) const fn new(repository: TessariObjects, data: DataFiles) -> Self {
         Self {
             repository,
             data,
@@ -44,12 +44,6 @@ impl ObjectService {
     pub(crate) fn clustered(mut self, writes: Arc<ErasureWrites>) -> Self {
         self.erasure = Some(writes);
         self
-    }
-
-    /// Whether objects above the inline size can be stored.
-    #[must_use]
-    pub fn stores_data(&self) -> bool {
-        self.data.is_some() || self.erasure.is_some()
     }
 
     /// Commits `object` at `bucket/key` under `condition`. A data object whose write is refused releases its file;

@@ -40,9 +40,8 @@ fn fake(holder: &'static str) -> Fake {
                 bucket: "photos".to_owned(),
                 objects: 3,
                 bytes: 30,
-                inline_bytes: 30,
-                data_bytes: 0,
-                data_stripes: 0,
+                data_bytes: 30,
+                data_stripes: 1,
             }],
             ..Measured::default()
         },
@@ -66,8 +65,7 @@ async fn the_claim_holder_measures_and_stores() {
             bucket: "photos".to_owned(),
             objects: 3,
             bytes: 30,
-            inline_bytes: 30,
-            raw_bytes: 0,
+            raw_bytes: 30,
         }])
     );
 }

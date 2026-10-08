@@ -39,11 +39,11 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// The services over `pool`, with data files under `data_dir` when one is configured. Nothing is dialled or
-    /// created until the first call.
+    /// The services over `pool`, with every object's bytes under `data_dir`. Nothing is dialled or created until the
+    /// first call.
     #[must_use]
-    pub fn new(pool: MetaPool, data_dir: Option<PathBuf>) -> Self {
-        let data = data_dir.map(|root| DataFiles::new(root, DATA_BLOCK_SIZE));
+    pub fn new(pool: MetaPool, data_dir: PathBuf) -> Self {
+        let data = DataFiles::new(data_dir, DATA_BLOCK_SIZE);
         let shards = ShardService::new(data.clone());
         let objects = ObjectService::new(TessariObjects::new(pool.clone()), data);
         let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
@@ -66,11 +66,7 @@ impl Storage {
     ///
     /// # Errors
     /// [`crate::Error::Peer`] when the peer client cannot be built.
-    pub fn clustered(
-        pool: MetaPool,
-        data_dir: Option<PathBuf>,
-        cluster: &ClusterSettings,
-    ) -> Result<Self> {
+    pub fn clustered(pool: MetaPool, data_dir: PathBuf, cluster: &ClusterSettings) -> Result<Self> {
         let mut storage = Self::new(pool.clone(), data_dir);
         let peers = RemoteShards::new(
             cluster.node.clone(),

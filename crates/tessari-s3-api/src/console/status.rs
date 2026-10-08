@@ -84,7 +84,7 @@ pub(super) async fn status(
         }));
     }
     let storage = state.storage();
-    let drive = storage.shards().drive().await?;
+    let drive = Some(storage.shards().drive().await?);
     let members = match state.node() {
         Some(this) => Some(
             stream::iter(storage.cluster().members().await?)

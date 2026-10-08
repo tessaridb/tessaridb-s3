@@ -80,7 +80,8 @@ pub(super) async fn download(
     let last = object.size.saturating_sub(1);
     // The first block is read and verified here, so damage there is an error answer rather than a short body.
     let content = match &object.content {
-        Content::Inline(bytes) => Body::from(bytes.clone()),
+        // An empty object has no byte to read back.
+        _ if object.size == 0 => Body::empty(),
         Content::Data(id) => body::send(objects, *id, object.size, 0, last)
             .await
             .map_err(|error| failed(&error))?,

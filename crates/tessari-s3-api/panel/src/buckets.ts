@@ -73,7 +73,7 @@ function figures(usage: Answer<Usage>, bucket: Bucket): BucketUsage | null {
   if (!usage.ok || usage.value.taken === null || usage.value.taken < bucket.created) {
     return null;
   }
-  return usage.value.buckets.find((entry) => entry.bucket === bucket.name) ?? { bucket: bucket.name, objects: 0, bytes: 0, inline_bytes: 0, raw_bytes: 0 };
+  return usage.value.buckets.find((entry) => entry.bucket === bucket.name) ?? { bucket: bucket.name, objects: 0, bytes: 0, raw_bytes: 0 };
 }
 
 const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, text);

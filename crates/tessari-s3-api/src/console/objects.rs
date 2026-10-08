@@ -161,7 +161,7 @@ pub(super) async fn detail(
     };
     let parts = match &object.content {
         Content::Parts(multipart) => Some(multipart.parts.len()),
-        Content::Inline(_) | Content::Data(_) => None,
+        Content::Data(_) => None,
     };
     Ok(Json(Detail {
         key: key.as_str().to_owned(),

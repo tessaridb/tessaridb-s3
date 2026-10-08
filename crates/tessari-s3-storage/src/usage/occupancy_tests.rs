@@ -4,12 +4,11 @@ use super::occupancy::{Geometry, ObjectFold, Occupancy, PartFold, occupancy};
 
 const MIB: u64 = 1 << 20;
 
-fn fold(bucket: &str, inline_bytes: u64, data_bytes: u64, data_stripes: u64) -> ObjectFold {
+fn fold(bucket: &str, data_bytes: u64, data_stripes: u64) -> ObjectFold {
     ObjectFold {
         bucket: bucket.to_owned(),
         objects: 2,
-        bytes: inline_bytes.saturating_add(data_bytes),
-        inline_bytes,
+        bytes: data_bytes,
         data_bytes,
         data_stripes,
     }
@@ -30,7 +29,7 @@ fn owners() -> BTreeMap<[u8; 16], String> {
 #[test]
 fn a_node_on_its_own_holds_its_data_files_as_they_are() {
     let found = occupancy(
-        &[fold("media", 10, 3 * MIB, 3)],
+        &[fold("media", 3 * MIB, 3)],
         &[part(1, 6 * MIB, 6), part(9, MIB, 1)],
         &owners(),
         None,
@@ -40,8 +39,7 @@ fn a_node_on_its_own_holds_its_data_files_as_they_are() {
         vec![Occupancy {
             bucket: "media".to_owned(),
             objects: 2,
-            bytes: 10 + 3 * MIB,
-            inline_bytes: 10,
+            bytes: 3 * MIB,
             raw_bytes: 3 * MIB + 6 * MIB,
         }],
         "a part no upload owns is not counted"
@@ -57,7 +55,7 @@ fn a_cluster_counts_every_stripe_at_its_full_width() {
     };
     let stripe = 6 * 256 * 1024;
     let found = occupancy(
-        &[fold("media", 0, MIB + 1, 2)],
+        &[fold("media", MIB + 1, 2)],
         &[part(1, 5 * MIB, 5), part(2, 1, 1)],
         &owners(),
         Some(geometry),
@@ -69,14 +67,12 @@ fn a_cluster_counts_every_stripe_at_its_full_width() {
                 bucket: "media".to_owned(),
                 objects: 2,
                 bytes: MIB + 1,
-                inline_bytes: 0,
                 raw_bytes: 7 * stripe,
             },
             Occupancy {
                 bucket: "open".to_owned(),
                 objects: 0,
                 bytes: 0,
-                inline_bytes: 0,
                 raw_bytes: stripe,
             },
         ],

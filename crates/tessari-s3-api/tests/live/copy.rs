@@ -357,18 +357,19 @@ async fn a_copy_is_refused_by_name_before_it_writes() {
         huge.body
     );
     // A source whose bytes no longer match its stored whole-object checksum is not copied.
+    assert_eq!(
+        call(&state, "PUT", "/cpr/bent", vec![], b"abc")
+            .await
+            .status,
+        200
+    );
     planter
         .run(
-            "CREATE objects:'cpr/bent' = { bucket_name: 'cpr', key: 'bent', incarnation: $i, size: 3, \
-             etag: '\"e\"', modified: time::now(), headers: {}, metadata: {}, \
-             checksums: { CRC64NVME: 'AAAAAAAAAAA=' }, inline: $bytes };",
-            vec![
-                ("i".to_owned(), incarnation_value(&planter).await),
-                ("bytes".to_owned(), Value::Bytes(b"abc".to_vec())),
-            ],
+            "UPDATE objects:'cpr/bent' SET checksums = { CRC64NVME: 'AAAAAAAAAAA=' };",
+            vec![],
         )
         .await
-        .expect("plant");
+        .expect("bend the stored checksum");
     let bent = call_with(
         &state,
         "PUT",

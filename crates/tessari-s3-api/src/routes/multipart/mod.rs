@@ -143,12 +143,6 @@ pub(crate) async fn upload_part(
         ));
     }
     let storage = call.state.storage();
-    if !storage.objects().stores_data() {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "multipart uploads need a data directory (TESSARIDB_S3_DATA_DIR)",
-        ));
-    }
     let bucket = call.bucket()?;
     // Refuse before reading the body: a part for no upload is never written to a drive.
     if !storage.multipart().exists(bucket, key, id).await? {

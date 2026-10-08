@@ -115,7 +115,6 @@ impl ObjectRepository for TessariObjects {
         // `supersede` event queues whatever data the record held before, in the same transaction. The write's answer
         // follows `BEGIN`.
         let (script, answer_at) = match &object.content {
-            Content::Inline(_) => (statement.to_owned(), 0),
             // A completed upload: the upload must still exist (the `UPDATE` refuses the whole transaction once an
             // abort or another completion took it), the unlisted parts go (their event queues their files), and the
             // upload ends — all in the commit that makes the object visible.

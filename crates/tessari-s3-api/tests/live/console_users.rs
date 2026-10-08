@@ -17,7 +17,7 @@ use tessari_s3_storage::users::{NewUser, UserCreated};
 /// A server state and a console over one storage, both timed by a clock the test moves.
 pub(crate) async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
     // A data directory, so this node has a drive the cluster view would show.
-    let config = live_config(test_node(), None, Some(&scratch_dir()));
+    let config = live_config(test_node(), None, &scratch_dir());
     let storage = prepared(&config).await;
     let now = Arc::new(AtomicI64::new(ApiState::system_clock()()));
     let read = Arc::clone(&now);

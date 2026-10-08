@@ -9,14 +9,13 @@ use crate::console::{send, sign_in};
 use crate::multipart;
 use crate::{IGNORED, call, fresh, fresh_console};
 
-/// A bucket's figures when every object is small enough to be held inline: nothing on the drives.
+/// A bucket's figures on a node on its own: every object byte is a data file on the drive, held as it is.
 fn figures(bucket: &str, objects: u64, bytes: u64) -> BucketUsage {
     BucketUsage {
         bucket: bucket.to_owned(),
         objects,
         bytes,
-        inline_bytes: bytes,
-        raw_bytes: 0,
+        raw_bytes: bytes,
     }
 }
 
@@ -86,7 +85,7 @@ async fn the_console_reports_the_last_measurement_and_this_nodes_drive() {
     assert_eq!(before.status, 200);
     assert_eq!(
         before.json(),
-        json!({"taken": null, "buckets": [], "objects": 0, "bytes": 0, "inline_bytes": 0, "raw_bytes": 0}),
+        json!({"taken": null, "buckets": [], "objects": 0, "bytes": 0, "raw_bytes": 0}),
         "nothing measured yet"
     );
     assert_eq!(call(&state, "PUT", "/media", vec![], b"").await.status, 200);
@@ -109,15 +108,13 @@ async fn the_console_reports_the_last_measurement_and_this_nodes_drive() {
             &body["buckets"],
             &body["objects"],
             &body["bytes"],
-            &body["inline_bytes"],
             &body["raw_bytes"]
         ),
         (
-            &json!([{"bucket": "media", "objects": 1, "bytes": 10, "inline_bytes": 10, "raw_bytes": 0}]),
+            &json!([{"bucket": "media", "objects": 1, "bytes": 10, "raw_bytes": 10}]),
             &json!(1),
             &json!(10),
-            &json!(10),
-            &json!(0)
+            &json!(10)
         )
     );
     assert!(
@@ -127,16 +124,16 @@ async fn the_console_reports_the_last_measurement_and_this_nodes_drive() {
         "{body}"
     );
     let status = send(&console, "GET", "/api/v1/status", Some(&token), None).await;
-    assert_eq!(
-        status.json()["drive"],
-        serde_json::Value::Null,
-        "this node has no data directory"
+    assert!(
+        status.json()["drive"].is_object(),
+        "every node has a data drive: {}",
+        status.json()
     );
 }
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn a_pass_counts_inline_bytes_and_the_bytes_on_the_drive() {
+async fn a_pass_counts_every_objects_bytes_on_the_drive() {
     const MIB: usize = 1 << 20;
     let _why = IGNORED;
     let (state, _) = fresh().await;
@@ -200,14 +197,12 @@ async fn a_pass_counts_inline_bytes_and_the_bytes_on_the_drive() {
                 bucket: "media".to_owned(),
                 objects: 3,
                 bytes: to(10 + MIB + 1 + joined),
-                inline_bytes: 10,
-                raw_bytes: to(MIB + 1 + joined),
+                raw_bytes: to(10 + MIB + 1 + joined),
             },
             BucketUsage {
                 bucket: "open".to_owned(),
                 objects: 0,
                 bytes: 0,
-                inline_bytes: 0,
                 raw_bytes: 7,
             },
         ],

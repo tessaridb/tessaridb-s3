@@ -28,6 +28,7 @@ mod large;
 mod listing;
 mod metadata;
 mod multipart;
+mod no_bytes;
 mod objects;
 mod quota;
 mod reclaim;
@@ -65,7 +66,7 @@ pub(crate) const IGNORED: &str =
 /// namespace for a test that must plant a record directly. Large objects go to a fresh data directory that is
 /// created on first use.
 pub(crate) async fn fresh() -> (ApiState, MetaPool) {
-    let (state, planter, _) = fresh_with(Some(scratch_dir())).await;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
     (state, planter)
 }
 
@@ -74,10 +75,10 @@ pub(crate) fn scratch_dir() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("tessari-s3-live-{}", uuid::Uuid::new_v4().simple()))
 }
 
-/// As [`fresh`], with the data directory chosen by the caller (`None`: not configured), which it gets back.
+/// As [`fresh`], with the data directory chosen by the caller, which it gets back.
 pub(crate) async fn fresh_with(
-    data_dir: Option<std::path::PathBuf>,
-) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
+    data_dir: std::path::PathBuf,
+) -> (ApiState, MetaPool, std::path::PathBuf) {
     fresh_at(test_node(), None, data_dir).await
 }
 
@@ -94,9 +95,9 @@ fn need(key: &str) -> String {
 pub(crate) async fn fresh_at(
     meta_addresses: String,
     replication: Option<&str>,
-    data_dir: Option<std::path::PathBuf>,
-) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
-    let config = live_config(meta_addresses, replication, data_dir.as_ref());
+    data_dir: std::path::PathBuf,
+) -> (ApiState, MetaPool, std::path::PathBuf) {
+    let config = live_config(meta_addresses, replication, &data_dir);
     let storage = prepared(&config).await;
     let planter = MetaPool::new(config.meta.clone()).expect("pool");
     (
@@ -106,10 +107,10 @@ pub(crate) async fn fresh_at(
     )
 }
 
-/// A server state and a console state over ONE storage in a fresh namespace on the test node, with no data
-/// directory: what an operator does through the console is what an S3 client then sees.
+/// A server state and a console state over ONE storage in a fresh namespace on the test node: what an operator does
+/// through the console is what an S3 client then sees.
 pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) {
-    let config = live_config(test_node(), None, None);
+    let config = live_config(test_node(), None, &scratch_dir());
     let storage = prepared(&config).await;
     let console =
         tessari_s3_api::ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
@@ -124,7 +125,7 @@ pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) 
 fn live_config(
     meta_addresses: String,
     replication: Option<&str>,
-    data_dir: Option<&std::path::PathBuf>,
+    data_dir: &std::path::Path,
 ) -> S3Config {
     let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
     let mut vars = vec![
@@ -140,12 +141,7 @@ fn live_config(
             need("TESSARIDB_S3_TEST_META_PASSWORD"),
         ),
         ("TESSARIDB_S3_META_NAMESPACE", namespace),
-        (
-            "TESSARIDB_S3_DATA_DIR",
-            data_dir
-                .map(|dir| dir.display().to_string())
-                .unwrap_or_default(),
-        ),
+        ("TESSARIDB_S3_DATA_DIR", data_dir.display().to_string()),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
         // The live suite's own root key for sealing user access-key secrets; it seals nothing outside the test node.
         ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),

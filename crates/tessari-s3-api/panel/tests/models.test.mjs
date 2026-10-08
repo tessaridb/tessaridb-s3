@@ -27,10 +27,10 @@ test("a drive must carry three byte counts, or be null", () => {
 });
 
 test("usage reads buckets with their figures, and a measurement never taken", () => {
-  const media = { bucket: "media", objects: 2, bytes: 30, inline_bytes: 10, raw_bytes: 60 };
-  const taken = { taken: "2026-10-08T10:00:00.000Z", buckets: [media], objects: 2, bytes: 30, inline_bytes: 10, raw_bytes: 60 };
+  const media = { bucket: "media", objects: 2, bytes: 30, raw_bytes: 60 };
+  const taken = { taken: "2026-10-08T10:00:00.000Z", buckets: [media], objects: 2, bytes: 30, raw_bytes: 60 };
   assert.deepEqual(readUsage(taken), taken);
-  const none = { taken: null, buckets: [], objects: 0, bytes: 0, inline_bytes: 0, raw_bytes: 0 };
+  const none = { taken: null, buckets: [], objects: 0, bytes: 0, raw_bytes: 0 };
   assert.deepEqual(readUsage(none), none);
   assert.equal(readUsage({ ...none, buckets: [{ ...media, objects: "2" }] }), null);
   assert.equal(readUsage({ ...taken, buckets: [{ bucket: "media", objects: 2, bytes: 30 }] }), null, "a bucket without its occupancy");

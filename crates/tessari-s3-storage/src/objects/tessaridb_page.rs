@@ -9,7 +9,7 @@ use super::super::repository::Batch;
 use crate::Result;
 use crate::answers::{first_record, incarnation_of};
 
-/// What a listing reads of each record: no inline bytes.
+/// What a listing reads of each record.
 const LIST_FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, checksums";
 
 /// See `ObjectRepository::page`.

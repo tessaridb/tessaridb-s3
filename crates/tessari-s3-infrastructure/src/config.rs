@@ -35,8 +35,8 @@ pub struct S3Config {
     pub shutdown_grace_secs: u64,
     /// `TESSARIDB_S3_META_*` — the TessariDB node holding every bucket and object record.
     pub meta: MetaSettings,
-    /// `TESSARIDB_S3_DATA_DIR` — where objects above the inline size are stored; unset, they are refused.
-    pub data_dir: Option<std::path::PathBuf>,
+    /// `TESSARIDB_S3_DATA_DIR` — where every object's bytes are stored (required: none are held in the metadata).
+    pub data_dir: std::path::PathBuf,
     /// `TESSARIDB_S3_RECLAIM_GRACE_SECS` — how long a queued data file is kept before it may be removed.
     pub reclaim_grace_secs: u64,
     /// `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` — time between reclamation passes (positive).
@@ -180,7 +180,11 @@ impl S3Config {
                     reason: "too large",
                 })
             })?,
-            data_dir: get("TESSARIDB_S3_DATA_DIR").map(|dir| std::path::PathBuf::from(dir.trim())),
+            data_dir: get("TESSARIDB_S3_DATA_DIR")
+                .map(|dir| std::path::PathBuf::from(dir.trim()))
+                .ok_or(Error::MissingConfig {
+                    key: "TESSARIDB_S3_DATA_DIR",
+                })?,
             listen,
             region,
             domains,

@@ -9,7 +9,7 @@ use crate::{Error, Result};
 /// Shard files under the node's data directory.
 #[derive(Debug, Clone)]
 pub struct ShardService {
-    files: Option<DataFiles>,
+    files: DataFiles,
 }
 
 /// A shard being written; [`ShardWrite::finish`] makes it durable, [`ShardWrite::abandon`] removes what was written.
@@ -20,30 +20,23 @@ pub struct ShardWrite {
 }
 
 impl ShardService {
-    pub(crate) const fn new(files: Option<DataFiles>) -> Self {
+    pub(crate) const fn new(files: DataFiles) -> Self {
         Self { files }
     }
 
-    fn files(&self) -> Result<&DataFiles> {
-        self.files.as_ref().ok_or(Error::NoDataDirectory)
-    }
-
-    /// The space of this node's data drive; `None` on a node without a data directory.
+    /// The space of this node's data drive.
     ///
     /// # Errors
     /// The operating system's refusal to report it.
-    pub async fn drive(&self) -> Result<Option<DriveSpace>> {
-        match &self.files {
-            Some(files) => files.drive().await.map(Some),
-            None => Ok(None),
-        }
+    pub async fn drive(&self) -> Result<DriveSpace> {
+        self.files.drive().await
     }
 
     /// Starts shard `index` of data `id`: `size` bytes in blocks of `block_size`.
     ///
     /// # Errors
     /// [`Error::InvalidShard`] for a block size of zero or past [`DATA_BLOCK_SIZE`] or an index past the widest
-    /// code, [`Error::NoDataDirectory`], or the drive's failure (a shard already being written is `AlreadyExists`).
+    /// code, or the drive's failure (a shard already being written is `AlreadyExists`).
     pub async fn write(
         &self,
         id: [u8; 16],
@@ -57,7 +50,7 @@ impl ShardService {
                 reason: "block size of zero or past a data block",
             });
         }
-        let writer = self.files()?.create_shard(id, index, block_size).await?;
+        let writer = self.files.create_shard(id, index, block_size).await?;
         Ok(ShardWrite {
             writer,
             declared: size,
@@ -68,11 +61,11 @@ impl ShardService {
     /// Opens shard `index` of data `id`, which must hold `size` bytes; every block is verified as it is read.
     ///
     /// # Errors
-    /// [`Error::InvalidShard`], [`Error::NoDataDirectory`], [`Error::Corrupt`] or the drive's failure (a missing
+    /// [`Error::InvalidShard`], [`Error::Corrupt`] or the drive's failure (a missing
     /// shard is `NotFound`).
     pub async fn open(&self, id: [u8; 16], index: u16, size: u64) -> Result<DataReader> {
         check_index(index)?;
-        self.files()?.open_shard(id, index, size).await
+        self.files.open_shard(id, index, size).await
     }
 
     /// Up to `limit` shards on this node last written more than `age` ago, as (data id, index); none without a data
@@ -85,19 +78,16 @@ impl ShardService {
         age: std::time::Duration,
         limit: usize,
     ) -> Result<Vec<([u8; 16], u16)>> {
-        match &self.files {
-            Some(files) => files.shards_older_than(age, limit).await,
-            None => Ok(Vec::new()),
-        }
+        self.files.shards_older_than(age, limit).await
     }
 
     /// Removes shard `index` of data `id`; a missing shard is not an error.
     ///
     /// # Errors
-    /// [`Error::InvalidShard`], [`Error::NoDataDirectory`] or the drive's failure.
+    /// [`Error::InvalidShard`] or the drive's failure.
     pub async fn remove(&self, id: [u8; 16], index: u16) -> Result<()> {
         check_index(index)?;
-        self.files()?.remove_shard(id, index).await
+        self.files.remove_shard(id, index).await
     }
 }
 

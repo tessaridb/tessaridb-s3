@@ -106,7 +106,6 @@ fn entity(figures: Occupancy) -> Result<BucketUsageEntity> {
     Ok(BucketUsageEntity {
         objects: stored(figures.objects, "objects")?,
         bytes: stored(figures.bytes, "bytes")?,
-        inline_bytes: stored(figures.inline_bytes, "inline_bytes")?,
         raw_bytes: stored(figures.raw_bytes, "raw_bytes")?,
         bucket: figures.bucket,
     })

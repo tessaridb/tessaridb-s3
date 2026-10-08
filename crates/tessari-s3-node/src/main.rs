@@ -53,14 +53,12 @@ async fn main() -> anyhow::Result<()> {
     }
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut daemons = JoinSet::new();
-    if storage.objects().stores_data() {
-        let reclaimer = Reclaimer::new(
-            storage.objects().clone(),
-            config.reclaim_grace_secs,
-            Duration::from_secs(config.reclaim_interval_secs),
-        );
-        daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
-    }
+    let reclaimer = Reclaimer::new(
+        storage.objects().clone(),
+        config.reclaim_grace_secs,
+        Duration::from_secs(config.reclaim_interval_secs),
+    );
+    daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
     if let Some(cluster) = &config.cluster {
         let healer = Healer::new(
             storage.objects().clone(),

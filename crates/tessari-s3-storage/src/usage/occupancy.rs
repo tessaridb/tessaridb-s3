@@ -1,5 +1,5 @@
-//! Real occupancy: from what one usage pass read, each bucket's bytes held in the metadata store (inline objects)
-//! and on the drives (data files, with erasure overhead on a cluster). Pure: everything it reads is in its arguments.
+//! Real occupancy: from what one usage pass read, each bucket's bytes on the drives (data files, with erasure overhead
+//! on a cluster) — every object byte is there, none in the metadata (ADR-0008). Pure: everything it reads is in its arguments.
 
 use std::collections::BTreeMap;
 
@@ -10,8 +10,6 @@ pub(crate) struct ObjectFold {
     pub(crate) objects: u64,
     /// Logical bytes of every object.
     pub(crate) bytes: u64,
-    /// Bytes of the objects held inline, in the metadata.
-    pub(crate) inline_bytes: u64,
     /// Bytes of the single-part objects held in data files.
     pub(crate) data_bytes: u64,
     /// Stripes those data files are cut into, summed over files.
@@ -50,7 +48,6 @@ pub(crate) struct Occupancy {
     pub(crate) bucket: String,
     pub(crate) objects: u64,
     pub(crate) bytes: u64,
-    pub(crate) inline_bytes: u64,
     pub(crate) raw_bytes: u64,
 }
 
@@ -78,7 +75,6 @@ pub(crate) fn occupancy(
                 bucket: fold.bucket.clone(),
                 objects: fold.objects,
                 bytes: fold.bytes,
-                inline_bytes: fold.inline_bytes,
                 raw_bytes: raw(fold.data_bytes, fold.data_stripes),
             },
         );
@@ -91,7 +87,6 @@ pub(crate) fn occupancy(
             bucket: bucket.clone(),
             objects: 0,
             bytes: 0,
-            inline_bytes: 0,
             raw_bytes: 0,
         });
         entry.raw_bytes = entry
