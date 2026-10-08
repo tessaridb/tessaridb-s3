@@ -3,7 +3,8 @@
 //! where its bytes become values, so nothing is cast — each reader returns the
 //! typed value or null.
 
-export type Member = { readonly node: string; readonly endpoint: string; readonly answering: boolean };
+export type Drive = { readonly capacity: number; readonly free: number; readonly available: number };
+export type Member = { readonly node: string; readonly endpoint: string; readonly answering: boolean; readonly drive: Drive | null };
 export type Backlog = { readonly listed: number; readonly more: boolean };
 export type Status = {
   readonly version: string;
@@ -12,6 +13,14 @@ export type Status = {
   readonly erasure: string | null;
   readonly members: readonly Member[] | null;
   readonly heal_backlog: Backlog | null;
+  readonly drive: Drive | null;
+};
+export type BucketUsage = { readonly bucket: string; readonly objects: number; readonly bytes: number };
+export type Usage = {
+  readonly taken: string | null;
+  readonly buckets: readonly BucketUsage[];
+  readonly objects: number;
+  readonly bytes: number;
 };
 export type Bucket = { readonly name: string; readonly created: string; readonly region: string };
 export type ObjectRow = { readonly key: string; readonly size: number; readonly etag: string; readonly modified: string };
@@ -76,10 +85,23 @@ function strings(value: unknown): Record<string, string> | null {
   return out;
 }
 
-const member = (v: unknown): Member | null =>
-  record(v) && text(v["node"]) && text(v["endpoint"]) && typeof v["answering"] === "boolean"
-    ? { node: v["node"], endpoint: v["endpoint"], answering: v["answering"] }
-    : null;
+/** A drive, null for an explicit null, and undefined for anything else. */
+function drive(v: unknown): Drive | null | undefined {
+  if (v === null) {
+    return null;
+  }
+  return record(v) && count(v["capacity"]) && count(v["free"]) && count(v["available"])
+    ? { capacity: v["capacity"], free: v["free"], available: v["available"] }
+    : undefined;
+}
+
+function member(v: unknown): Member | null {
+  if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || typeof v["answering"] !== "boolean") {
+    return null;
+  }
+  const space = drive(v["drive"]);
+  return space === undefined ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space };
+}
 
 export function readStatus(v: unknown): Status | null {
   if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
@@ -91,10 +113,24 @@ export function readStatus(v: unknown): Status | null {
     backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean"
       ? { listed: backlog["listed"], more: backlog["more"] }
       : undefined;
-  if ((v["members"] !== null && members === null) || heal === undefined) {
+  const space = drive(v["drive"]);
+  if ((v["members"] !== null && members === null) || heal === undefined || space === undefined) {
     return null;
   }
-  return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal };
+  return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space };
+}
+
+const bucketUsage = (v: unknown): BucketUsage | null =>
+  record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"])
+    ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"] }
+    : null;
+
+export function readUsage(v: unknown): Usage | null {
+  if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"])) {
+    return null;
+  }
+  const buckets = list(v["buckets"], bucketUsage);
+  return buckets === null ? null : { taken: v["taken"], buckets, objects: v["objects"], bytes: v["bytes"] };
 }
 
 const bucket = (v: unknown): Bucket | null =>

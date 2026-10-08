@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Storage usage: every node measures how many objects and how many bytes each bucket holds every
+  `TESSARIDB_S3_USAGE_INTERVAL_SECS` (default 60); an expiring claim in TessariDB lets one member measure per pass.
+  The console shows the totals with the time they were taken, each bucket's objects and size, and the space of every
+  member's data drive (capacity, free, available) with a bar that turns amber at 80 % and red at 95 %.
 - Shards between nodes (second part of the erasure-coded data plane): a cluster member serves an internal shard
   surface on `TESSARIDB_S3_INTERNAL_LISTEN` where other nodes store, read (whole or by block range) and remove its
   shards. Each request is signed with the cluster secret and refused otherwise; a shard is kept only at exactly the

@@ -64,6 +64,12 @@ pub const INTERNAL_SHARDS_PATH: &str = "/internal/v1/shards";
 /// The internal route a node answers with 204 when the cluster asks whether it is up.
 pub const INTERNAL_HEALTH_PATH: &str = "/internal/v1/health";
 
+/// The internal route a node answers with its data drive's space.
+pub const INTERNAL_DRIVE_PATH: &str = "/internal/v1/drive";
+
+/// Largest drive answer read from a peer: three 20-digit numbers and two spaces.
+pub const INTERNAL_DRIVE_BODY_MAX: usize = 64;
+
 /// The header naming the node that sent an internal request.
 pub const INTERNAL_NODE_HEADER: &str = "x-tessari-node";
 
@@ -188,6 +194,14 @@ pub const HEAL_BATCH: usize = 100;
 /// verified shard is never rewritten and a second writer of one shard is refused. It is also how long a node that
 /// died holding a claim, and does not come back, keeps the others off that id.
 pub const HEAL_CLAIM_SECS: u64 = 120;
+
+/// How long a member's claim on the usage pass lasts. Longer than the default interval between passes, so the member
+/// that measured keeps measuring; when it stops, another member takes the pass once the claim lapses.
+pub const USAGE_CLAIM_SECS: u64 = 180;
+
+/// Default time between usage passes (`TESSARIDB_S3_USAGE_INTERVAL_SECS`). A pass reads every object record, so the
+/// figures the console shows are at most this old.
+pub const DEFAULT_USAGE_INTERVAL_SECS: u64 = 60;
 
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;

@@ -126,7 +126,7 @@ async fn sign_in(state: &ConsoleState) -> String {
 }
 
 /// Every route that needs a session, as (method, path).
-const PROTECTED: [(&str, &str); 12] = [
+const PROTECTED: [(&str, &str); 13] = [
     ("GET", "/api/v1/status"),
     ("DELETE", "/api/v1/session"),
     ("GET", "/api/v1/buckets"),
@@ -137,6 +137,7 @@ const PROTECTED: [(&str, &str); 12] = [
     ("DELETE", "/api/v1/buckets/bkt/object?key=k"),
     ("GET", "/api/v1/buckets/bkt/object/content?key=k"),
     ("GET", "/api/v1/actions"),
+    ("GET", "/api/v1/usage"),
     ("PUT", "/api/v1/buckets"),
     ("GET", "/api/v1/not-a-route"),
 ];

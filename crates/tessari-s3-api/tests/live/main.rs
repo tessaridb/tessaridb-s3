@@ -30,6 +30,7 @@ mod reclaim;
 )]
 mod signer;
 mod uploads;
+mod usage;
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;

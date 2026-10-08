@@ -14,7 +14,7 @@ pub use serve::serve_internal;
 use std::sync::Arc;
 
 use axum::routing::{get, put};
-use tessari_s3_constants::{INTERNAL_HEALTH_PATH, INTERNAL_SHARDS_PATH};
+use tessari_s3_constants::{INTERNAL_DRIVE_PATH, INTERNAL_HEALTH_PATH, INTERNAL_SHARDS_PATH};
 use tessari_s3_storage::Storage;
 use tessari_s3_types::SecretKey;
 
@@ -69,6 +69,7 @@ pub fn internal_router(state: InternalState) -> axum::Router {
     let route = format!("{INTERNAL_SHARDS_PATH}/{{id}}/{{index}}");
     axum::Router::new()
         .route(INTERNAL_HEALTH_PATH, get(answer))
+        .route(INTERNAL_DRIVE_PATH, get(drive))
         .route(
             &route,
             put(shards::put_shard)
@@ -87,4 +88,15 @@ pub fn internal_router(state: InternalState) -> axum::Router {
 /// one is up and shares its cluster secret, and tells anyone else nothing.
 async fn answer() -> axum::http::StatusCode {
     axum::http::StatusCode::NO_CONTENT
+}
+
+/// `GET {INTERNAL_DRIVE_PATH}`: this node's data drive space in the drive form, for the console of whichever member an
+/// operator signed in to; `404` on a node without a data directory.
+async fn drive(
+    axum::extract::State(state): axum::extract::State<InternalState>,
+) -> Result<String, refusal::Refusal> {
+    match state.storage().shards().drive().await? {
+        Some(space) => Ok(space.to_wire()),
+        None => Err(refusal::Refusal::NoDrive),
+    }
 }

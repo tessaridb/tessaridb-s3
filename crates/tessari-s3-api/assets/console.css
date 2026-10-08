@@ -745,6 +745,52 @@ tr.asking:hover td {
   color: var(--bad);
 }
 
+/* ────────────────────────────────────────────────────────────── gauges ── */
+
+.gauge {
+  display: grid;
+  gap: var(--s-1);
+  min-inline-size: 10rem;
+}
+
+.meter {
+  block-size: 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.meter::before {
+  content: "";
+  display: block;
+  block-size: 100%;
+  inline-size: calc(var(--fill, 0) * 100%);
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.meter.warn::before {
+  background: var(--warn);
+}
+
+.meter.bad::before {
+  background: var(--bad);
+}
+
+.gauge-text {
+  font-size: var(--t-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.gauge-text .muted,
+.tile .value .muted {
+  color: var(--text-muted);
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ────────────────────────────────────────────────────────────── controls ── */
 
 .field {
@@ -914,7 +960,12 @@ body.signed-out main {
   button,
   .button,
   .card,
-  .tile {
+  .tile,
+  .meter {
     border: 1px solid CanvasText;
+  }
+
+  .meter::before {
+    background: Highlight;
   }
 }

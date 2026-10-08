@@ -13,6 +13,7 @@ mod objects;
 mod page;
 mod session;
 mod status;
+mod usage;
 
 use std::sync::Arc;
 
@@ -148,6 +149,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
             get(content::download),
         )
         .route("/api/v1/actions", get(actions::list))
+        .route("/api/v1/usage", get(usage::usage))
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()

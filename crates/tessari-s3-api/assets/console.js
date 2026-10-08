@@ -37,7 +37,19 @@
     }
     return out;
   }
-  var member = (v) => record(v) && text(v["node"]) && text(v["endpoint"]) && typeof v["answering"] === "boolean" ? { node: v["node"], endpoint: v["endpoint"], answering: v["answering"] } : null;
+  function drive(v) {
+    if (v === null) {
+      return null;
+    }
+    return record(v) && count(v["capacity"]) && count(v["free"]) && count(v["available"]) ? { capacity: v["capacity"], free: v["free"], available: v["available"] } : void 0;
+  }
+  function member(v) {
+    if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || typeof v["answering"] !== "boolean") {
+      return null;
+    }
+    const space = drive(v["drive"]);
+    return space === void 0 ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space };
+  }
   function readStatus(v) {
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
       return null;
@@ -45,10 +57,19 @@
     const members = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
     const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" ? { listed: backlog["listed"], more: backlog["more"] } : void 0;
-    if (v["members"] !== null && members === null || heal === void 0) {
+    const space = drive(v["drive"]);
+    if (v["members"] !== null && members === null || heal === void 0 || space === void 0) {
       return null;
     }
-    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal };
+    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space };
+  }
+  var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"] } : null;
+  function readUsage(v) {
+    if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"])) {
+      return null;
+    }
+    const buckets2 = list(v["buckets"], bucketUsage);
+    return buckets2 === null ? null : { taken: v["taken"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"] };
   }
   var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) ? { name: v["name"], created: v["created"], region: v["region"] } : null;
   function readBuckets(v) {
@@ -217,6 +238,9 @@
     const at2 = new Date(iso);
     return Number.isNaN(at2.getTime()) ? iso : stamp.format(at2);
   }
+  var percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
+  var share = (part, whole2) => percent.format(whole2 === 0 ? 0 : part / whole2);
+  var amount = (value) => value.toLocaleString();
 
   // src/route.ts
   //! The console's views as hash routes, so every view is a URL an operator can
@@ -437,7 +461,8 @@
     members: [ring(6, 7, 2.5), ring(18, 7, 2.5), ring(12, 18, 2.5), "M8.5 7h7", "M7.3 9.2l3.4 6.6", "M16.7 9.2l-3.4 6.6"],
     layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
     pulse: ["M3 12h4l3-7 4 14 3-7h4"],
-    back: ["M14.5 6l-6 6 6 6"]
+    back: ["M14.5 6l-6 6 6 6"],
+    disk: [box(3, 5, 18, 14, 2.5), "M3 13h18", "M16.5 16h.01"]
   };
   function icon(name) {
     const svg = document.createElementNS(SVG, "svg");
@@ -460,8 +485,9 @@
 
   // src/buckets.ts
   //! Buckets: find one (the list is complete, so filtering it here hides nothing
-  //! the server sent), create one from the form the header's button reveals, and
-  //! delete an empty one with a reason.
+  //! the server sent), see how many objects and bytes each holds as last measured,
+  //! create one from the form the header's button reveals, and delete an empty one
+  //! with a reason.
   var TITLE2 = "Buckets";
   function createForm(screen, opener) {
     const name = field("new-bucket", "Bucket name", { spellcheck: "false", autocomplete: "off", required: "" }, "3-63 lowercase letters, digits, dots and hyphens.");
@@ -512,16 +538,26 @@
     });
     return form;
   }
-  function bucketRow(screen, bucket2) {
+  function figures(usage, bucket2) {
+    if (!usage.ok || usage.value.taken === null || usage.value.taken < bucket2.created) {
+      return null;
+    }
+    return usage.value.buckets.find((entry) => entry.bucket === bucket2.name) ?? { bucket: bucket2.name, objects: 0, bytes: 0 };
+  }
+  var numeric = (text2) => el("span", { class: "numeric" }, text2);
+  function bucketRow(screen, bucket2, usage) {
     const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
+    const held = figures(usage, bucket2);
     const line = row(
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
+      numeric(held === null ? "—" : amount(held.objects)),
+      numeric(held === null ? "—" : size(held.bytes)),
       moment(bucket2.created),
       mono(bucket2.region),
       remove
     );
     remove.addEventListener("click", () => {
-      const cell = el("td", { colspan: "4" });
+      const cell = el("td", { colspan: "6" });
       const ask = el("tr", { class: "asking" }, cell);
       const close = () => {
         ask.remove();
@@ -553,9 +589,16 @@
     });
     return line;
   }
+  function measuredLine(count2, usage) {
+    const listed = `${count2.toLocaleString()} on this cluster`;
+    if (!usage.ok) {
+      return `${listed} · sizes could not be read`;
+    }
+    return usage.value.taken === null ? `${listed} · sizes not measured yet` : `${listed} · sizes measured ${moment(usage.value.taken)}`;
+  }
   async function buckets(screen) {
     loading(screen, TITLE2, "buckets");
-    const answer = await call("GET", "/buckets", readBuckets);
+    const [answer, usage] = await Promise.all([call("GET", "/buckets", readBuckets), call("GET", "/usage", readUsage)]);
     if (!answer.ok) {
       failed(screen, TITLE2, answer);
       return;
@@ -574,14 +617,14 @@
       const shown = all2.filter((bucket2) => bucket2.name.includes(wanted));
       fill(
         listed,
-        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2)))
+        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
       );
     };
     filter.input.addEventListener("input", draw2);
     draw2();
     fill(
       screen.main,
-      head(TITLE2, `${all2.length.toLocaleString()} on this cluster`, opener),
+      head(TITLE2, measuredLine(all2.length, usage), opener),
       form,
       el("section", { class: "card flush" }, all2.length === 0 ? null : el("div", { class: "toolbar" }, filter.row), listed)
     );
@@ -786,9 +829,39 @@
     key.input.focus();
   }
 
+  // src/meter.ts
+  //! How full a drive is: a bar on a zero baseline whose length is the used share,
+  //! with the figures beside it in text, so the bar's colour is never the only
+  //! signal. The thresholds turn it amber, then red, before the drive is full.
+  var WARN = 0.8;
+  var CRITICAL = 0.95;
+  var used = (drive2) => Math.max(drive2.capacity - drive2.free, 0);
+  function meter(drive2, label) {
+    const taken = used(drive2);
+    const ratio = drive2.capacity === 0 ? 0 : taken / drive2.capacity;
+    const level = ratio >= CRITICAL ? "bad" : ratio >= WARN ? "warn" : "ok";
+    const bar = el("div", {
+      class: `meter ${level}`,
+      role: "meter",
+      "aria-label": label,
+      "aria-valuemin": "0",
+      "aria-valuemax": String(drive2.capacity),
+      "aria-valuenow": String(taken),
+      "aria-valuetext": `${size(taken)} of ${size(drive2.capacity)} used, ${share(taken, drive2.capacity)}`
+    });
+    bar.style.setProperty("--fill", ratio.toFixed(4));
+    return el(
+      "div",
+      { class: "gauge" },
+      bar,
+      el("span", { class: "gauge-text" }, `${size(taken)} of ${size(drive2.capacity)}`, el("span", { class: "muted" }, ` · ${share(taken, drive2.capacity)}`))
+    );
+  }
+
   // src/status.ts
-  //! The overview: is this node and its cluster healthy, and is anything waiting
-  //! to be healed. Each tile links to where the operator acts on it.
+  //! The overview: is this node and its cluster healthy, how much is stored and
+  //! how full the drives are, and is anything waiting to be healed. Each tile
+  //! links to where the operator acts on it.
   var TITLE4 = "Overview";
   function tile(glyph, label, value, note, href) {
     const parts = [el("span", { class: "label" }, icon(glyph), label), el("span", { class: "value" }, value), el("span", { class: "note" }, note)];
@@ -814,9 +887,43 @@
     const answering = members.filter((member2) => member2.answering).length;
     return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
   }
+  function storedTile(usage) {
+    if (!usage.ok) {
+      return tile("buckets", "Stored", "—", "The usage figures could not be read. Reload to try again.");
+    }
+    const measured = usage.value;
+    if (measured.taken === null) {
+      return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
+    }
+    const objects2 = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
+    return tile("buckets", "Stored", size(measured.bytes), `${objects2} · measured ${moment(measured.taken)}`);
+  }
+  function drives(node) {
+    if (node.members === null) {
+      return node.drive === null ? [] : [node.drive];
+    }
+    return node.members.flatMap((member2) => member2.drive === null ? [] : [member2.drive]);
+  }
+  function diskTile(node) {
+    const read = drives(node);
+    if (read.length === 0) {
+      return tile("disk", "Disk", "—", node.members === null ? "This node stores no data on its own drive." : "No member reported its drive.");
+    }
+    const total = read.reduce(
+      (sum, drive2) => ({ capacity: sum.capacity + drive2.capacity, free: sum.free + drive2.free, available: sum.available + drive2.available }),
+      { capacity: 0, free: 0, available: 0 }
+    );
+    const scope = node.members === null ? "This node's data drive" : `Raw space on ${read.length} of ${node.members.length} members`;
+    return tile(
+      "disk",
+      "Disk",
+      el("span", {}, share(used(total), total.capacity), el("span", { class: "muted" }, " used")),
+      el("span", { class: "gauge" }, meter(total, "Disk space used"), el("span", {}, `${scope} · ${size(total.free)} free`))
+    );
+  }
   async function status(screen) {
     loading(screen, TITLE4, "the node's status");
-    const answer = await call("GET", "/status", readStatus);
+    const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
     if (!answer.ok) {
       failed(screen, TITLE4, answer);
       return;
@@ -825,7 +932,13 @@
       return;
     }
     const node = answer.value;
-    const members = node.members === null ? null : node.members.length === 0 ? empty("No members are registered yet.") : table("Cluster members", ["Member", "State", "Internal address"], node.members.map((member2) => row(mono(member2.node), state(member2), mono(member2.endpoint))));
+    const members = node.members === null ? null : node.members.length === 0 ? empty("No members are registered yet.") : table(
+      "Cluster members",
+      ["Member", "State", "Disk", "Internal address"],
+      node.members.map(
+        (member2) => row(mono(member2.node), state(member2), member2.drive === null ? "—" : meter(member2.drive, `Disk space used on ${member2.node}`), mono(member2.endpoint))
+      )
+    );
     fill(
       screen.main,
       head(TITLE4, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -836,6 +949,8 @@
         membersTile(node.members),
         tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
         healing(node.heal_backlog),
+        storedTile(usage),
+        diskTile(node),
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
         tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
       ),

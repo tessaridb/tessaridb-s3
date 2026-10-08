@@ -1,5 +1,6 @@
-//! `GET /api/v1/status`: what this node is — its name in the cluster, the build, the region it signs for — and, on a
-//! cluster member, the registered members with whether each answers now, and how many objects wait for healing.
+//! `GET /api/v1/status`: what this node is — its name in the cluster, the build, the region it signs for, the space of
+//! its data drive — and, on a cluster member, the registered members with whether each answers now and its drive's
+//! space, and how many objects wait for healing.
 
 use std::time::Duration;
 
@@ -11,9 +12,28 @@ use tessari_s3_constants::{
     CONSOLE_BACKLOG_COUNT_MAX, CONSOLE_MEMBER_PROBE_SECS, ERASURE_MAX_WIDTH,
 };
 use tessari_s3_storage::cluster::Member;
+use tessari_s3_storage::data::DriveSpace;
 
 use super::ConsoleState;
 use super::error::ConsoleError;
+
+/// A data drive's space in bytes.
+#[derive(Serialize)]
+struct DriveView {
+    capacity: u64,
+    free: u64,
+    available: u64,
+}
+
+impl From<DriveSpace> for DriveView {
+    fn from(space: DriveSpace) -> Self {
+        Self {
+            capacity: space.capacity,
+            free: space.free,
+            available: space.available,
+        }
+    }
+}
 
 #[derive(Serialize)]
 struct MemberView {
@@ -21,6 +41,8 @@ struct MemberView {
     endpoint: String,
     /// Whether it answered a signed probe just now; this node answers by serving the request.
     answering: bool,
+    /// Its data drive's space; absent when it did not answer or stores no data.
+    drive: Option<DriveView>,
 }
 
 #[derive(Serialize)]
@@ -39,16 +61,19 @@ pub(super) struct Status {
     erasure: Option<String>,
     members: Option<Vec<MemberView>>,
     heal_backlog: Option<BacklogView>,
+    /// This node's data drive; absent on a node without a data directory.
+    drive: Option<DriveView>,
 }
 
 pub(super) async fn status(
     State(state): State<ConsoleState>,
 ) -> Result<Json<Status>, ConsoleError> {
     let storage = state.storage();
+    let drive = storage.shards().drive().await?;
     let members = match state.node() {
         Some(this) => Some(
             stream::iter(storage.cluster().members().await?)
-                .map(|member| view(&state, this, member))
+                .map(|member| view(&state, this, member, drive))
                 .buffered(usize::from(ERASURE_MAX_WIDTH))
                 .collect()
                 .await,
@@ -70,23 +95,32 @@ pub(super) async fn status(
         erasure: state.erasure().map(str::to_owned),
         members,
         heal_backlog,
+        drive: drive.map(DriveView::from),
     }))
 }
 
-/// `member` as the console shows it: this node answers by serving the request, every other member is probed.
-async fn view(state: &ConsoleState, this: &str, member: Member) -> MemberView {
-    let answering = member.node.as_str() == this
-        || state
-            .storage()
-            .cluster()
-            .answers(
-                &member.endpoint,
-                Duration::from_secs(CONSOLE_MEMBER_PROBE_SECS),
-            )
-            .await;
+/// `member` as the console shows it: this node answers by serving the request and reports `local` as its drive;
+/// every other member is probed and asked for its drive.
+async fn view(
+    state: &ConsoleState,
+    this: &str,
+    member: Member,
+    local: Option<DriveSpace>,
+) -> MemberView {
+    let budget = Duration::from_secs(CONSOLE_MEMBER_PROBE_SECS);
+    let cluster = state.storage().cluster();
+    let (answering, drive) = if member.node.as_str() == this {
+        (true, local)
+    } else {
+        let drive = cluster.drive(&member.endpoint, budget).await;
+        // A member that reported its drive answered; one with no data directory still answers its probe.
+        let answering = drive.is_some() || cluster.answers(&member.endpoint, budget).await;
+        (answering, drive)
+    };
     MemberView {
         node: member.node.as_str().to_owned(),
         endpoint: member.endpoint,
         answering,
+        drive: drive.map(DriveView::from),
     }
 }

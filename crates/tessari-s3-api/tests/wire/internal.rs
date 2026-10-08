@@ -167,6 +167,24 @@ async fn the_health_route_answers_the_cluster_and_refuses_anyone_else() {
 }
 
 #[tokio::test]
+async fn the_drive_route_answers_the_cluster_with_its_space_and_refuses_anyone_else() {
+    let (state, dir) = internal();
+    let (status, bytes) = sent(&state, "GET", "/internal/v1/drive", Vec::new()).await;
+    assert_eq!(status, 200);
+    let text = String::from_utf8(bytes).expect("utf-8");
+    let drive = tessari_s3_storage::data::DriveSpace::from_wire(&text).expect("three byte counts");
+    assert!(drive.capacity > 0 && drive.free <= drive.capacity, "{text}");
+    let other = "another-secret-0123456789abcdef0123";
+    let (status, _) = send(
+        &state,
+        signed("GET", "/internal/v1/drive", NOW, other, Vec::new()),
+    )
+    .await;
+    assert_eq!(status, 401);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
 async fn a_request_the_cluster_did_not_sign_is_refused_and_writes_nothing() {
     let (state, dir) = internal();
     let put = shard(0, "?block=64&size=160");

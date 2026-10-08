@@ -8,15 +8,15 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::stream::{BoxStream, Stream, StreamExt};
 use tessari_s3_constants::{
-    INTERNAL_DATE_HEADER, INTERNAL_HEALTH_PATH, INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH,
-    INTERNAL_SIGNATURE_HEADER,
+    INTERNAL_DATE_HEADER, INTERNAL_DRIVE_BODY_MAX, INTERNAL_DRIVE_PATH, INTERNAL_HEALTH_PATH,
+    INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH, INTERNAL_SIGNATURE_HEADER,
 };
 use tessari_s3_core::internal::{InternalRequest, sign};
 use tessari_s3_infrastructure::InternalTls;
 use tessari_s3_infrastructure::peer::{PeerBody, PeerHttp, PeerMethod, PeerReply};
 use tessari_s3_types::{NodeId, SecretKey};
 
-use crate::data::hex;
+use crate::data::{DriveSpace, hex};
 use crate::{Error, Result};
 
 /// Which shard: a data id and the shard's index in its stripe.
@@ -135,6 +135,40 @@ impl RemoteShards {
             )
             .await?;
         answered(&reply, 204)
+    }
+
+    /// The space of the data drive of the node at `endpoint`; `None` when it has no data directory.
+    ///
+    /// # Errors
+    /// [`Error::PeerRefused`], [`Error::Peer`], or [`Error::Malformed`] for an answer not in the drive form.
+    pub async fn drive(&self, endpoint: &str, budget: Duration) -> Result<Option<DriveSpace>> {
+        let reply = self
+            .call(
+                PeerMethod::Get,
+                endpoint,
+                INTERNAL_DRIVE_PATH,
+                PeerBody::Empty,
+                budget,
+            )
+            .await?;
+        if reply.status() == 404 {
+            return Ok(None);
+        }
+        answered(&reply, 200)?;
+        let mut body = Vec::new();
+        let mut chunks = reply.into_stream();
+        while let Some(chunk) = chunks.next().await {
+            body.extend_from_slice(&chunk?);
+            if body.len() > INTERNAL_DRIVE_BODY_MAX {
+                break;
+            }
+        }
+        let malformed = Error::Malformed {
+            record: "drive",
+            reason: "a peer's drive answer is not three byte counts",
+        };
+        let text = std::str::from_utf8(&body).map_err(|_| malformed.clone())?;
+        DriveSpace::from_wire(text).map(Some).ok_or(malformed)
     }
 
     async fn call(

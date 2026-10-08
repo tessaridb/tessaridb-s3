@@ -30,6 +30,7 @@ const SHAPES = {
   layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
   pulse: ["M3 12h4l3-7 4 14 3-7h4"],
   back: ["M14.5 6l-6 6 6 6"],
+  disk: [box(3, 5, 18, 14, 2.5), "M3 13h18", "M16.5 16h.01"],
 } as const;
 
 export type IconName = keyof typeof SHAPES;

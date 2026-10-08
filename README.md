@@ -75,7 +75,7 @@ claims it; the two marked **tested** already are:
 |---|---|
 | Stage | pre-alpha |
 | Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented`; on a cluster (`TESSARIDB_S3_ERASURE`): RS(k, m) shards one per node, write quorum k (k + 1 when k = m), reads from any k verified shards, background healing (one node at a time per object, under a claim in TessariDB; shard bytes no object can reach are swept), the internal surface over mutual TLS when configured — tested with a node killed mid-write and mid-read and the metadata leader killed |
-| Console | a web page on its own listener (sign-in, overview, buckets, object browser, downloads, ETag-guarded deletes with reasons, the action record; light and dark) over a JSON API |
+| Console | a web page on its own listener (sign-in, overview with stored bytes and drive space, buckets with their size, object browser, downloads, ETag-guarded deletes with reasons, the action record; light and dark) over a JSON API |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -115,6 +115,7 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_DATA_DIR` | unset | where objects above 128 KiB are stored (`<dir>/s3data/…`); unset, such objects are answered `NotImplemented` |
 | `TESSARIDB_S3_RECLAIM_GRACE_SECS` | `86400` | how long a replaced, deleted or abandoned data file is kept before the reclaimer removes it |
 | `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` | `300` | time between reclamation passes |
+| `TESSARIDB_S3_USAGE_INTERVAL_SECS` | `60` | time between passes measuring each bucket's objects and bytes; every node runs one and one member measures per pass |
 | `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` | `604800` | how long a multipart upload may stay open (from its initiation) before the reaper aborts it; the reaper runs on the reclamation interval |
 | `TESSARIDB_S3_ERASURE` | unset (a node on its own) | the erasure code `k+m` this node's cluster writes objects with (k, m ≥ 1, k + m ≤ 16); setting it makes the node a cluster member and requires the four settings below and `TESSARIDB_S3_DATA_DIR` |
 | `TESSARIDB_S3_NODE_ID` | — | this node's name in the cluster: 1–63 lowercase letters, digits and inner hyphens |
@@ -136,7 +137,9 @@ With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator consol
 and sign in with the root access key. The page needs nothing from the network — no font, no script from anywhere
 else — and runs only its own script under a strict content security policy. Everything it does goes through the
 JSON API under `/api/v1`, which can be called directly. After signing in (`POST /api/v1/session`) an operator can read the node's
-status — on a cluster member its members, whether each answers, and how many objects wait for healing — list, create and delete buckets,
+status — this node's data drive (capacity, free, available) and, on a cluster member, its members, whether each answers,
+the space of each one's drive, and how many objects wait for healing — read how many objects and bytes each bucket holds
+(`GET /api/v1/usage`, as of the last measurement, with its time) — list, create and delete buckets,
 list a bucket a page at a time, describe an object, download it (always as an attachment) and delete it under the
 ETag they saw: a changed object answers `412` and is kept. Every change and every download is recorded with the
 signed-in key and the operator's reason, required to delete; `GET /api/v1/actions` reads that record newest first.

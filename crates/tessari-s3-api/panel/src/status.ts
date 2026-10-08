@@ -1,10 +1,13 @@
-//! The overview: is this node and its cluster healthy, and is anything waiting
-//! to be healed. Each tile links to where the operator acts on it.
+//! The overview: is this node and its cluster healthy, how much is stored and
+//! how full the drives are, and is anything waiting to be healed. Each tile
+//! links to where the operator acts on it.
 
-import { call } from "./api.ts";
+import { call, type Answer } from "./api.ts";
 import { el, fill, mono, row, table } from "./dom.ts";
+import { amount, moment, share, size } from "./format.ts";
 import { icon, type IconName } from "./icons.ts";
-import { readStatus, type Backlog, type Member } from "./models.ts";
+import { meter, used } from "./meter.ts";
+import { readStatus, readUsage, type Backlog, type Drive, type Member, type Status, type Usage } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, type Screen } from "./screen.ts";
 
@@ -43,9 +46,49 @@ function membersTile(members: readonly Member[] | null): HTMLElement {
     : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
 }
 
+/** The Stored tile: what clients stored, as of the last measurement. */
+function storedTile(usage: Answer<Usage>): HTMLElement {
+  if (!usage.ok) {
+    return tile("buckets", "Stored", "—", "The usage figures could not be read. Reload to try again.");
+  }
+  const measured = usage.value;
+  if (measured.taken === null) {
+    return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
+  }
+  const objects = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
+  return tile("buckets", "Stored", size(measured.bytes), `${objects} · measured ${moment(measured.taken)}`);
+}
+
+/** Every drive the console could read: this node's off a cluster, each answering member's on one. */
+function drives(node: Status): Drive[] {
+  if (node.members === null) {
+    return node.drive === null ? [] : [node.drive];
+  }
+  return node.members.flatMap((member) => (member.drive === null ? [] : [member.drive]));
+}
+
+/** The Disk tile: space used over every drive that reported, with the bar. */
+function diskTile(node: Status): HTMLElement {
+  const read = drives(node);
+  if (read.length === 0) {
+    return tile("disk", "Disk", "—", node.members === null ? "This node stores no data on its own drive." : "No member reported its drive.");
+  }
+  const total: Drive = read.reduce(
+    (sum, drive) => ({ capacity: sum.capacity + drive.capacity, free: sum.free + drive.free, available: sum.available + drive.available }),
+    { capacity: 0, free: 0, available: 0 },
+  );
+  const scope = node.members === null ? "This node's data drive" : `Raw space on ${read.length} of ${node.members.length} members`;
+  return tile(
+    "disk",
+    "Disk",
+    el("span", {}, share(used(total), total.capacity), el("span", { class: "muted" }, " used")),
+    el("span", { class: "gauge" }, meter(total, "Disk space used"), el("span", {}, `${scope} · ${size(total.free)} free`)),
+  );
+}
+
 export async function status(screen: Screen): Promise<void> {
   loading(screen, TITLE, "the node's status");
-  const answer = await call("GET", "/status", readStatus);
+  const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
   if (!answer.ok) {
     failed(screen, TITLE, answer);
     return;
@@ -59,7 +102,13 @@ export async function status(screen: Screen): Promise<void> {
       ? null
       : node.members.length === 0
         ? empty("No members are registered yet.")
-        : table("Cluster members", ["Member", "State", "Internal address"], node.members.map((member) => row(mono(member.node), state(member), mono(member.endpoint))));
+        : table(
+            "Cluster members",
+            ["Member", "State", "Disk", "Internal address"],
+            node.members.map((member) =>
+              row(mono(member.node), state(member), member.drive === null ? "—" : meter(member.drive, `Disk space used on ${member.node}`), mono(member.endpoint)),
+            ),
+          );
   fill(
     screen.main,
     head(TITLE, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -70,6 +119,8 @@ export async function status(screen: Screen): Promise<void> {
       membersTile(node.members),
       tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
       healing(node.heal_backlog),
+      storedTile(usage),
+      diskTile(node),
       tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
       tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null })),
     ),

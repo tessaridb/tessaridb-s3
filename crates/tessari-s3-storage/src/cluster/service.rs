@@ -11,6 +11,7 @@ use tessari_s3_types::NodeId;
 use super::entity::LayoutEntity;
 use super::repository::{ClusterRepository, Proposed};
 use super::tessaridb::TessariCluster;
+use crate::data::DriveSpace;
 use crate::peers::RemoteShards;
 use crate::{Error, Result};
 
@@ -47,6 +48,19 @@ impl ClusterService {
         Self {
             peers: Some(peers),
             ..self
+        }
+    }
+
+    /// The data drive space of the member at `endpoint`, when it answers within `budget` and stores data; `None`
+    /// otherwise, including off a cluster.
+    pub async fn drive(&self, endpoint: &str, budget: Duration) -> Option<DriveSpace> {
+        let peers = self.peers.as_ref()?;
+        match peers.drive(endpoint, budget).await {
+            Ok(drive) => drive,
+            Err(error) => {
+                tracing::debug!(endpoint, error = %error, "a member's drive was not read");
+                None
+            }
         }
     }
 

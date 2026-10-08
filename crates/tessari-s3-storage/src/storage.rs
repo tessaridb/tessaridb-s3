@@ -17,6 +17,7 @@ use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
 use crate::shards::ShardService;
+use crate::usage::{TessariUsage, UsageService};
 
 /// Every storage service, built over one metadata pool.
 #[derive(Clone)]
@@ -27,6 +28,7 @@ pub struct Storage {
     cluster: ClusterService,
     shards: ShardService,
     actions: ActionService,
+    usage: UsageService,
     pool: MetaPool,
 }
 
@@ -43,6 +45,7 @@ impl Storage {
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
             cluster: ClusterService::new(TessariCluster::new(pool.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
+            usage: UsageService::new(TessariUsage::new(pool.clone())),
             objects,
             shards,
             pool,
@@ -127,5 +130,11 @@ impl Storage {
     #[must_use]
     pub const fn actions(&self) -> &ActionService {
         &self.actions
+    }
+
+    /// How many objects and bytes each bucket holds, as last measured.
+    #[must_use]
+    pub const fn usage(&self) -> &UsageService {
+        &self.usage
     }
 }

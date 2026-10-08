@@ -14,6 +14,8 @@ pub(super) enum Refusal {
     Invalid(&'static str),
     /// No such shard here.
     NotFound,
+    /// This node has no data directory.
+    NoDrive,
     /// The shard is being written by another request.
     Busy,
     /// The shard failed verification.
@@ -34,6 +36,11 @@ impl Refusal {
             ),
             Self::Invalid(reason) => (StatusCode::BAD_REQUEST, "invalid_request", reason),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found", "no such shard here"),
+            Self::NoDrive => (
+                StatusCode::NOT_FOUND,
+                "no_data_directory",
+                "this node stores no data",
+            ),
             Self::Busy => (
                 StatusCode::CONFLICT,
                 "shard_busy",

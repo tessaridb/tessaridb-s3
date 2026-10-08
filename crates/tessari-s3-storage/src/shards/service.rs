@@ -3,7 +3,7 @@
 
 use tessari_s3_constants::{DATA_BLOCK_SIZE, ERASURE_MAX_WIDTH};
 
-use crate::data::{DataFiles, DataReader, DataWriter};
+use crate::data::{DataFiles, DataReader, DataWriter, DriveSpace};
 use crate::{Error, Result};
 
 /// Shard files under the node's data directory.
@@ -26,6 +26,17 @@ impl ShardService {
 
     fn files(&self) -> Result<&DataFiles> {
         self.files.as_ref().ok_or(Error::NoDataDirectory)
+    }
+
+    /// The space of this node's data drive; `None` on a node without a data directory.
+    ///
+    /// # Errors
+    /// The operating system's refusal to report it.
+    pub async fn drive(&self) -> Result<Option<DriveSpace>> {
+        match &self.files {
+            Some(files) => files.drive().await.map(Some),
+            None => Ok(None),
+        }
     }
 
     /// Starts shard `index` of data `id`: `size` bytes in blocks of `block_size`.

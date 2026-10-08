@@ -15,14 +15,14 @@ use tower::ServiceExt;
 use crate::erasure_reads::{read_back, shard_file, striped, written};
 use crate::{ACCESS_KEY, IGNORED, SECRET, call, call_with, fresh_console};
 
-struct Seen {
-    status: u16,
+pub(crate) struct Seen {
+    pub(crate) status: u16,
     headers: HeaderMap,
     bytes: Vec<u8>,
 }
 
 impl Seen {
-    fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         serde_json::from_slice(&self.bytes).expect("a JSON body")
     }
 
@@ -34,7 +34,7 @@ impl Seen {
     }
 }
 
-async fn send(
+pub(crate) async fn send(
     console: &ConsoleState,
     method: &str,
     path: &str,
@@ -72,7 +72,7 @@ async fn send(
     }
 }
 
-async fn sign_in(console: &ConsoleState) -> String {
+pub(crate) async fn sign_in(console: &ConsoleState) -> String {
     let body = format!("{{\"access_key_id\":\"{ACCESS_KEY}\",\"secret_access_key\":\"{SECRET}\"}}");
     let answer = send(console, "POST", "/api/v1/session", None, Some(&body)).await;
     assert_eq!(answer.status, 200);

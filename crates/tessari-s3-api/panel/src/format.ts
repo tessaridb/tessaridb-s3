@@ -25,3 +25,11 @@ export function moment(iso: string): string {
   const at = new Date(iso);
   return Number.isNaN(at.getTime()) ? iso : stamp.format(at);
 }
+
+const percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
+
+/** The share `part` is of `whole`, as a percentage; 0 % of nothing. */
+export const share = (part: number, whole: number): string => percent.format(whole === 0 ? 0 : part / whole);
+
+/** A count for a reader, grouped by the reader's locale. */
+export const amount = (value: number): string => value.toLocaleString();

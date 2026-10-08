@@ -1,13 +1,14 @@
 //! Buckets: find one (the list is complete, so filtering it here hides nothing
-//! the server sent), create one from the form the header's button reveals, and
-//! delete an empty one with a reason.
+//! the server sent), see how many objects and bytes each holds as last measured,
+//! create one from the form the header's button reveals, and delete an empty one
+//! with a reason.
 
-import { call } from "./api.ts";
+import { call, type Answer } from "./api.ts";
 import { confirmation } from "./confirm.ts";
 import { announce, el, field, fill, mono, row, table } from "./dom.ts";
-import { moment } from "./format.ts";
+import { amount, moment, size } from "./format.ts";
 import { icon } from "./icons.ts";
-import { ignored, readBuckets, type Bucket } from "./models.ts";
+import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Usage } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
 
@@ -64,16 +65,30 @@ function createForm(screen: Screen, opener: HTMLButtonElement): HTMLElement {
   return form;
 }
 
-function bucketRow(screen: Screen, bucket: Bucket): HTMLTableRowElement {
+/** A bucket's figures as last measured: none when nothing was measured since it was created, zero when it was
+ * measured and held nothing. ISO instants in one format compare as text. */
+function figures(usage: Answer<Usage>, bucket: Bucket): BucketUsage | null {
+  if (!usage.ok || usage.value.taken === null || usage.value.taken < bucket.created) {
+    return null;
+  }
+  return usage.value.buckets.find((entry) => entry.bucket === bucket.name) ?? { bucket: bucket.name, objects: 0, bytes: 0 };
+}
+
+const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, text);
+
+function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTableRowElement {
   const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
+  const held = figures(usage, bucket);
   const line = row(
     el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket.name)),
+    numeric(held === null ? "—" : amount(held.objects)),
+    numeric(held === null ? "—" : size(held.bytes)),
     moment(bucket.created),
     mono(bucket.region),
     remove,
   );
   remove.addEventListener("click", () => {
-    const cell = el("td", { colspan: "4" });
+    const cell = el("td", { colspan: "6" });
     const ask = el("tr", { class: "asking" }, cell);
     const close = (): void => {
       ask.remove();
@@ -106,9 +121,18 @@ function bucketRow(screen: Screen, bucket: Bucket): HTMLTableRowElement {
   return line;
 }
 
+/** The header's line: how many buckets, and how old the sizes are. */
+function measuredLine(count: number, usage: Answer<Usage>): string {
+  const listed = `${count.toLocaleString()} on this cluster`;
+  if (!usage.ok) {
+    return `${listed} · sizes could not be read`;
+  }
+  return usage.value.taken === null ? `${listed} · sizes not measured yet` : `${listed} · sizes measured ${moment(usage.value.taken)}`;
+}
+
 export async function buckets(screen: Screen): Promise<void> {
   loading(screen, TITLE, "buckets");
-  const answer = await call("GET", "/buckets", readBuckets);
+  const [answer, usage] = await Promise.all([call("GET", "/buckets", readBuckets), call("GET", "/usage", readUsage)]);
   if (!answer.ok) {
     failed(screen, TITLE, answer);
     return;
@@ -131,14 +155,14 @@ export async function buckets(screen: Screen): Promise<void> {
         ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.")
         : shown.length === 0
           ? empty(`No bucket name contains “${wanted}”.`)
-          : table("Buckets", ["Name", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket))),
+          : table("Buckets", ["Name", "Objects", "Size", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket, usage))),
     );
   };
   filter.input.addEventListener("input", draw);
   draw();
   fill(
     screen.main,
-    head(TITLE, `${all.length.toLocaleString()} on this cluster`, opener),
+    head(TITLE, measuredLine(all.length, usage), opener),
     form,
     el("section", { class: "card flush" }, all.length === 0 ? null : el("div", { class: "toolbar" }, filter.row), listed),
   );

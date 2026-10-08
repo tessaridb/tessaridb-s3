@@ -13,6 +13,7 @@ pub mod peers;
 mod schema;
 pub mod shards;
 mod storage;
+pub mod usage;
 
 pub use error::{Error, Result};
 pub use storage::Storage;
