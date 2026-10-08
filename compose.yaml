@@ -22,20 +22,39 @@ services:
       - tessaridb:/var/lib/tessaridb
     stop_grace_period: 30s
 
+  # Declares the S3 server's own database account, as the owner, and exits: the
+  # server signs in as an editor of its one database and never as the owner.
+  s3-account:
+    image: tessaridb/tessaridb:0.33.2-beta
+    entrypoint: ["/bin/bash", "/s3-account.sh"]
+    depends_on:
+      tessaridb:
+        condition: service_healthy
+    environment:
+      TESSARIDB_AT: tessaridb:9080
+      TESSARIDB_OWNER: ${TESSARIDB_USER}
+      TESSARIDB_PASSWORD: ${TESSARIDB_PASSWORD}
+      S3_NAMESPACE: s3
+      S3_DATABASE: meta
+      S3_META_USER: s3
+      S3_META_PASSWORD: ${S3_META_PASSWORD:?set S3_META_PASSWORD in .env}
+    volumes:
+      - ./docker/s3-account.sh:/s3-account.sh:ro
+
   s3:
     image: tessaridb/s3:dev
     build: .
     restart: unless-stopped
     depends_on:
-      tessaridb:
-        condition: service_healthy
+      s3-account:
+        condition: service_completed_successfully
     environment:
       TESSARIDB_S3_ROOT_ACCESS_KEY: ${S3_ROOT_ACCESS_KEY:?set S3_ROOT_ACCESS_KEY in .env}
       TESSARIDB_S3_ROOT_SECRET_KEY: ${S3_ROOT_SECRET_KEY:?set S3_ROOT_SECRET_KEY in .env}
       TESSARIDB_S3_REGION: ${S3_REGION:-us-east-1}
       TESSARIDB_S3_META_ADDRESS: tessaridb:9080
-      TESSARIDB_S3_META_USER: ${TESSARIDB_USER}
-      TESSARIDB_S3_META_PASSWORD: ${TESSARIDB_PASSWORD}
+      TESSARIDB_S3_META_USER: s3
+      TESSARIDB_S3_META_PASSWORD: ${S3_META_PASSWORD}
       TESSARIDB_S3_IAM_KEY: ${S3_IAM_KEY:-}
       TESSARIDB_S3_CONSOLE_LISTEN: 0.0.0.0:9101
     ports:

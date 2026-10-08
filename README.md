@@ -107,8 +107,8 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` | `30` | how long in-flight requests get after SIGTERM |
 | `TESSARIDB_S3_META_ADDRESS` | — (required) | the TessariDB nodes holding the metadata, `host:port` of each wire surface, comma-separated; a node that does not answer within 5 s is passed over for the next |
 | `TESSARIDB_S3_META_REPLICATION` | `none` for one node; required for several | copies the metadata cluster keeps of the namespace: a number, or `none` — a cluster refuses a namespace whose replication was never stated |
-| `TESSARIDB_S3_META_USER` / `_PASSWORD` | — (required) | the TessariDB user the server signs in as |
-| `TESSARIDB_S3_META_NAMESPACE` / `_DATABASE` | `s3` / `meta` | where the metadata lives; created on start-up |
+| `TESSARIDB_S3_META_USER` / `_PASSWORD` | — (required) | the TessariDB user the server signs in as — its own account, an editor of its one database (`DEFINE USER s3 ON s3.meta ROLE editor`), never the owner |
+| `TESSARIDB_S3_META_NAMESPACE` / `_DATABASE` | `s3` / `meta` | where the metadata lives; the database is created on start-up, the namespace only by an account allowed to (the operator declares it with the server's account) |
 | `TESSARIDB_S3_META_CA` | unset | a PEM certificate authority to verify the node's TLS against; unset speaks in the clear |
 | `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata store |
 | `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS` | `30` | how long a metadata statement may wait for its answer; past it the request answers `503` and a write's data stays queued, because the statement may have committed |
@@ -178,13 +178,15 @@ The `Dockerfile` builds an image holding only the `tessaridb-s3` server — no d
 TessariDB node beside it, and `compose.yaml` runs the two together:
 
 ```sh
-cp .env.example .env        # set every value: the TessariDB owner, the S3 root key and secret, the IAM key
+cp .env.example .env        # set every value: the TessariDB owner, the server's own account password, the S3 root key and secret, the IAM key
 docker compose up -d --wait
 aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
 ```
 
 The database (`tessaridb/tessaridb:0.33.2-beta`) declares its owner from `.env` on first start and is reachable only
-from the S3 server over the compose network. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
+from the S3 server over the compose network. A one-shot `s3-account` step (`docker/s3-account.sh`) signs in as that
+owner once to declare the namespace, the database and the server's own account; the server then signs in as `s3`,
+an editor of `s3.meta` that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
 a TLS-terminating proxy in front before exposing either. Both keep their data in named volumes, and the server runs
 as a non-root user. The image carries no credential: every required value comes from the environment, and the
 server refuses to start without them. No image is published yet.

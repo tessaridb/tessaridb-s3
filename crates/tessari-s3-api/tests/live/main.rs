@@ -13,6 +13,7 @@ mod access_window;
 mod buckets;
 mod cluster;
 mod complete;
+mod confined_account;
 mod console;
 mod console_admin;
 mod console_keys;
@@ -157,10 +158,50 @@ pub(crate) fn live_config(
         .expect("live configuration")
 }
 
-/// The storage `config` describes, schema applied.
+/// The account the server signs in as for `config`'s namespace: created by the test node's owner as an editor of that
+/// one database — never the owner — the way an operator sets a deployment up. Its password is derived from the
+/// namespace, so every node of one test signs in alike; it guards nothing outside the throwaway test node.
+pub(crate) async fn confined(
+    config: &S3Config,
+) -> tessari_s3_infrastructure::tessaridb::MetaSettings {
+    let owner = MetaPool::new(config.meta.clone()).expect("pool");
+    let (namespace, database) = owner.scope();
+    let (namespace, database) = (namespace.to_owned(), database.to_owned());
+    let user = format!("svc_{namespace}");
+    let password = format!("svc_{namespace}_password");
+    owner
+        .run_unscoped(&format!(
+            "DEFINE NAMESPACE IF NOT EXISTS {namespace} {}; USE NAMESPACE {namespace}; \
+             DEFINE DATABASE IF NOT EXISTS {database};",
+            owner.replication().clause()
+        ))
+        .await
+        .expect("the owner declares the tenancy");
+    // 0.33.2 takes the password as text and refuses a parameter there; this one is built from the namespace, which
+    // is checked to `[a-z0-9_]`, so it can carry no quote.
+    owner
+        .run(
+            &format!(
+                "DEFINE USER IF NOT EXISTS {user} ON {namespace}.{database} ROLE editor PASSWORD '{password}';"
+            ),
+            Vec::new(),
+        )
+        .await
+        .expect("the owner declares the server's account");
+    let mut settings = config.meta.clone();
+    settings.user = user;
+    settings.password = tessari_s3_types::SecretKey::new(password);
+    settings
+}
+
+/// The storage `config` describes, signed in as its [`confined`] account, schema applied.
 pub(crate) async fn prepared(config: &S3Config) -> Storage {
+    // Containment, not a fix (Q-S3-2): see below; declaring the account writes the same store-wide catalog.
+    let turn = SCHEMA_TURN.lock().await;
+    let account = confined(config).await;
+    drop(turn);
     let storage = Storage::new(
-        MetaPool::new(config.meta.clone()).expect("pool"),
+        MetaPool::new(account).expect("pool"),
         config.data_dir.clone(),
     )
     .with_iam_key(config.iam_key.clone())

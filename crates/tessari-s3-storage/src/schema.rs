@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tessari_s3_constants::{SCHEMA_RETRY_ATTEMPTS, SCHEMA_RETRY_BACKOFF_MS};
-use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass};
+use tessari_s3_infrastructure::tessaridb::{MetaError, MetaPool, RefusalClass};
 
 use crate::Result;
 
@@ -178,11 +178,21 @@ async fn apply_once(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
     let (namespace, database) = pool.scope();
     // The replication is stated, never left out: a metadata cluster refuses a namespace whose replication nobody said.
     let replication = pool.replication().clause();
-    let tenancy = format!(
-        "DEFINE NAMESPACE IF NOT EXISTS {namespace} {replication}; USE NAMESPACE {namespace};\n\
-         DEFINE DATABASE IF NOT EXISTS {database};"
-    );
-    pool.run_unscoped(&tenancy).await?;
+    // The server's own account is an editor of its one database (an operator declares the namespace, the database and
+    // the account): `USE` plus the database's `IF NOT EXISTS` is all it may run here. Only when that is refused — the
+    // namespace is new, so an account that may declare one is starting the server — is the namespace declared.
+    let own = format!("USE NAMESPACE {namespace}; DEFINE DATABASE IF NOT EXISTS {database};");
+    match pool.run_unscoped(&own).await {
+        Ok(_) => {}
+        Err(MetaError::Refused { .. }) => {
+            let tenancy = format!(
+                "DEFINE NAMESPACE IF NOT EXISTS {namespace} {replication}; USE NAMESPACE {namespace};\n\
+             DEFINE DATABASE IF NOT EXISTS {database};"
+            );
+            pool.run_unscoped(&tenancy).await?;
+        }
+        Err(error) => return Err(error.into()),
+    }
     pool.run(TABLES, grace(reclaim_grace_secs)?).await?;
     fill_spaces(pool).await
 }
