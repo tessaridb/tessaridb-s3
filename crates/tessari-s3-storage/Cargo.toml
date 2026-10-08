@@ -21,6 +21,11 @@ getrandom.workspace = true
 futures-util = { workspace = true, features = ["alloc"] }
 bytes.workspace = true
 rustix.workspace = true
+chacha20poly1305.workspace = true
+hkdf.workspace = true
+sha2.workspace = true
+base64.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "fs", "macros", "rt-multi-thread"] }

@@ -37,7 +37,8 @@ async fn main() -> anyhow::Result<()> {
     let storage = match &config.cluster {
         Some(cluster) => Storage::clustered(pool, config.data_dir.clone(), cluster)?,
         None => Storage::new(pool, config.data_dir.clone()),
-    };
+    }
+    .with_iam_key(config.iam_key.clone());
     // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
     // start, rather than answering every request 503.
     storage.prepare().await?;

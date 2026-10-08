@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    Access, Action, BucketResource, Decision, Denied, Principal, Role, SpaceName, UserPrincipal,
-    authorize,
+    Access, Action, BucketResource, Decision, Denied, Principal, Role, SpaceName, UserName,
+    UserPrincipal, authorize,
 };
 
 fn space(name: &str) -> SpaceName {
@@ -42,6 +42,17 @@ fn space_names_follow_the_node_name_rule() {
     assert!(SpaceName::new("team-a1").is_some());
     for bad in ["", "-a", "a-", "Team", "a_b", &"a".repeat(64)] {
         assert!(SpaceName::new(bad).is_none(), "{bad:?}");
+    }
+}
+
+#[test]
+fn user_names_follow_the_same_rule() {
+    assert_eq!(
+        UserName::new("ann-2").map(|name| name.as_str().to_owned()),
+        Some("ann-2".to_owned())
+    );
+    for bad in ["", "-a", "a-", "Ann", "a/b", &"a".repeat(64)] {
+        assert!(UserName::new(bad).is_none(), "{bad:?}");
     }
 }
 

@@ -26,6 +26,9 @@ use crate::Result;
 /// taking it.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
 /// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
+/// `spaces`, `users` (one space each), `access_keys` (the secret sealed, never plain) and `grants` (a user's access to
+/// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
+/// grants.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -75,6 +78,18 @@ DEFINE SPACE IF NOT EXISTS heal_claims;
 DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 DEFINE TABLE IF NOT EXISTS bucket_usage (taken datetime REQUIRED, buckets array REQUIRED);
 DEFINE SPACE IF NOT EXISTS usage_claims;
+DEFINE TABLE IF NOT EXISTS spaces (name string REQUIRED, created datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS users (\
+ name string REQUIRED, space_name string REQUIRED, space_role string REQUIRED, create_buckets bool REQUIRED,\
+ operator bool REQUIRED, cluster_viewer bool REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_user_space ON users FIELDS space_name;
+DEFINE TABLE IF NOT EXISTS access_keys (\
+ user_name string REQUIRED, secret bytes REQUIRED, nonce bytes REQUIRED, kek_id string REQUIRED,\
+ algorithm string REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS grants (\
+ user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
 COMMIT;
 ";
 

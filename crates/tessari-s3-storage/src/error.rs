@@ -103,6 +103,13 @@ pub enum Error {
     /// retryable.
     #[error("the key changed under every read attempt")]
     Contended,
+    /// An access key was to be issued or resolved and no root key (`TESSARIDB_S3_IAM_KEY`) is configured.
+    #[error("no IAM root key is configured (TESSARIDB_S3_IAM_KEY)")]
+    NoIamKey,
+    /// A stored access-key secret did not open: another root key, another binding, a changed byte or an unknown
+    /// algorithm — deliberately not told apart.
+    #[error("a stored access key secret could not be opened")]
+    Unsealable,
     /// Another node holds the claim on this data id (it is healing or reclaiming it); try on a later pass.
     #[error("another node is working on this data id")]
     Held,
@@ -127,6 +134,8 @@ impl Error {
             | Self::Corrupt { .. }
             | Self::NoDataDirectory
             | Self::Randomness
+            | Self::Unsealable
+            | Self::NoIamKey
             | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
             Self::InvalidShard { .. } | Self::ShardLength { .. } => ErrorCategory::Validation,
             Self::Contended | Self::Held => ErrorCategory::Conflict,

@@ -1,4 +1,4 @@
-//! Reading TessariDB answers: the first record of a read, and a bucket's incarnation out of it.
+//! Reading TessariDB answers: the first record of a read, every record of a listing, and a bucket's incarnation.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, Value};
 
@@ -35,6 +35,19 @@ pub(crate) fn incarnation_of(value: Option<Value>) -> Result<Option<[u8; 16]>> {
         Some(_) => Err(Error::Malformed {
             record: "bucket",
             reason: "not an object",
+        }),
+    }
+}
+
+/// Every record of a records answer, as `record` names them in an error.
+pub(crate) fn all_records(answer: Option<Answer>, record: &'static str) -> Result<Vec<Value>> {
+    match answer {
+        Some(Answer::Records { records, .. }) => {
+            Ok(records.into_iter().map(|(_, value)| value).collect())
+        }
+        _ => Err(Error::Malformed {
+            record,
+            reason: "a listing answered no records",
         }),
     }
 }

@@ -6,23 +6,45 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SpaceName(String);
 
+/// Whether `name` is 1-63 lowercase letters, digits and inner hyphens, as node names are.
+fn is_node_name(name: &str) -> bool {
+    (1..=63).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+}
+
 impl SpaceName {
     /// The space called `name`; names are 1-63 lowercase letters, digits and inner hyphens, as node names are.
     #[must_use]
     pub fn new(name: &str) -> Option<Self> {
-        let valid = (1..=63).contains(&name.len())
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            && !name.starts_with('-')
-            && !name.ends_with('-');
-        valid.then(|| Self(name.to_owned()))
+        is_node_name(name).then(|| Self(name.to_owned()))
     }
 
     /// The space buckets from before spaces existed belong to, and the one the root credential creates in.
     #[must_use]
     pub fn default_space() -> Self {
         Self(tessari_s3_constants::DEFAULT_SPACE.to_owned())
+    }
+
+    /// The name as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A user's name, unique across the store; the same rule as a space's name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UserName(String);
+
+impl UserName {
+    /// The user called `name`; names are 1-63 lowercase letters, digits and inner hyphens.
+    #[must_use]
+    pub fn new(name: &str) -> Option<Self> {
+        is_node_name(name).then(|| Self(name.to_owned()))
     }
 
     /// The name as text.

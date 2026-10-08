@@ -5,6 +5,7 @@ mod cluster_config;
 mod config;
 mod console_config;
 mod error;
+mod iam_config;
 mod meta_config;
 pub mod peer;
 pub mod tessaridb;

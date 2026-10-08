@@ -32,6 +32,8 @@ mod signer;
 mod spaces;
 mod uploads;
 mod usage;
+mod users;
+mod users_sealed;
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
@@ -136,6 +138,8 @@ fn live_config(
                 .unwrap_or_default(),
         ),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
+        // The live suite's own root key for sealing user access-key secrets; it seals nothing outside the test node.
+        ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
     ];
     if let Some(replication) = replication {
         vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));
@@ -149,7 +153,8 @@ async fn prepared(config: &S3Config) -> Storage {
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
-    );
+    )
+    .with_iam_key(config.iam_key.clone());
     // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one store-wide
     // catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not about
     // concurrent start-up, so their setup takes turns; each still gets its own namespace.

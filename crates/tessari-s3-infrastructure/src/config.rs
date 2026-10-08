@@ -50,6 +50,9 @@ pub struct S3Config {
     pub cluster: Option<ClusterSettings>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
     pub console: Option<crate::console_config::ConsoleSettings>,
+    /// `TESSARIDB_S3_IAM_KEY` — the root key user access-key secrets are sealed under; unset, the root credential is
+    /// the only one.
+    pub iam_key: Option<tessari_s3_types::IamKey>,
 }
 
 /// What a node of an erasure-coded cluster is told about itself and its peers. All or nothing.
@@ -134,10 +137,12 @@ impl S3Config {
         let meta = meta_settings(&get)?;
         let cluster = cluster_settings(&get)?;
         let console = crate::console_config::console_settings(&get)?;
+        let iam_key = crate::iam_config::iam_key(&get)?;
         Ok(Self {
             meta,
             cluster,
             console,
+            iam_key,
             reclaim_grace_secs: match get("TESSARIDB_S3_RECLAIM_GRACE_SECS") {
                 None => DEFAULT_RECLAIM_GRACE_SECS,
                 Some(text) => text.trim().parse().map_err(|_| Error::InvalidConfig {

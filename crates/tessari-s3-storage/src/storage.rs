@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tessari_s3_constants::DATA_BLOCK_SIZE;
+use tessari_s3_core::authz::SpaceName;
 use tessari_s3_infrastructure::ClusterSettings;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_types::IamKey;
 
 use crate::Result;
 use crate::actions::{ActionService, TessariActions};
@@ -17,7 +19,9 @@ use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
 use crate::shards::ShardService;
+use crate::spaces::{SpaceService, TessariSpaces};
 use crate::usage::{TessariUsage, UsageService};
+use crate::users::{TessariUsers, UserService};
 
 /// Every storage service, built over one metadata pool.
 #[derive(Clone)]
@@ -29,6 +33,8 @@ pub struct Storage {
     shards: ShardService,
     actions: ActionService,
     usage: UsageService,
+    spaces: SpaceService,
+    users: UserService,
     pool: MetaPool,
 }
 
@@ -40,12 +46,15 @@ impl Storage {
         let data = data_dir.map(|root| DataFiles::new(root, DATA_BLOCK_SIZE));
         let shards = ShardService::new(data.clone());
         let objects = ObjectService::new(TessariObjects::new(pool.clone()), data);
+        let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
         Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
             cluster: ClusterService::new(TessariCluster::new(pool.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
             usage: UsageService::new(TessariUsage::new(pool.clone())),
+            users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
+            spaces,
             objects,
             shards,
             pool,
@@ -82,13 +91,24 @@ impl Storage {
         Ok(storage)
     }
 
-    /// Creates the schema when it is missing and clears what writes cut short by a crash left on the drive; run once
-    /// at start-up, before the node serves.
+    /// The same services with user access-key secrets sealed and opened under `root`; `None` (no
+    /// `TESSARIDB_S3_IAM_KEY`) leaves the root credential as the only one that works.
+    #[must_use]
+    pub fn with_iam_key(self, root: Option<IamKey>) -> Self {
+        Self {
+            users: self.users.with_iam_key(root),
+            ..self
+        }
+    }
+
+    /// Creates the schema when it is missing, the default space with it, and clears what writes cut short by a crash
+    /// left on the drive; run once at start-up, before the node serves.
     ///
     /// # Errors
     /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
         crate::schema::apply(&self.pool).await?;
+        self.spaces.create(&SpaceName::default_space()).await?;
         let cleared = self.objects.recover().await?;
         if cleared > 0 {
             tracing::info!(cleared, "temporary files of interrupted writes removed");
@@ -136,5 +156,17 @@ impl Storage {
     #[must_use]
     pub const fn usage(&self) -> &UsageService {
         &self.usage
+    }
+
+    /// The spaces buckets and users belong to.
+    #[must_use]
+    pub const fn spaces(&self) -> &SpaceService {
+        &self.spaces
+    }
+
+    /// Users, their access keys and their grants.
+    #[must_use]
+    pub const fn users(&self) -> &UserService {
+        &self.users
     }
 }
