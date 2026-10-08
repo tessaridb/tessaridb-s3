@@ -29,6 +29,7 @@ mod erasure_heals;
 mod erasure_reads;
 mod large;
 mod listing;
+mod meta_pool;
 mod metadata;
 mod multipart;
 mod no_bytes;

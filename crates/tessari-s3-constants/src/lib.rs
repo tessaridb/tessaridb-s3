@@ -103,6 +103,11 @@ pub const CLUSTER_SECRET_MIN_LEN: usize = 32;
 /// request for the operating system's connect timeout.
 pub const META_DIAL_TIMEOUT_SECS: u64 = 5;
 
+/// New metadata connections signing in at once. Each spends the password on its first statement, an Argon2id check,
+/// and a node runs at most 24 of those at once for EVERY client it has — past that it refuses the sign-in
+/// (`SignInThrottled`) — so a burst on a cold pool waits here instead of being refused there.
+pub const META_SIGN_IN_CONCURRENCY: usize = 4;
+
 /// Seconds one unit of work may wait for the metadata store's answer once sent, when
 /// `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS` is unset: well past a failover round and a schema apply, and half the
 /// node's own 60 s frame stall, so a node partitioned away mid-statement releases the request well before the

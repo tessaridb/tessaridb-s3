@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use std::time::Duration;
 
-use tessari_s3_constants::META_DIAL_TIMEOUT_SECS;
+use tessari_s3_constants::{META_DIAL_TIMEOUT_SECS, META_SIGN_IN_CONCURRENCY};
 use tessaridb_client::{Answer, Client, Secured, Tls, Value};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
@@ -27,6 +27,8 @@ struct Inner {
     scope: String,
     idle: Mutex<Vec<Link>>,
     permits: Semaphore,
+    /// New connections signing in at once, held from the dial through the statement that spends the credential.
+    signing_in: Semaphore,
     /// The address that answered last; the next dial starts there.
     preferred: AtomicUsize,
 }
@@ -78,6 +80,7 @@ impl MetaPool {
                 scope,
                 idle: Mutex::new(Vec::new()),
                 permits,
+                signing_in: Semaphore::new(META_SIGN_IN_CONCURRENCY),
                 preferred: AtomicUsize::new(0),
             }),
         })
@@ -132,19 +135,24 @@ impl MetaPool {
         script: &str,
         parameters: Vec<(String, Value)>,
     ) -> MetaResult<Vec<Answer>> {
-        let _permit = self
-            .inner
-            .permits
-            .acquire()
-            .await
-            .map_err(|_| MetaError::Unavailable {
-                reason: "the metadata pool is closed".to_owned(),
-            })?;
-        let pooled = self.take_idle()?;
-        let (mut link, credentials) = match pooled {
+        let _permit = self.inner.permits.acquire().await.map_err(|_| closed())?;
+        let (mut link, signing) = match self.take_idle()? {
             Some(link) => (link, None),
-            None => (self.dial().await?, Some(self.credentials())),
+            None => {
+                let signing = self
+                    .inner
+                    .signing_in
+                    .acquire()
+                    .await
+                    .map_err(|_| closed())?;
+                // A connection may have come back while this request waited its turn to sign in.
+                match self.take_idle()? {
+                    Some(link) => (link, None),
+                    None => (self.dial().await?, Some(signing)),
+                }
+            }
         };
+        let credentials = signing.as_ref().map(|_| self.credentials());
         let credentials = credentials
             .as_ref()
             .map(|(user, password)| (user.as_str(), password.as_str()));
@@ -166,8 +174,12 @@ impl MetaPool {
                 Ok(answers)
             }
             Err(tessaridb_client::Error::Refused { message, class }) => {
-                // A refusal is the node's answer; the connection is healthy and goes back.
-                self.put_idle(link)?;
+                // A refusal is the node's answer and the connection is healthy — unless the refused statement carried
+                // the credential, when the refusal may be of the sign-in itself: a connection that never signed in is
+                // dropped rather than handed to the next request as if it had.
+                if signing.is_none() {
+                    self.put_idle(link)?;
+                }
                 Err(MetaError::Refused { message, class })
             }
             // Anything else leaves the connection's state unknown, so it is dropped rather than reused.
@@ -244,6 +256,13 @@ impl MetaPool {
         let mut idle = self.inner.idle.lock().map_err(|_| MetaError::Poisoned)?;
         idle.push(link);
         Ok(())
+    }
+}
+
+/// The refusal for a request that arrives after the pool closed.
+fn closed() -> MetaError {
+    MetaError::Unavailable {
+        reason: "the metadata pool is closed".to_owned(),
     }
 }
 

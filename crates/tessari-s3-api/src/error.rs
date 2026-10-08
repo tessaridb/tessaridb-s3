@@ -65,6 +65,16 @@ impl From<tessari_s3_storage::Error> for Error {
                     "the metadata store is busy; retry",
                 )
             }
+            Storage::Meta(MetaError::Refused {
+                class: Some(RefusalClass::Throttled),
+                ..
+            }) => {
+                tracing::warn!(error = %error, "metadata store throttled the request");
+                Self::new(
+                    ErrorCode::SlowDown,
+                    "the metadata store is busy; reduce your request rate",
+                )
+            }
             Storage::Quorum { .. }
             | Storage::Unreadable { .. }
             | Storage::NoLayout
@@ -94,3 +104,28 @@ impl From<DispatchError> for Error {
 
 /// The result of a pipeline step.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use tessari_s3_infrastructure::tessaridb::{MetaError, RefusalClass};
+    use tessari_s3_types::ErrorCode;
+
+    use super::Error;
+
+    fn refused(class: RefusalClass) -> Error {
+        Error::from(tessari_s3_storage::Error::Meta(MetaError::Refused {
+            message: "this node is not taking a sign-in for that user right now".to_owned(),
+            class: Some(class),
+        }))
+    }
+
+    #[test]
+    fn a_throttled_metadata_store_answers_slow_down_so_clients_back_off_and_retry() {
+        assert_eq!(refused(RefusalClass::Throttled).code, ErrorCode::SlowDown);
+        assert_eq!(
+            refused(RefusalClass::Retry).code,
+            ErrorCode::ServiceUnavailable,
+            "control: a retry-class refusal keeps its answer"
+        );
+    }
+}

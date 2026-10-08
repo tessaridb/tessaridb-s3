@@ -53,7 +53,11 @@ impl MetaError {
                 class: Some(RefusalClass::Conflict | RefusalClass::Retry),
                 ..
             } => ErrorCategory::Conflict,
-            Self::Unavailable { .. } => ErrorCategory::Unavailable,
+            Self::Unavailable { .. }
+            | Self::Refused {
+                class: Some(RefusalClass::Throttled),
+                ..
+            } => ErrorCategory::Unavailable,
             Self::Refused { .. }
             | Self::Protocol { .. }
             | Self::Configuration { .. }
@@ -64,3 +68,20 @@ impl MetaError {
 
 /// The result of a metadata-store call.
 pub type MetaResult<T> = std::result::Result<T, MetaError>;
+
+#[cfg(test)]
+mod tests {
+    use tessari_s3_types::ErrorCategory;
+    use tessaridb_client::RefusalClass;
+
+    use super::MetaError;
+
+    #[test]
+    fn a_throttled_refusal_is_a_store_that_is_busy_not_a_fault() {
+        let throttled = MetaError::Refused {
+            message: "this node is not taking a sign-in for that user right now".to_owned(),
+            class: Some(RefusalClass::Throttled),
+        };
+        assert_eq!(throttled.category(), ErrorCategory::Unavailable);
+    }
+}
