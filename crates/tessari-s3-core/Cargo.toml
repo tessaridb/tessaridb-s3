@@ -19,6 +19,8 @@ base64.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
 reed-solomon-simd.workspace = true
+blake3.workspace = true
+siphasher.workspace = true
 
 [lints]
 workspace = true
