@@ -34,7 +34,7 @@ pub struct DataReader {
     hex: String,
 }
 
-pub(super) fn hex(id: [u8; 16]) -> String {
+pub(crate) fn hex(id: [u8; 16]) -> String {
     id.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

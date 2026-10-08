@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Shards between nodes (second part of the erasure-coded data plane): a cluster member serves an internal shard
+  surface on `TESSARIDB_S3_INTERNAL_LISTEN` where other nodes store, read (whole or by block range) and remove its
+  shards. Each request is signed with the cluster secret and refused otherwise; a shard is kept only at exactly the
+  length declared and is durable before the write is answered. Objects are not yet spread over the cluster.
 - Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion
   settings a node registers itself in the metadata on start-up, and the cluster's first layout — the lowest k + m
   registered node ids — is created once however many nodes propose it. Object data is still stored per node.

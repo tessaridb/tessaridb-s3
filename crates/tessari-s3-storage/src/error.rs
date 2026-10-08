@@ -1,5 +1,6 @@
 //! Failures of `tessari-s3-storage`.
 
+use tessari_s3_infrastructure::peer::PeerError;
 use tessari_s3_infrastructure::tessaridb::MetaError;
 use tessari_s3_types::ErrorCategory;
 
@@ -9,6 +10,15 @@ pub enum Error {
     /// The metadata store refused or could not be reached.
     #[error(transparent)]
     Meta(#[from] MetaError),
+    /// Another node of the cluster could not be reached, or stopped answering.
+    #[error(transparent)]
+    Peer(#[from] PeerError),
+    /// Another node answered a shard request with a refusal.
+    #[error("a peer refused the shard request with status {status}")]
+    PeerRefused {
+        /// The HTTP status it answered.
+        status: u16,
+    },
     /// A stored record does not have the shape this server writes — a defect or a store written by something else.
     #[error("a stored {record} record is malformed: {reason}")]
     Malformed {
@@ -82,6 +92,11 @@ impl Error {
     pub fn category(&self) -> ErrorCategory {
         match self {
             Self::Meta(meta) => meta.category(),
+            Self::Peer(peer) => peer.category(),
+            Self::PeerRefused { status: 404 } => ErrorCategory::NotFound,
+            Self::PeerRefused { status: 409 } => ErrorCategory::Conflict,
+            Self::PeerRefused { status: 503 } => ErrorCategory::Unavailable,
+            Self::PeerRefused { .. } => ErrorCategory::Internal,
             Self::Malformed { .. }
             | Self::DataIo { .. }
             | Self::Corrupt { .. }

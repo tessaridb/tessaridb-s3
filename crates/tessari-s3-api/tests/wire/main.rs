@@ -5,6 +5,7 @@
 
 mod internal;
 mod operations;
+mod peers;
 mod refusals;
 mod signer;
 

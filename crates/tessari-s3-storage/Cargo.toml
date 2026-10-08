@@ -19,6 +19,7 @@ blake3.workspace = true
 uuid.workspace = true
 getrandom.workspace = true
 futures-util = { workspace = true, features = ["alloc"] }
+bytes.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "fs", "macros", "rt-multi-thread"] }

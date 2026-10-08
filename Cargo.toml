@@ -42,6 +42,9 @@ subtle = "2"
 blake3 = "1"
 reed-solomon-simd = "3"
 futures-util = { version = "0.3", default-features = false }
+# Internal shard traffic between S3 nodes; TLS arrives with the cluster CA (W7), so no TLS backend yet.
+reqwest = { version = "0.13", default-features = false, features = ["stream"] }
+bytes = "1"
 zeroize = { version = "1", features = ["derive"] }
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

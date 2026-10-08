@@ -5,6 +5,6 @@ mod format;
 mod shards;
 mod writer;
 
-pub(crate) use files::DataFiles;
 pub use files::DataReader;
+pub(crate) use files::{DataFiles, hex};
 pub(crate) use writer::DataWriter;

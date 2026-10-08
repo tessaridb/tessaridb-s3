@@ -14,6 +14,9 @@ thiserror.workspace = true
 tessaridb-client.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
+reqwest.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
 
 [lints]
 workspace = true

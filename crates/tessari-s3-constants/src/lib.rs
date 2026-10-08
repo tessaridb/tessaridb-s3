@@ -70,6 +70,12 @@ pub const INTERNAL_DATE_HEADER: &str = "x-tessari-date";
 /// The header carrying an internal request's signature, lowercase hex.
 pub const INTERNAL_SIGNATURE_HEADER: &str = "x-tessari-signature";
 
+/// Seconds a node waits for a peer to accept a connection before calling it unavailable.
+pub const PEER_CONNECT_TIMEOUT_SECS: u64 = 5;
+
+/// Seconds a node waits on a peer that has stopped sending mid-answer before calling it unavailable.
+pub const PEER_READ_TIMEOUT_SECS: u64 = 30;
+
 /// Shortest cluster secret accepted, in bytes: it keys HMAC-SHA256 over every internal request and the placement
 /// hash, so it carries at least the 256 bits of the MAC it keys.
 pub const CLUSTER_SECRET_MIN_LEN: usize = 32;

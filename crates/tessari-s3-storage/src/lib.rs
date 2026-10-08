@@ -7,6 +7,7 @@ pub mod data;
 mod error;
 pub mod multipart;
 pub mod objects;
+pub mod peers;
 mod schema;
 pub mod shards;
 mod storage;

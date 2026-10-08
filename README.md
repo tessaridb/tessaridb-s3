@@ -115,7 +115,7 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` | `604800` | how long a multipart upload may stay open (from its initiation) before the reaper aborts it; the reaper runs on the reclamation interval |
 | `TESSARIDB_S3_ERASURE` | unset (a node on its own) | the erasure code `k+m` this node's cluster writes objects with (k, m ≥ 1, k + m ≤ 16); setting it makes the node a cluster member and requires the four settings below and `TESSARIDB_S3_DATA_DIR` |
 | `TESSARIDB_S3_NODE_ID` | — | this node's name in the cluster: 1–63 lowercase letters, digits and inner hyphens |
-| `TESSARIDB_S3_INTERNAL_LISTEN` | — | where the internal shard surface listens (keep it on a private network until it speaks TLS) |
+| `TESSARIDB_S3_INTERNAL_LISTEN` | — | where the internal shard surface listens: the other nodes store, read and remove this node's shards there, every request signed with the cluster secret and anything unsigned refused. Until it speaks TLS the traffic is not encrypted and shard bytes are not covered by the signature, so keep it on a private network |
 | `TESSARIDB_S3_INTERNAL_ADVERTISE` | — | `host:port` the other nodes reach that surface at; registered in the metadata on start-up |
 | `TESSARIDB_S3_CLUSTER_SECRET` | — | key for internal request signatures, at least 32 bytes, the same on every node |
 

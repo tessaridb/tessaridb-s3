@@ -16,12 +16,17 @@ use tower::ServiceExt;
 
 use crate::NOW;
 
-const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
+pub(crate) const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
-/// An internal state at [`NOW`] over a fresh data directory, which it returns for removal. The metadata pool points
-/// at a port that refuses every connection and is never dialled: shards live on the drive alone.
+/// An internal state at [`NOW`] over a fresh data directory, which it returns for removal.
 fn internal() -> (InternalState, std::path::PathBuf) {
+    internal_with(std::sync::Arc::new(|| NOW))
+}
+
+/// An internal state by `clock` over a fresh data directory, which it returns for removal. The metadata pool points
+/// at a port that refuses every connection and is never dialled: shards live on the drive alone.
+pub(crate) fn internal_with(clock: tessari_s3_api::Clock) -> (InternalState, std::path::PathBuf) {
     let dir =
         std::env::temp_dir().join(format!("tessari-s3-data-{}", uuid::Uuid::new_v4().simple()));
     let vars = [
@@ -46,7 +51,7 @@ fn internal() -> (InternalState, std::path::PathBuf) {
     );
     let state = InternalState::new(
         SecretKey::new(CLUSTER_SECRET.to_owned()),
-        std::sync::Arc::new(|| NOW),
+        clock,
         storage,
         16,
     );
