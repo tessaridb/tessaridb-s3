@@ -2,11 +2,16 @@
 //! stored at write, beside size, age and ETag — whichever path wrote it, so an operator sees a bucket's contents
 //! without opening any object — the side pane's details come from the metadata record alone.
 
-use serde_json::Value;
+use std::sync::atomic::Ordering;
 
+use serde_json::Value;
+use tessari_s3_core::authz::{Access, Role};
+
+use crate::access::{grant, user_with_key};
 use crate::console::{send, sign_in};
+use crate::console_users::sign_in_as;
 use crate::multipart::{etag, part, text};
-use crate::{IGNORED, call, call_with, fresh_console, fresh_console_with, scratch_dir};
+use crate::{IGNORED, call, call_as, call_with, fresh_console, fresh_console_with, scratch_dir};
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
@@ -330,4 +335,159 @@ async fn a_name_filter_is_a_prefix_the_store_lists_and_pages_within() {
         objects.is_empty() && prefixes.is_empty() && next.is_none(),
         "no name starts so"
     );
+}
+
+/// Sends each of `paths` as `token`; the ones at `refused` must answer 403 with none of `leaks` in the body.
+async fn refused_saying_nothing(
+    console: &tessari_s3_api::ConsoleState,
+    token: &str,
+    paths: &[(&str, String, Option<&str>)],
+    refused: &[usize],
+    leaks: &[&str],
+) {
+    for (index, (method, path, body)) in paths.iter().enumerate() {
+        let seen = send(console, method, path, Some(token), *body).await;
+        if !refused.contains(&index) {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&seen.bytes);
+        assert_eq!(seen.status, 403, "{method} {path}: {text}");
+        for leak in leaks {
+            assert!(
+                !text.contains(leak),
+                "{method} {path} leaked {leak}: {text}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_explorer_answers_nothing_about_a_bucket_its_caller_may_not_read() {
+    let _why = IGNORED;
+    let (state, console, now) = crate::console_users::states().await;
+    let storage = state.storage();
+    let ann = user_with_key(storage, "ann", "alpha", Role::Member, true).await;
+    let bob = user_with_key(storage, "bob", "alpha", Role::Member, false).await;
+    let carl = user_with_key(storage, "carl", "beta", Role::SpaceAdmin, true).await;
+    for (path, headers) in [
+        ("/ann-photos", vec![]),
+        (
+            "/ann-photos/secret-plan.png",
+            vec![("content-type", "image/x-secret")],
+        ),
+    ] {
+        let put = call_as(&state, ann.pair(), "PUT", path, vec![], headers, b"x").await;
+        assert_eq!(put.status, 200, "{}", put.body);
+    }
+    // A grant across spaces reaches nothing; the crossing is attempted with one in place.
+    grant(
+        storage,
+        "carl",
+        "ann-photos",
+        Access {
+            read: true,
+            write: true,
+        },
+    )
+    .await;
+    let ann_token = sign_in_as(&console, &ann).await.expect("ann");
+    let bob_token = sign_in_as(&console, &bob).await.expect("bob");
+    let carl_token = sign_in_as(&console, &carl).await.expect("carl");
+    let detail = send(
+        &console,
+        "GET",
+        "/api/v1/buckets/ann-photos/object?key=secret-plan.png",
+        Some(&ann_token),
+        None,
+    )
+    .await;
+    assert_eq!(detail.status, 200, "the control: the owner reads it");
+    let etag = detail.json()["etag"].as_str().expect("an etag").to_owned();
+    let delete_body = format!(
+        r#"{{"etag":{},"reason":"probe"}}"#,
+        Value::from(etag.as_str())
+    );
+
+    let paths = [
+        ("GET", "/api/v1/buckets/ann-photos/objects".to_owned(), None),
+        (
+            "GET",
+            "/api/v1/buckets/ann-photos/objects?prefix=secret&delimiter=%2F&limit=5".to_owned(),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/buckets/ann-photos/objects?cursor=key%3Aa&limit=5".to_owned(),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/buckets/ann-photos/object?key=secret-plan.png".to_owned(),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/buckets/ann-photos/object/content?key=secret-plan.png".to_owned(),
+            None,
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/ann-photos/object?key=secret-plan.png".to_owned(),
+            Some(delete_body.as_str()),
+        ),
+        // Absent objects and buckets answer exactly as a present one does.
+        (
+            "GET",
+            "/api/v1/buckets/ann-photos/object?key=never-written".to_owned(),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/buckets/no-such-bucket/objects".to_owned(),
+            None,
+        ),
+        (
+            "GET",
+            "/api/v1/buckets/no-such-bucket/object?key=secret-plan.png".to_owned(),
+            None,
+        ),
+    ];
+    let every: Vec<usize> = (0..paths.len()).collect();
+    let leaks = ["secret-plan", "image/x-secret", etag.as_str()];
+    refused_saying_nothing(&console, &carl_token, &paths, &every, &leaks).await;
+    refused_saying_nothing(&console, &bob_token, &paths, &every, &leaks).await;
+
+    // A read grant opens the reads in its own space, and still not the delete.
+    grant(
+        storage,
+        "bob",
+        "ann-photos",
+        Access {
+            read: true,
+            write: false,
+        },
+    )
+    .await;
+    now.fetch_add(5, Ordering::AcqRel);
+    for path in [
+        "/api/v1/buckets/ann-photos/objects?prefix=secret",
+        "/api/v1/buckets/ann-photos/object?key=secret-plan.png",
+        "/api/v1/buckets/ann-photos/object/content?key=secret-plan.png",
+    ] {
+        let seen = send(&console, "GET", path, Some(&bob_token), None).await;
+        assert_eq!(seen.status, 200, "{path}");
+    }
+    refused_saying_nothing(&console, &bob_token, &paths, &[5, 7, 8], &leaks).await;
+
+    let kept = send(
+        &console,
+        "GET",
+        "/api/v1/buckets/ann-photos/object?key=secret-plan.png",
+        Some(&ann_token),
+        None,
+    )
+    .await;
+    assert_eq!(kept.status, 200, "no refused delete removed the object");
+    assert_eq!(kept.json()["etag"], Value::from(etag.as_str()));
 }
