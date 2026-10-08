@@ -33,8 +33,12 @@ async fn queued_files_are_reclaimed_after_the_grace_period_and_live_ones_are_not
             .status,
         200
     );
-    let mut orphan = objects.upload().await.expect("upload");
-    orphan.append(&body(MIB, 3)).await.expect("append");
+    let bytes = body(MIB, 3);
+    let mut orphan = objects
+        .upload(u64::try_from(bytes.len()).expect("small"))
+        .await
+        .expect("upload");
+    orphan.append(&bytes).await.expect("append");
     let orphan = orphan.finish().await.expect("finish").id;
     assert_eq!(files(&dir).len(), 3, "first, current and the orphan");
     let mut both = vec![first, orphan];
@@ -64,8 +68,12 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
     let (state, planter, _) = fresh_with(Some(dir.clone())).await;
     assert_eq!(call(&state, "PUT", "/race", vec![], b"").await.status, 200);
     let objects = state.storage().objects();
-    let mut upload = objects.upload().await.expect("upload");
-    upload.append(&body(MIB, 4)).await.expect("append");
+    let bytes = body(MIB, 4);
+    let mut upload = objects
+        .upload(u64::try_from(bytes.len()).expect("small"))
+        .await
+        .expect("upload");
+    upload.append(&bytes).await.expect("append");
     let uploaded = upload.finish().await.expect("finish");
     // The upload outlived the grace period: the reclaimer takes its file before the object commits.
     assert_eq!(objects.reclaim(0, 1000).await.expect("reclaim").removed, 1);

@@ -17,7 +17,9 @@ use crate::Result;
 /// removal queues its file. Each open upload also has a `pending` record whose id orders the uploads as
 /// ListMultipartUploads lists them; whatever deletes the upload drops it in the same transaction (`upload_closed`).
 /// The cluster's topology lives here too: `s3_nodes` (one record per node, refreshed as it registers) and `layouts`
-/// (one record per layout version, created once and never rewritten).
+/// (one record per layout version, created once and never rewritten). On a cluster member every data id is
+/// erasure-coded and `shard_sets` records the layout its shards were placed under, from the transaction that queues
+/// the id until reclamation; `heals` lists the data ids acknowledged with fewer than every shard durable.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -58,6 +60,8 @@ THEN { LET $listed = $before.position; DELETE pending:$listed; };
 DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUIRED, seen datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS layouts (\
  version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED);
+DEFINE TABLE IF NOT EXISTS heals (data uuid REQUIRED, queued datetime REQUIRED);
 COMMIT;
 ";
 

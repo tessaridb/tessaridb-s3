@@ -1,14 +1,17 @@
 //! [`Storage`]: the services the API reaches persistence through, and nothing else.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tessari_s3_constants::DATA_BLOCK_SIZE;
+use tessari_s3_infrastructure::ClusterSettings;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
 use crate::Result;
 use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
+use crate::erasure::ErasureWrites;
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::shards::ShardService;
@@ -40,6 +43,29 @@ impl Storage {
             shards,
             pool,
         }
+    }
+
+    /// The services of a cluster member: as [`Storage::new`], with every data id written as erasure-coded shards
+    /// over the cluster described by `cluster`.
+    ///
+    /// # Errors
+    /// [`crate::Error::Peer`] when the peer client cannot be built.
+    pub fn clustered(
+        pool: MetaPool,
+        data_dir: Option<PathBuf>,
+        cluster: &ClusterSettings,
+    ) -> Result<Self> {
+        let mut storage = Self::new(pool.clone(), data_dir);
+        let writes = ErasureWrites::new(
+            cluster,
+            pool.clone(),
+            storage.cluster.clone(),
+            storage.shards.clone(),
+        )?;
+        storage.objects = storage.objects.clone().clustered(Arc::new(writes));
+        storage.multipart =
+            MultipartService::new(TessariMultipart::new(pool), storage.objects.clone());
+        Ok(storage)
     }
 
     /// Creates the schema when it is missing; run once at start-up.

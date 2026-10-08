@@ -357,14 +357,18 @@ async fn an_upload_cut_off_before_its_commit_leaves_a_queued_file_and_no_object(
     let dir = scratch_dir();
     let (state, planter, _) = fresh_with(Some(dir.clone())).await;
     let objects = state.storage().objects();
-    let mut upload = objects.upload().await.expect("upload starts");
+    let bytes = body(MIB + 3, 2);
+    let mut upload = objects
+        .upload(u64::try_from(bytes.len()).expect("small"))
+        .await
+        .expect("upload starts");
     let id = upload.id();
     assert_eq!(
         queued(&planter).await,
         vec![id],
         "queued before a byte reaches the disk"
     );
-    upload.append(&body(MIB + 3, 2)).await.expect("append");
+    upload.append(&bytes).await.expect("append");
     upload.finish().await.expect("the file is durable");
     // The process dies here: the object record was never committed.
     assert_eq!(files(&dir).len(), 1, "the file is on disk");

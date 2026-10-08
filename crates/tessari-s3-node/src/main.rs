@@ -5,10 +5,12 @@
 //! internal shard listener — then serving until SIGINT or SIGTERM, after which in-flight
 //! requests and the daemons' current runs get the configured grace period before the process exits.
 
+mod internal;
+
 use std::time::Duration;
 
 use std::sync::Arc;
-use tessari_s3_api::{ApiState, InternalState, internal_router, router};
+use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
@@ -29,7 +31,11 @@ async fn main() -> anyhow::Result<()> {
         max_inflight = config.max_inflight,
         "tessaridb-s3 starting"
     );
-    let storage = Storage::new(MetaPool::new(config.meta.clone())?, config.data_dir.clone());
+    let pool = MetaPool::new(config.meta.clone())?;
+    let storage = match &config.cluster {
+        Some(cluster) => Storage::clustered(pool, config.data_dir.clone(), cluster)?,
+        None => Storage::new(pool, config.data_dir.clone()),
+    };
     // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
     // start, rather than answering every request 503.
     storage.prepare().await?;
@@ -59,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(config.reclaim_interval_secs),
     );
     daemons.spawn(run(Arc::new(reaper), stop_rx.clone()));
-    let internal = internal_surface(&config, &storage, stop_rx.clone()).await?;
+    let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let mut server_stop = stop_rx;
@@ -101,31 +107,6 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("tessaridb-s3 stopped");
     Ok(())
-}
-
-/// On a node of a cluster, the internal shard surface: bound before anything is served, stopped with the S3
-/// surface. `None` on a node of its own.
-async fn internal_surface(
-    config: &S3Config,
-    storage: &Storage,
-    mut stop: watch::Receiver<bool>,
-) -> anyhow::Result<Option<impl Future<Output = std::io::Result<()>> + use<>>> {
-    let Some(cluster) = &config.cluster else {
-        return Ok(None);
-    };
-    let state = InternalState::new(
-        cluster.secret.clone(),
-        ApiState::system_clock(),
-        storage.clone(),
-        config.max_inflight,
-    );
-    let listener = tokio::net::TcpListener::bind(cluster.internal_listen).await?;
-    tracing::info!(internal_listen = %cluster.internal_listen, "internal shard surface listening");
-    let serving =
-        axum::serve(listener, internal_router(state)).with_graceful_shutdown(async move {
-            let _closed = stop.changed().await;
-        });
-    Ok(Some(serving.into_future()))
 }
 
 /// Resolves when the process is asked to stop.

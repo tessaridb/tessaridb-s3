@@ -39,7 +39,7 @@ pub(crate) async fn receive(
     length: u64,
 ) -> Result<(Uploaded, Option<String>)> {
     let objects = call.state.storage().objects();
-    let mut upload = objects.upload().await?;
+    let mut upload = objects.upload(length).await?;
     let id = upload.id();
     let outcome = match fill(call, body, length, &mut upload).await {
         Ok(trailer) => match upload.finish().await {

@@ -13,6 +13,12 @@ pub enum Error {
     /// Another node of the cluster could not be reached, or stopped answering.
     #[error(transparent)]
     Peer(#[from] PeerError),
+    /// The cluster has no layout yet: fewer nodes have registered than the erasure code has shards.
+    #[error("the cluster has no layout yet; fewer nodes than shards have registered")]
+    NoLayout,
+    /// The data is erasure-coded and this build does not read erasure-coded data yet.
+    #[error("erasure-coded data cannot be read by this build yet")]
+    ErasureReadPending,
     /// Fewer shards than the write quorum were made durable; the write is not acknowledged.
     #[error("{durable} shards durable, the write quorum is {needed}")]
     Quorum {
@@ -101,7 +107,8 @@ impl Error {
         match self {
             Self::Meta(meta) => meta.category(),
             Self::Peer(peer) => peer.category(),
-            Self::Quorum { .. } => ErrorCategory::Unavailable,
+            Self::Quorum { .. } | Self::NoLayout => ErrorCategory::Unavailable,
+            Self::ErasureReadPending => ErrorCategory::Internal,
             Self::PeerRefused { status: 404 } => ErrorCategory::NotFound,
             Self::PeerRefused { status: 409 } => ErrorCategory::Conflict,
             Self::PeerRefused { status: 503 } => ErrorCategory::Unavailable,

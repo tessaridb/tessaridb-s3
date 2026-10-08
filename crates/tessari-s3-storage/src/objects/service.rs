@@ -6,13 +6,17 @@ use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, MULTIPART_READ_ATTEMPTS};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
-use super::model::{Content, NewObject, Reclaimed, Removed, StoredObject, WriteCondition, Written};
+use super::model::{Content, NewObject, Removed, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use super::tessaridb::TessariObjects;
-use super::upload::Upload;
-use crate::data::{DataFiles, DataReader};
+use std::sync::Arc;
+
+use crate::data::DataFiles;
+use crate::erasure::ErasureWrites;
 use crate::{Error, Result};
 
+#[path = "service_data.rs"]
+mod data;
 #[path = "list.rs"]
 mod list;
 
@@ -21,104 +25,31 @@ mod list;
 pub struct ObjectService {
     repository: TessariObjects,
     data: Option<DataFiles>,
+    erasure: Option<Arc<ErasureWrites>>,
 }
 
 impl ObjectService {
     /// The service over `repository`, with data files in `data` when a data directory is configured.
     #[must_use]
     pub(crate) const fn new(repository: TessariObjects, data: Option<DataFiles>) -> Self {
-        Self { repository, data }
+        Self {
+            repository,
+            data,
+            erasure: None,
+        }
+    }
+
+    /// The same service on a cluster member: every data id is written as shards through `writes`.
+    #[must_use]
+    pub(crate) fn clustered(mut self, writes: Arc<ErasureWrites>) -> Self {
+        self.erasure = Some(writes);
+        self
     }
 
     /// Whether objects above the inline size can be stored.
     #[must_use]
-    pub const fn stores_data(&self) -> bool {
-        self.data.is_some()
-    }
-
-    fn files(&self) -> Result<&DataFiles> {
-        self.data.as_ref().ok_or(Error::NoDataDirectory)
-    }
-
-    /// Starts a data file: its id is queued for reclamation first, then the file is created.
-    ///
-    /// # Errors
-    /// [`Error::NoDataDirectory`], the metadata store's refusal or outage, or the drive's failure.
-    pub async fn upload(&self) -> Result<Upload> {
-        let files = self.files()?;
-        let id = *uuid::Uuid::new_v4().as_bytes();
-        self.repository.queue(id).await?;
-        match files.create(id).await {
-            Ok(writer) => Ok(Upload::new(id, writer)),
-            Err(error) => {
-                self.release_logged(id).await;
-                Err(error)
-            }
-        }
-    }
-
-    /// Removes data `id`'s file and then its queue entry; a failure leaves the entry for the reclaimer.
-    ///
-    /// # Errors
-    /// The drive's or the metadata store's failure.
-    pub async fn release(&self, id: [u8; 16]) -> Result<()> {
-        self.files()?.remove(id).await?;
-        self.repository.unqueue(id).await
-    }
-
-    /// Whether data `id` is still queued and unclaimed, so a commit could still take it.
-    ///
-    /// # Errors
-    /// The metadata store's refusal or outage.
-    pub(crate) async fn claimable(&self, id: [u8; 16]) -> Result<bool> {
-        self.repository.claimable(id).await
-    }
-
-    async fn release_logged(&self, id: [u8; 16]) {
-        if let Err(error) = self.release(id).await {
-            let data = uuid::Uuid::from_bytes(id);
-            tracing::warn!(%data, error = %error, "data left queued for the reclaimer");
-        }
-    }
-
-    /// One reclamation pass over at most `limit` queue entries older than `grace_secs`.
-    ///
-    /// # Errors
-    /// The metadata store's or the drive's failure.
-    pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
-        let files = self.files()?;
-        let due = self.repository.due(grace_secs, limit).await?;
-        let mut done = Reclaimed {
-            examined: due.len(),
-            ..Reclaimed::default()
-        };
-        for (id, marked) in due {
-            let data = uuid::Uuid::from_bytes(id);
-            if self.repository.referenced(id).await? {
-                // Not a state this server writes; keep the bytes and say so.
-                tracing::warn!(%data, "a queued data file is referenced by an object; kept");
-                self.repository.unqueue(id).await?;
-                done.kept = done.kept.saturating_add(1);
-                continue;
-            }
-            // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false
-            // mark means the commit got there first.
-            if !marked && !self.repository.mark(id).await? {
-                continue;
-            }
-            files.remove(id).await?;
-            self.repository.unqueue(id).await?;
-            done.removed = done.removed.saturating_add(1);
-        }
-        Ok(done)
-    }
-
-    /// Opens data `id` holding an object of `size` bytes, its header and length checked.
-    ///
-    /// # Errors
-    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] or the drive's failure.
-    pub async fn open(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
-        self.files()?.open(id, size).await
+    pub fn stores_data(&self) -> bool {
+        self.data.is_some() || self.erasure.is_some()
     }
 
     /// Commits `object` at `bucket/key` under `condition`. A data object whose write is refused releases its file;

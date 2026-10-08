@@ -145,7 +145,7 @@ pub(crate) async fn into_file(
             "objects larger than 128 KiB need a data directory (TESSARIDB_S3_DATA_DIR)",
         ));
     }
-    let mut upload = objects.upload().await?;
+    let mut upload = objects.upload(length).await?;
     let id = upload.id();
     let mut written = Ok(());
     while let Some(chunk) = stream.next().await {
