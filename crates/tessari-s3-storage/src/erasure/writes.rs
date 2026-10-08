@@ -78,6 +78,18 @@ impl ErasureWrites {
         self.stall
     }
 
+    /// The name this node's claims are held under.
+    pub(super) fn holder(&self) -> &str {
+        self.node.as_str()
+    }
+
+    /// Hands back this node's claim on data `id`; a failure only costs the claim's remaining lease.
+    pub(super) async fn unclaim_logged(&self, id: [u8; 16]) {
+        if let Err(error) = self.sets.unclaim(id, self.holder()).await {
+            tracing::warn!(data = %crate::data::hex(id), error = %error, "a claim is left to lapse");
+        }
+    }
+
     async fn layout(&self) -> Result<&Layout> {
         self.layout
             .get_or_try_init(|| async {
@@ -183,11 +195,22 @@ impl ErasureWrites {
     }
 
     /// Removes every shard of data `id` — written under layout `version` — from every node, then its shard-set
-    /// record. A node that cannot be reached leaves the record, so a later pass tries again.
+    /// record, under this node's claim on the id so no healer writes a shard back behind it. A node that cannot be
+    /// reached leaves the record, so a later pass tries again.
     ///
     /// # Errors
-    /// [`Error::Malformed`] for a layout this node does not hold, a peer's refusal or absence, or the store's.
+    /// [`Error::Held`] while another node works on the id, [`Error::Malformed`] for a layout this node does not
+    /// hold, a peer's refusal or absence, or the store's.
     pub(crate) async fn remove(&self, id: [u8; 16], version: u32) -> Result<()> {
+        if !self.sets.claim(id, self.holder()).await? {
+            return Err(Error::Held);
+        }
+        let removed = self.remove_claimed(id, version).await;
+        self.unclaim_logged(id).await;
+        removed
+    }
+
+    async fn remove_claimed(&self, id: [u8; 16], version: u32) -> Result<()> {
         let layout = self.layout().await?;
         if layout.version() != version {
             return Err(Error::Malformed {

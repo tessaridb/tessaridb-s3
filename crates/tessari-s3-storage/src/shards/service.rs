@@ -64,6 +64,22 @@ impl ShardService {
         self.files()?.open_shard(id, index, size).await
     }
 
+    /// Up to `limit` shards on this node last written more than `age` ago, as (data id, index); none without a data
+    /// directory.
+    ///
+    /// # Errors
+    /// The drive's failure while walking.
+    pub(crate) async fn older_than(
+        &self,
+        age: std::time::Duration,
+        limit: usize,
+    ) -> Result<Vec<([u8; 16], u16)>> {
+        match &self.files {
+            Some(files) => files.shards_older_than(age, limit).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Removes shard `index` of data `id`; a missing shard is not an error.
     ///
     /// # Errors

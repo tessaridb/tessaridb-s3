@@ -19,7 +19,8 @@ use crate::Result;
 /// The cluster's topology lives here too: `s3_nodes` (one record per node, refreshed as it registers) and `layouts`
 /// (one record per layout version, created once and never rewritten). On a cluster member every data id is
 /// erasure-coded and `shard_sets` records the layout its shards were placed under, from the transaction that queues
-/// the id until reclamation; `heals` lists the data ids acknowledged with fewer than every shard durable.
+/// the id until reclamation; `heals` lists the data ids acknowledged with fewer than every shard durable, and the
+/// `heal_claims` space holds the expiring claim of the one node healing or reclaiming an id.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -62,6 +63,7 @@ DEFINE TABLE IF NOT EXISTS layouts (\
  version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE TABLE IF NOT EXISTS heals (data uuid REQUIRED, queued datetime REQUIRED);
+DEFINE SPACE IF NOT EXISTS heal_claims;
 COMMIT;
 ";
 

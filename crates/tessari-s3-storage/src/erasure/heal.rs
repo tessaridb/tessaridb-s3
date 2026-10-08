@@ -27,15 +27,22 @@ enum Outcome {
 }
 
 impl ErasureWrites {
-    /// Heals up to `limit` listed data ids. An id whose healing fails part way stays listed for the next pass.
+    /// Heals up to `limit` listed data ids, each under this node's claim on it; an id another node holds is left to
+    /// that node, and an id whose healing fails part way stays listed for the next pass.
     ///
     /// # Errors
-    /// The metadata store's refusal or outage while listing or unlisting.
+    /// The metadata store's refusal or outage while listing, claiming or unlisting.
     pub(crate) async fn heal_pass(self: &Arc<Self>, limit: usize) -> Result<Healed> {
         let mut done = Healed::default();
         for id in self.sets.healing(limit).await? {
             done.examined = done.examined.saturating_add(1);
-            match self.heal_one(id).await {
+            if !self.sets.claim(id, self.holder()).await? {
+                done.held = done.held.saturating_add(1);
+                continue;
+            }
+            let outcome = self.heal_one(id).await;
+            self.unclaim_logged(id).await;
+            match outcome {
                 Ok(Outcome::Whole) => {
                     self.sets.healed(id).await?;
                     done.healed = done.healed.saturating_add(1);

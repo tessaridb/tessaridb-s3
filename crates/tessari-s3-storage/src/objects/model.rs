@@ -108,6 +108,8 @@ pub struct Reclaimed {
     pub removed: usize,
     /// Entries an object still references: the entry is dropped, the file kept.
     pub kept: usize,
+    /// Data ids whose shard bytes were on this node with no shard set left: their shards removed.
+    pub orphans: usize,
 }
 
 /// What one healing pass did.
@@ -119,6 +121,8 @@ pub struct Healed {
     pub healed: usize,
     /// Ids with fewer readable shards than the read quorum, left listed.
     pub at_risk: usize,
+    /// Ids another node holds the claim on, left to it for this pass.
+    pub held: usize,
 }
 
 /// What a delete ended in.

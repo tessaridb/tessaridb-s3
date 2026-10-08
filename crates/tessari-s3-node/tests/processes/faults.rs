@@ -2,9 +2,9 @@
 //! killed while a write or a read is in flight and the metadata leader killed under traffic. An acknowledged object
 //! is never lost, and no object is ever visible with anything but the bytes that were written to it.
 
-use std::path::Path;
 use std::time::{Duration, Instant};
 
+use crate::disk::{first_shards, kill, writing};
 use crate::docker;
 use crate::meta::MetaCluster;
 use crate::requests::{call, fetch, get_interrupted, put, put_interrupted};
@@ -28,43 +28,6 @@ fn patterned(len: usize, seed: usize) -> Vec<u8> {
             u8::try_from(mixed % 251).expect("small")
         })
         .collect()
-}
-
-/// Files of any kind under `dir`.
-fn files(dir: &Path) -> usize {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|entry| {
-            let path = entry.path();
-            if path.is_dir() { files(&path) } else { 1 }
-        })
-        .sum()
-}
-
-/// Kills process `pid` with SIGKILL, as a power cut would; the test still owns its handle and reaps it later.
-async fn kill(pid: u32) {
-    let status = tokio::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .await
-        .expect("kill runs");
-    assert!(status.success(), "process {pid} was not running");
-}
-
-/// Waits until a node has started writing its part of an upload: the first file appears in its data directory.
-async fn writing(dir: &Path) {
-    let started = Instant::now();
-    while files(dir) == 0 {
-        assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "{} never received a shard",
-            dir.display()
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 async fn healed(cluster: &Cluster) {
@@ -169,7 +132,14 @@ async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     }
     healed(&cluster).await;
 
-    // A node holding a shard dies while a read streams: the read goes on from the others, byte for byte.
+    // A node holding a shard the read needs dies while the read streams: the read goes on from the others, byte for
+    // byte. Placement is per object, so the victim is a node other than the front one that received one of this
+    // object's data shards.
+    let before: Vec<_> = cluster
+        .nodes
+        .iter()
+        .map(|node| first_shards(&node.dir))
+        .collect();
     let large = patterned(24 * MIB, 3);
     let (status, body) = call(&cluster.nodes[front], "PUT", "/faults/during-get", &large).await;
     assert_eq!(status, 200, "{body}");
@@ -178,7 +148,14 @@ async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
         0,
         "every shard durable"
     );
-    let victim = 2;
+    let victim = (0..cluster.nodes.len())
+        .find(|&node| {
+            node != front
+                && first_shards(&cluster.nodes[node].dir)
+                    .iter()
+                    .any(|path| !before[node].contains(path))
+        })
+        .expect("another node holds one of this object's data shards");
     let pid = cluster.nodes[victim].child.id().expect("running");
     let (status, read) =
         get_interrupted(&cluster.nodes[front], "/faults/during-get", kill(pid)).await;

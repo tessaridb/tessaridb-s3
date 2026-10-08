@@ -103,6 +103,9 @@ pub enum Error {
     /// retryable.
     #[error("the key changed under every read attempt")]
     Contended,
+    /// Another node holds the claim on this data id (it is healing or reclaiming it); try on a later pass.
+    #[error("another node is working on this data id")]
+    Held,
 }
 
 impl Error {
@@ -126,7 +129,7 @@ impl Error {
             | Self::Randomness
             | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
             Self::InvalidShard { .. } | Self::ShardLength { .. } => ErrorCategory::Validation,
-            Self::Contended => ErrorCategory::Conflict,
+            Self::Contended | Self::Held => ErrorCategory::Conflict,
         }
     }
 }

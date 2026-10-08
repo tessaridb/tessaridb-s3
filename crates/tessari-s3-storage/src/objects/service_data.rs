@@ -113,9 +113,16 @@ impl ObjectService {
             if !marked && !self.repository.mark(id).await? {
                 continue;
             }
-            self.remove_data(id).await?;
+            match self.remove_data(id).await {
+                // Another node is healing it; the entry stays marked and a later pass removes it.
+                Err(Error::Held) => continue,
+                removed => removed?,
+            }
             self.repository.unqueue(id).await?;
             done.removed = done.removed.saturating_add(1);
+        }
+        if let Some(writes) = &self.erasure {
+            done.orphans = writes.sweep(grace_secs, limit).await?;
         }
         Ok(done)
     }

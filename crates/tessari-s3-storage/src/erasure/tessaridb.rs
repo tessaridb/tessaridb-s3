@@ -1,6 +1,7 @@
 //! [`ShardSetRepository`] over TessariDB. Every value is bound; the pool sends the namespace and database with each
 //! unit of work.
 
+use tessari_s3_constants::HEAL_CLAIM_SECS;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 
 use super::repository::{ShardSet, ShardSetRepository};
@@ -110,6 +111,47 @@ impl ShardSetRepository for TessariShardSets {
 
     async fn healed(&self, id: [u8; 16]) -> Result<()> {
         self.pool.run("DELETE heals:$data;", data(id)).await?;
+        Ok(())
+    }
+
+    async fn claim(&self, id: [u8; 16], holder: &str) -> Result<bool> {
+        let mut parameters = data(id);
+        parameters.push(("holder".to_owned(), Value::String(holder.to_owned())));
+        // Free, or already this holder's — one healer and one reclaimer run per process, one after the other, so a
+        // claim under this node's own name is one a dead process of this node left. `EXPIRE` takes the duration as
+        // written; it is this server's own constant, formatted to digits only.
+        let script = format!(
+            "SET heal_claims:$data = $holder IF ABSENT EXPIRE {HEAL_CLAIM_SECS}s; \
+             SET heal_claims:$data = $holder IF = $holder EXPIRE {HEAL_CLAIM_SECS}s;"
+        );
+        let mut taken = false;
+        for answer in self.pool.run(&script, parameters).await? {
+            match answer {
+                Answer::Value {
+                    value: Value::Bool(wrote),
+                    ..
+                } => taken = taken || wrote,
+                _ => {
+                    return Err(Error::Malformed {
+                        record: "heal_claims",
+                        reason: "a conditional set answered no boolean",
+                    });
+                }
+            }
+        }
+        Ok(taken)
+    }
+
+    async fn unclaim(&self, id: [u8; 16], holder: &str) -> Result<()> {
+        let mut parameters = data(id);
+        parameters.push(("holder".to_owned(), Value::String(holder.to_owned())));
+        // Conditional on still holding it, and leaving an expiring key: a bare write would make the claim permanent.
+        self.pool
+            .run(
+                "SET heal_claims:$data = 'free' IF = $holder EXPIRE 1ms;",
+                parameters,
+            )
+            .await?;
         Ok(())
     }
 }

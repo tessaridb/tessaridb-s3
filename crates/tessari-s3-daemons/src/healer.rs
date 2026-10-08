@@ -48,8 +48,8 @@ impl Daemon for Healer {
                 })?;
             Ok(Report {
                 message: format!(
-                    "examined {}, healed {}, at risk {}",
-                    done.examined, done.healed, done.at_risk
+                    "examined {}, healed {}, at risk {}, held elsewhere {}",
+                    done.examined, done.healed, done.at_risk, done.held
                 ),
             })
         })

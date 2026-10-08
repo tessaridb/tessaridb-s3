@@ -53,8 +53,8 @@ impl Daemon for Reclaimer {
                 })?;
             Ok(Report {
                 message: format!(
-                    "examined {}, removed {}, kept {}",
-                    done.examined, done.removed, done.kept
+                    "examined {}, removed {}, kept {}, orphans {}",
+                    done.examined, done.removed, done.kept, done.orphans
                 ),
             })
         })

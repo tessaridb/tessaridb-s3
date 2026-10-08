@@ -96,6 +96,11 @@ impl DataFiles {
         Self { root, block_size }
     }
 
+    /// The directory every data file and shard lives under.
+    pub(super) fn data_root(&self) -> PathBuf {
+        self.root.join(DATA_SUBDIR)
+    }
+
     /// The final path of data `id`: two directory levels from its first two bytes, so no directory holds more than
     /// a 65 536th of the files. Only the server's own uuid names a path; nothing a client sent reaches it.
     pub(crate) fn path(&self, id: [u8; 16]) -> PathBuf {

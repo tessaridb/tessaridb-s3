@@ -5,6 +5,7 @@ mod heal;
 mod read;
 mod repository;
 mod senders;
+mod sweep;
 mod tessaridb;
 mod upload;
 mod writes;

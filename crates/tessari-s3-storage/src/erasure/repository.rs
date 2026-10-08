@@ -23,4 +23,9 @@ pub(crate) trait ShardSetRepository: Send + Sync {
     fn healing(&self, limit: usize) -> impl Future<Output = Result<Vec<[u8; 16]>>> + Send;
     /// Removes data `id` from the healing list.
     fn healed(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
+    /// Takes the expiring claim on data `id` for `holder` — free, or already `holder`'s; `false` when another holder
+    /// has it.
+    fn claim(&self, id: [u8; 16], holder: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// Hands back `holder`'s claim on data `id`; a claim that lapsed or passed to another holder is left alone.
+    fn unclaim(&self, id: [u8; 16], holder: &str) -> impl Future<Output = Result<()>> + Send;
 }

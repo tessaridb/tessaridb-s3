@@ -30,6 +30,9 @@ section records which TessariDB version its metadata runs on.
   directory on start-up, and a write that stops part way (a client gone, a healing pass stopped) removes its own.
 - A committed object whose data is missing is reported as damaged (`500 InternalError`, logged as corruption)
   rather than as a drive error.
+- One node at a time heals or reclaims an object: each takes an expiring claim on the object's data in TessariDB
+  first, so healers no longer duplicate work and a heal can no longer write a shard back behind a reclaim. Shard
+  bytes left with no record of their object (older than the reclamation grace) are swept by the reclaimer.
 - Every metadata statement is bounded in time (`TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS`, default 30): a metadata
   node that stops answering mid-statement no longer holds the request until the operating system gives up. The
   request answers `503`, and a write's data stays queued, since the statement may have committed.

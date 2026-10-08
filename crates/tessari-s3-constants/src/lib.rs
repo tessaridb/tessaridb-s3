@@ -146,6 +146,13 @@ pub const DEFAULT_HEAL_INTERVAL_SECS: u64 = 60;
 /// Data ids one healing pass looks at.
 pub const HEAL_BATCH: usize = 100;
 
+/// Seconds a node's claim on one data id lasts — taken by a healer before it checks and rewrites shards, and by a
+/// reclaimer before it removes them, so one node at a time works on an id. A lease, not a mutex: past it another node
+/// may take the id, which costs duplicate work (two healers end in one refusal), never a wrong shard, because a
+/// verified shard is never rewritten and a second writer of one shard is refused. It is also how long a node that
+/// died holding a claim, and does not come back, keeps the others off that id.
+pub const HEAL_CLAIM_SECS: u64 = 120;
+
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 
