@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::ObjectService;
 use crate::data::{DataFiles, hex};
 use crate::objects::ObjectReader;
-use crate::objects::model::{Healed, Reclaimed};
+use crate::objects::model::{HealBacklog, Healed, Reclaimed};
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
 use crate::{Error, Result};
@@ -135,6 +135,17 @@ impl ObjectService {
         match &self.erasure {
             Some(writes) => writes.heal_pass(limit).await,
             None => Ok(Healed::default()),
+        }
+    }
+
+    /// How many data ids are listed for healing, counted up to `limit`; `None` off a cluster, where nothing is.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn heal_backlog(&self, limit: usize) -> Result<Option<HealBacklog>> {
+        match &self.erasure {
+            Some(writes) => writes.backlog(limit).await.map(Some),
+            None => Ok(None),
         }
     }
 

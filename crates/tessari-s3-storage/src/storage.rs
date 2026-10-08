@@ -8,6 +8,7 @@ use tessari_s3_infrastructure::ClusterSettings;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
 use crate::Result;
+use crate::actions::{ActionService, TessariActions};
 use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
@@ -24,6 +25,7 @@ pub struct Storage {
     multipart: MultipartService,
     cluster: ClusterService,
     shards: ShardService,
+    actions: ActionService,
     pool: MetaPool,
 }
 
@@ -39,6 +41,7 @@ impl Storage {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
             cluster: ClusterService::new(TessariCluster::new(pool.clone())),
+            actions: ActionService::new(TessariActions::new(pool.clone())),
             objects,
             shards,
             pool,
@@ -110,5 +113,11 @@ impl Storage {
     #[must_use]
     pub const fn buckets(&self) -> &BucketService {
         &self.buckets
+    }
+
+    /// The record of what operators did through the console.
+    #[must_use]
+    pub const fn actions(&self) -> &ActionService {
+        &self.actions
     }
 }

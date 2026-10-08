@@ -134,6 +134,28 @@ pub enum Removed {
     NoSuchBucket,
 }
 
+/// What a delete conditional on the object's ETag ended in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemovedIf {
+    /// The object the ETag named is gone.
+    Done,
+    /// The bucket does not exist.
+    NoSuchBucket,
+    /// The key holds no object.
+    NoSuchKey,
+    /// The key holds an object with another ETag: it was kept.
+    PreconditionFailed,
+}
+
+/// How many data ids are listed for healing, counted up to a bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HealBacklog {
+    /// Ids listed, at most the bound asked for.
+    pub listed: usize,
+    /// Whether more are listed than were counted.
+    pub more: bool,
+}
+
 /// What a listing shows of one object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectSummary {

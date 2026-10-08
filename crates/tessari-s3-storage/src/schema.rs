@@ -20,7 +20,8 @@ use crate::Result;
 /// (one record per layout version, created once and never rewritten). On a cluster member every data id is
 /// erasure-coded and `shard_sets` records the layout its shards were placed under, from the transaction that queues
 /// the id until reclamation; `heals` lists the data ids acknowledged with fewer than every shard durable, and the
-/// `heal_claims` space holds the expiring claim of the one node healing or reclaiming an id.
+/// `heal_claims` space holds the expiring claim of the one node healing or reclaiming an id. What operators do through
+/// the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -64,6 +65,7 @@ DEFINE TABLE IF NOT EXISTS layouts (\
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE TABLE IF NOT EXISTS heals (data uuid REQUIRED, queued datetime REQUIRED);
 DEFINE SPACE IF NOT EXISTS heal_claims;
+DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 COMMIT;
 ";
 

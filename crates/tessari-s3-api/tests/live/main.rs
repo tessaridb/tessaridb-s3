@@ -9,6 +9,7 @@
 mod buckets;
 mod cluster;
 mod complete;
+mod console_store;
 mod copy;
 mod copy_part;
 mod delete_many;

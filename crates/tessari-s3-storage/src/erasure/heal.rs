@@ -14,7 +14,7 @@ use super::repository::ShardSetRepository;
 use super::senders::{self, ShardShape};
 use super::upload::Destination;
 use super::writes::ErasureWrites;
-use crate::objects::Healed;
+use crate::objects::{HealBacklog, Healed};
 use crate::peers::ShardRef;
 use crate::{Error, Result};
 
@@ -57,6 +57,18 @@ impl ErasureWrites {
             }
         }
         Ok(done)
+    }
+
+    /// How many data ids are listed for healing, counted up to `limit`.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub(crate) async fn backlog(&self, limit: usize) -> Result<HealBacklog> {
+        let listed = self.sets.healing(limit.saturating_add(1)).await?.len();
+        Ok(HealBacklog {
+            listed: listed.min(limit),
+            more: listed > limit,
+        })
     }
 
     async fn heal_one(self: &Arc<Self>, id: [u8; 16]) -> Result<Outcome> {

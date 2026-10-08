@@ -157,6 +157,9 @@ pub const DEFAULT_CONSOLE_SIGN_INS_PER_MINUTE: usize = 10;
 /// unset: a page refreshing every few seconds across several tabs fits well under it.
 pub const DEFAULT_CONSOLE_REQUESTS_PER_MINUTE: usize = 600;
 
+/// The most console actions one page of the action record answers.
+pub const CONSOLE_ACTIONS_PAGE_MAX: usize = 100;
+
 /// Data ids one healing pass looks at.
 pub const HEAL_BATCH: usize = 100;
 

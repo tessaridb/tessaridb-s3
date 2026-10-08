@@ -18,7 +18,11 @@ pub(crate) async fn surface(
     ) else {
         return Ok(None);
     };
-    let tls = console.tls.as_ref().map(console_server_config).transpose()?;
+    let tls = console
+        .tls
+        .as_ref()
+        .map(console_server_config)
+        .transpose()?;
     let listener = tokio::net::TcpListener::bind(console.listen).await?;
     if tls.is_some() {
         tracing::info!(console_listen = %console.listen, "console listening over TLS");

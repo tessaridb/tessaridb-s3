@@ -120,6 +120,15 @@ pub(crate) trait ObjectRepository: Send + Sync {
         key: &ObjectKey,
         upload: [u8; 16],
     ) -> impl Future<Output = Result<Option<Vec<Part>>>> + Send;
+    /// Removes the record at `bucket/key` only while it is of `incarnation` and its ETag is `etag`, as ONE
+    /// transaction; `false` when that did not hold or there was no record.
+    fn remove_if(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        incarnation: [u8; 16],
+        etag: &str,
+    ) -> impl Future<Output = Result<bool>> + Send;
     /// Removes the record at `bucket/key`, if any.
     fn remove(
         &self,

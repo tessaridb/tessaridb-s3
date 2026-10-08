@@ -13,6 +13,8 @@ use crate::{Error, Result};
 mod page;
 #[path = "tessaridb_parts.rs"]
 mod parts;
+#[path = "tessaridb_remove.rs"]
+mod remove;
 
 /// The TessariDB object repository.
 #[derive(Clone)]
@@ -268,6 +270,16 @@ impl ObjectRepository for TessariObjects {
         upload: [u8; 16],
     ) -> Result<Option<Vec<Part>>> {
         parts::parts_of(&self.pool, id(bucket, key), upload).await
+    }
+
+    async fn remove_if(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        incarnation: [u8; 16],
+        etag: &str,
+    ) -> Result<bool> {
+        remove::remove_if(&self.pool, id(bucket, key), incarnation, etag).await
     }
 
     async fn remove(&self, bucket: &BucketName, key: &ObjectKey) -> Result<()> {

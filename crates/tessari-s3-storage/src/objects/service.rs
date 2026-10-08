@@ -6,7 +6,7 @@ use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, MULTIPART_READ_ATTEMPTS};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
-use super::model::{Content, NewObject, Removed, StoredObject, WriteCondition, Written};
+use super::model::{Content, NewObject, Removed, RemovedIf, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use super::tessaridb::TessariObjects;
 use std::sync::Arc;
@@ -226,5 +226,39 @@ impl ObjectService {
         }
         self.repository.remove(bucket, key).await?;
         Ok(Removed::Done)
+    }
+
+    /// Removes the object at `bucket/key` only while its ETag is `etag` — the check and the delete are one step.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn delete_if_match(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        etag: &str,
+    ) -> Result<RemovedIf> {
+        let Some(incarnation) = self.repository.incarnation(bucket).await? else {
+            return Ok(RemovedIf::NoSuchBucket);
+        };
+        if self
+            .repository
+            .remove_if(bucket, key, incarnation, etag)
+            .await?
+        {
+            return Ok(RemovedIf::Done);
+        }
+        // Why it was refused, read back after the atomic attempt: the classification can race, the delete never could.
+        let Snapshot {
+            bucket: current,
+            object: existing,
+        } = self.repository.read(bucket, key).await?;
+        if current != Some(incarnation) {
+            return Ok(RemovedIf::NoSuchBucket);
+        }
+        match existing {
+            Some((record, _)) if record == incarnation => Ok(RemovedIf::PreconditionFailed),
+            _ => Ok(RemovedIf::NoSuchKey),
+        }
     }
 }
