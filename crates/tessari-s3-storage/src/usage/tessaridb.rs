@@ -2,12 +2,13 @@
 //! `bucket_usage:1` record, and the `usage_claims` space holds the expiring claim of the member measuring now. Every
 //! value is bound.
 
-use tessari_s3_constants::USAGE_CLAIM_SECS;
-use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Value};
+use tessari_s3_constants::{DATA_BLOCK_SIZE, USAGE_CLAIM_SECS};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 
 use super::entity::{BucketUsageEntity, UsageEntity};
+use super::occupancy::{Measured, ObjectFold, PartFold};
 use super::repository::UsageRepository;
-use crate::answers::first_record;
+use crate::answers::{all_records, first_record};
 use crate::{Error, Result};
 
 /// The TessariDB usage repository.
@@ -56,22 +57,39 @@ impl UsageRepository for TessariUsage {
         Ok(taken)
     }
 
-    async fn measure(&self) -> Result<Vec<BucketUsageEntity>> {
-        // A whole-table fold: it reads every object record by design, once per pass, never per request.
-        let answers = self
-            .pool
-            .run(
-                "SELECT bucket_name, count(*) AS objects, sum(size) AS bytes FROM objects GROUP BY bucket_name;",
-                Vec::new(),
-            )
-            .await?;
-        match answers.into_iter().next() {
-            Some(Answer::Records { records, .. }) => records
-                .iter()
-                .map(|(_, value)| BucketUsageEntity::from_value(value, "bucket_name"))
-                .collect(),
-            _ => Err(malformed("a grouped read answered no records")),
+    async fn measure(&self) -> Result<Measured> {
+        // Whole-table folds: they read every object and part record by design, once per pass, never per request.
+        // A data file's stripes are `ceil(size / stripe)`; an inline object has no data file.
+        const SCRIPT: &str = "\
+            SELECT bucket_name, count(*) AS objects, sum(size) AS bytes, \
+             sum(IF inline != NONE THEN size ELSE 0 END) AS inline_bytes, \
+             sum(IF data != NONE THEN size ELSE 0 END) AS data_bytes, \
+             sum(IF data != NONE THEN math::ceil(size / $stripe) ELSE 0 END) AS data_stripes \
+             FROM objects GROUP BY bucket_name; \
+            SELECT upload, sum(size) AS bytes, sum(math::ceil(size / $stripe)) AS stripes FROM parts GROUP BY upload; \
+            SELECT upload, bucket_name FROM objects WHERE upload != NONE; \
+            SELECT upload, bucket_name FROM pending;";
+        let parameters = vec![(
+            "stripe".to_owned(),
+            Value::Number(Number::Integer(i64::from(DATA_BLOCK_SIZE))),
+        )];
+        let mut answers = self.pool.run(SCRIPT, parameters).await?.into_iter();
+        let mut next = || all_records(answers.next(), "bucket_usage");
+        let objects = next()?
+            .iter()
+            .map(object_fold)
+            .collect::<Result<Vec<_>>>()?;
+        let parts = next()?.iter().map(part_fold).collect::<Result<Vec<_>>>()?;
+        let mut owners = std::collections::BTreeMap::new();
+        for owner in next()?.iter().chain(next()?.iter()) {
+            let (upload, bucket) = owner_of(owner)?;
+            owners.insert(upload, bucket);
         }
+        Ok(Measured {
+            objects,
+            parts,
+            owners,
+        })
     }
 
     async fn store(&self, buckets: &[BucketUsageEntity]) -> Result<()> {
@@ -99,4 +117,69 @@ impl UsageRepository for TessariUsage {
             .map(UsageEntity::from_value)
             .transpose()
     }
+}
+
+/// A non-negative whole count, as a sum answers it: an integer, or a decimal with no fraction (a sum over a division).
+fn count(fields: &std::collections::BTreeMap<String, Value>, field: &'static str) -> Result<u64> {
+    let whole = match fields.get(field) {
+        Some(Value::Number(Number::Integer(number))) => i128::from(*number),
+        Some(Value::Number(Number::Decimal { mantissa, scale })) => {
+            let unit = 10_i128
+                .checked_pow(*scale)
+                .ok_or_else(|| malformed(field))?;
+            if mantissa.checked_rem(unit) != Some(0) {
+                return Err(malformed(field));
+            }
+            mantissa.checked_div(unit).ok_or_else(|| malformed(field))?
+        }
+        _ => return Err(malformed(field)),
+    };
+    u64::try_from(whole).map_err(|_| malformed(field))
+}
+
+fn fields(value: &Value) -> Result<&std::collections::BTreeMap<String, Value>> {
+    match value {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(malformed("not an object")),
+    }
+}
+
+fn text(fields: &std::collections::BTreeMap<String, Value>, field: &'static str) -> Result<String> {
+    match fields.get(field) {
+        Some(Value::String(text)) => Ok(text.clone()),
+        _ => Err(malformed(field)),
+    }
+}
+
+fn upload(fields: &std::collections::BTreeMap<String, Value>) -> Result<[u8; 16]> {
+    match fields.get("upload") {
+        Some(Value::Uuid(id)) => Ok(*id),
+        _ => Err(malformed("upload")),
+    }
+}
+
+fn object_fold(value: &Value) -> Result<ObjectFold> {
+    let row = fields(value)?;
+    Ok(ObjectFold {
+        bucket: text(row, "bucket_name")?,
+        objects: count(row, "objects")?,
+        bytes: count(row, "bytes")?,
+        inline_bytes: count(row, "inline_bytes")?,
+        data_bytes: count(row, "data_bytes")?,
+        data_stripes: count(row, "data_stripes")?,
+    })
+}
+
+fn part_fold(value: &Value) -> Result<PartFold> {
+    let row = fields(value)?;
+    Ok(PartFold {
+        upload: upload(row)?,
+        bytes: count(row, "bytes")?,
+        stripes: count(row, "stripes")?,
+    })
+}
+
+fn owner_of(value: &Value) -> Result<([u8; 16], String)> {
+    let row = fields(value)?;
+    Ok((upload(row)?, text(row, "bucket_name")?))
 }

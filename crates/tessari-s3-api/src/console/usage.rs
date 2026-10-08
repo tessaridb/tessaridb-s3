@@ -1,5 +1,6 @@
-//! `GET /api/v1/usage`: how many objects and bytes each bucket holds as last measured, the totals, and when the
-//! measurement was taken — over the buckets the caller can list. Never measured answers no time and no buckets.
+//! `GET /api/v1/usage`: how many objects and bytes each bucket holds as last measured (logical, inline in the metadata,
+//! and on the drives), the totals, and when the measurement was taken — over the buckets the caller can list. Never
+//! measured answers no time and no buckets.
 
 use std::collections::BTreeSet;
 
@@ -7,6 +8,7 @@ use axum::Json;
 use axum::extract::{Extension, State};
 use serde::Serialize;
 use tessari_s3_core::authz::{Principal, Visible};
+use tessari_s3_storage::usage::BucketUsage;
 
 use super::ConsoleState;
 use super::error::ConsoleError;
@@ -16,6 +18,8 @@ struct BucketUsageView {
     bucket: String,
     objects: u64,
     bytes: u64,
+    inline_bytes: u64,
+    raw_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -24,6 +28,8 @@ pub(super) struct UsageView {
     buckets: Vec<BucketUsageView>,
     objects: u64,
     bytes: u64,
+    inline_bytes: u64,
+    raw_bytes: u64,
 }
 
 pub(super) async fn usage(
@@ -36,6 +42,8 @@ pub(super) async fn usage(
             buckets: Vec::new(),
             objects: 0,
             bytes: 0,
+            inline_bytes: 0,
+            raw_bytes: 0,
         }));
     };
     // One measurement covers every bucket; a user sees the entries, and totals, of the buckets it can list.
@@ -53,14 +61,14 @@ pub(super) async fn usage(
             .buckets
             .retain(|bucket| names.contains(&bucket.bucket));
     }
-    let objects = measured
-        .buckets
-        .iter()
-        .fold(0_u64, |sum, bucket| sum.saturating_add(bucket.objects));
-    let bytes = measured
-        .buckets
-        .iter()
-        .fold(0_u64, |sum, bucket| sum.saturating_add(bucket.bytes));
+    let total = |figure: fn(&BucketUsage) -> u64| {
+        measured
+            .buckets
+            .iter()
+            .fold(0_u64, |sum, bucket| sum.saturating_add(figure(bucket)))
+    };
+    let (objects, bytes) = (total(|b| b.objects), total(|b| b.bytes));
+    let (inline_bytes, raw_bytes) = (total(|b| b.inline_bytes), total(|b| b.raw_bytes));
     Ok(Json(UsageView {
         taken: Some(measured.taken.iso8601_millis()),
         buckets: measured
@@ -70,9 +78,13 @@ pub(super) async fn usage(
                 bucket: bucket.bucket,
                 objects: bucket.objects,
                 bytes: bucket.bytes,
+                inline_bytes: bucket.inline_bytes,
+                raw_bytes: bucket.raw_bytes,
             })
             .collect(),
         objects,
         bytes,
+        inline_bytes,
+        raw_bytes,
     }))
 }

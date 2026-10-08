@@ -214,6 +214,14 @@ async fn an_object_is_written_as_one_shard_per_node_and_reclaimed_from_every_nod
         0,
         "every shard durable"
     );
+    let usage = member.storage.usage();
+    usage.refresh("n1").await.expect("measured");
+    let measured = usage.latest().await.expect("read").expect("taken");
+    assert_eq!(
+        measured.buckets.first().map(|bucket| bucket.raw_bytes),
+        Some(6 * 256 * 1024),
+        "300 KiB is one stripe: six 256 KiB blocks under 4+2"
+    );
     let read = call(&member.state, "GET", "/shards/big", vec![], b"").await;
     assert_eq!(read.status, 200, "{}", read.body);
     assert_eq!(read.bytes, large(), "read back from the shards");

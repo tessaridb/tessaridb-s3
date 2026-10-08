@@ -69,7 +69,12 @@ function storedTile(usage: Answer<Usage>): HTMLElement {
     return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
   }
   const objects = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
-  return tile("buckets", "Stored", size(measured.bytes), `${objects} · measured ${moment(measured.taken)}`);
+  return tile(
+    "buckets",
+    "Stored",
+    size(measured.bytes),
+    `${objects} · ${size(measured.raw_bytes)} on the drives, ${size(measured.inline_bytes)} in the metadata · measured ${moment(measured.taken)}`,
+  );
 }
 
 /** Every drive the console could read: this node's off a cluster, each answering member's on one. */

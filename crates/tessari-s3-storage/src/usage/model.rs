@@ -14,6 +14,11 @@ pub struct BucketUsage {
     pub objects: u64,
     /// The objects' logical size in bytes — what clients stored, before erasure coding.
     pub bytes: u64,
+    /// Of those, the bytes of objects small enough to be held inline, in the metadata store.
+    pub inline_bytes: u64,
+    /// Bytes on the data drives: data files of objects and of open and completed uploads' parts, with erasure
+    /// overhead and stripe padding on a cluster (block checksums not included).
+    pub raw_bytes: u64,
 }
 
 /// The latest measurement.
@@ -38,6 +43,8 @@ impl TryFrom<BucketUsageEntity> for BucketUsage {
         Ok(Self {
             objects: count(entity.objects, "objects")?,
             bytes: count(entity.bytes, "bytes")?,
+            inline_bytes: count(entity.inline_bytes, "inline_bytes")?,
+            raw_bytes: count(entity.raw_bytes, "raw_bytes")?,
             bucket: entity.bucket,
         })
     }

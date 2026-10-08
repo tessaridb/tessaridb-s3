@@ -3,6 +3,9 @@
 
 mod entity;
 mod model;
+mod occupancy;
+#[cfg(test)]
+mod occupancy_tests;
 mod repository;
 mod service;
 #[cfg(test)]

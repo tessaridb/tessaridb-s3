@@ -72,7 +72,7 @@ function figures(usage: Answer<Usage>, bucket: Bucket): BucketUsage | null {
   if (!usage.ok || usage.value.taken === null || usage.value.taken < bucket.created) {
     return null;
   }
-  return usage.value.buckets.find((entry) => entry.bucket === bucket.name) ?? { bucket: bucket.name, objects: 0, bytes: 0 };
+  return usage.value.buckets.find((entry) => entry.bucket === bucket.name) ?? { bucket: bucket.name, objects: 0, bytes: 0, inline_bytes: 0, raw_bytes: 0 };
 }
 
 const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, text);
@@ -86,13 +86,14 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
     el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket.name)),
     numeric(held === null ? "—" : amount(held.objects)),
     numeric(held === null ? "—" : size(held.bytes)),
+    numeric(held === null ? "—" : size(held.raw_bytes)),
     numeric(limits(bucket)),
     moment(bucket.created),
     mono(bucket.region),
     el("div", { class: "actions" }, quota, remove),
   );
   quota?.addEventListener("click", () => {
-    const cell = el("td", { colspan: "7" });
+    const cell = el("td", { colspan: "8" });
     const region = el("tr", { class: "asking" }, cell);
     cell.append(
       quotaForm(screen, bucket, () => {
@@ -103,7 +104,7 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
     line.after(region);
   });
   remove.addEventListener("click", () => {
-    const cell = el("td", { colspan: "7" });
+    const cell = el("td", { colspan: "8" });
     const ask = el("tr", { class: "asking" }, cell);
     const close = (): void => {
       ask.remove();
@@ -170,7 +171,7 @@ export async function buckets(screen: Screen): Promise<void> {
         ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.")
         : shown.length === 0
           ? empty(`No bucket name contains “${wanted}”.`)
-          : table("Buckets", ["Name", "Objects", "Size", "Limit", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket, usage))),
+          : table("Buckets", ["Name", "Objects", "Size", "On drives", "Limit", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket, usage))),
     );
   };
   filter.input.addEventListener("input", draw);

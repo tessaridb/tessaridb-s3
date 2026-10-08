@@ -63,13 +63,13 @@
     }
     return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space2 };
   }
-  var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"] } : null;
+  var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["inline_bytes"]) && count(v["raw_bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], inline_bytes: v["inline_bytes"], raw_bytes: v["raw_bytes"] } : null;
   function readUsage(v) {
-    if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"])) {
+    if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["inline_bytes"]) || !count(v["raw_bytes"])) {
       return null;
     }
     const buckets2 = list(v["buckets"], bucketUsage);
-    return buckets2 === null ? null : { taken: v["taken"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"] };
+    return buckets2 === null ? null : { taken: v["taken"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], inline_bytes: v["inline_bytes"], raw_bytes: v["raw_bytes"] };
   }
   var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] } : null;
   function readBuckets(v) {
@@ -719,7 +719,7 @@
     if (!usage.ok || usage.value.taken === null || usage.value.taken < bucket2.created) {
       return null;
     }
-    return usage.value.buckets.find((entry) => entry.bucket === bucket2.name) ?? { bucket: bucket2.name, objects: 0, bytes: 0 };
+    return usage.value.buckets.find((entry) => entry.bucket === bucket2.name) ?? { bucket: bucket2.name, objects: 0, bytes: 0, inline_bytes: 0, raw_bytes: 0 };
   }
   var numeric = (text2) => el("span", { class: "numeric" }, text2);
   function bucketRow(screen, bucket2, usage) {
@@ -730,13 +730,14 @@
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
       numeric(held === null ? "—" : amount(held.objects)),
       numeric(held === null ? "—" : size(held.bytes)),
+      numeric(held === null ? "—" : size(held.raw_bytes)),
       numeric(limits(bucket2)),
       moment(bucket2.created),
       mono(bucket2.region),
       el("div", { class: "actions" }, quota, remove)
     );
     quota?.addEventListener("click", () => {
-      const cell = el("td", { colspan: "7" });
+      const cell = el("td", { colspan: "8" });
       const region = el("tr", { class: "asking" }, cell);
       cell.append(
         quotaForm(screen, bucket2, () => {
@@ -747,7 +748,7 @@
       line.after(region);
     });
     remove.addEventListener("click", () => {
-      const cell = el("td", { colspan: "7" });
+      const cell = el("td", { colspan: "8" });
       const ask = el("tr", { class: "asking" }, cell);
       const close = () => {
         ask.remove();
@@ -807,7 +808,7 @@
       const shown = all2.filter((bucket2) => bucket2.name.includes(wanted));
       fill(
         listed,
-        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "Limit", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
+        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "On drives", "Limit", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
       );
     };
     filter.input.addEventListener("input", draw2);
@@ -896,7 +897,12 @@
       return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
     }
     const objects2 = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
-    return tile("buckets", "Stored", size(measured.bytes), `${objects2} · measured ${moment(measured.taken)}`);
+    return tile(
+      "buckets",
+      "Stored",
+      size(measured.bytes),
+      `${objects2} · ${size(measured.raw_bytes)} on the drives, ${size(measured.inline_bytes)} in the metadata · measured ${moment(measured.taken)}`
+    );
   }
   function drives(node) {
     if (node.members === null) {

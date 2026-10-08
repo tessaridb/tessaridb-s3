@@ -17,10 +17,13 @@ pub(crate) struct BucketUsageEntity {
     pub(crate) bucket: String,
     pub(crate) objects: i64,
     pub(crate) bytes: i64,
+    pub(crate) inline_bytes: i64,
+    pub(crate) raw_bytes: i64,
 }
 
 impl BucketUsageEntity {
-    /// Reads one row of the grouped read, or one element of the stored record's `buckets`.
+    /// Reads one element of the stored record's `buckets`. A record written before the occupancy figures existed has
+    /// none; they read as zero until the next pass replaces it.
     pub(crate) fn from_value(value: &Value, bucket_field: &str) -> Result<Self> {
         let Value::Object(fields) = value else {
             return Err(malformed("not an object"));
@@ -28,6 +31,10 @@ impl BucketUsageEntity {
         let integer = |field: &'static str| match fields.get(field) {
             Some(Value::Number(Number::Integer(number))) => Ok(*number),
             _ => Err(malformed(field)),
+        };
+        let later = |field: &'static str| match fields.get(field) {
+            None => Ok(0),
+            Some(_) => integer(field),
         };
         let bucket = match fields.get(bucket_field) {
             Some(Value::String(bucket)) => bucket.clone(),
@@ -37,6 +44,8 @@ impl BucketUsageEntity {
             bucket,
             objects: integer("objects")?,
             bytes: integer("bytes")?,
+            inline_bytes: later("inline_bytes")?,
+            raw_bytes: later("raw_bytes")?,
         })
     }
 
@@ -52,6 +61,14 @@ impl BucketUsageEntity {
                 (
                     "bytes".to_owned(),
                     Value::Number(Number::Integer(self.bytes)),
+                ),
+                (
+                    "inline_bytes".to_owned(),
+                    Value::Number(Number::Integer(self.inline_bytes)),
+                ),
+                (
+                    "raw_bytes".to_owned(),
+                    Value::Number(Number::Integer(self.raw_bytes)),
                 ),
             ]
             .into_iter()

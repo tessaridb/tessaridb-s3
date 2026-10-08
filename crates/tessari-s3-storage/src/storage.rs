@@ -86,6 +86,7 @@ impl Storage {
             peers,
         );
         storage.objects = storage.objects.clone().clustered(Arc::new(writes));
+        storage.usage = storage.usage.clone().clustered(cluster.code)?;
         storage.multipart =
             MultipartService::new(TessariMultipart::new(pool), storage.objects.clone());
         Ok(storage)

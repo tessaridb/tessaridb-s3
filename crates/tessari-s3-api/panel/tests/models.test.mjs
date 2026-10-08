@@ -27,10 +27,14 @@ test("a drive must carry three byte counts, or be null", () => {
 });
 
 test("usage reads buckets with their figures, and a measurement never taken", () => {
-  const taken = { taken: "2026-10-08T10:00:00.000Z", buckets: [{ bucket: "media", objects: 2, bytes: 30 }], objects: 2, bytes: 30 };
+  const media = { bucket: "media", objects: 2, bytes: 30, inline_bytes: 10, raw_bytes: 60 };
+  const taken = { taken: "2026-10-08T10:00:00.000Z", buckets: [media], objects: 2, bytes: 30, inline_bytes: 10, raw_bytes: 60 };
   assert.deepEqual(readUsage(taken), taken);
-  assert.deepEqual(readUsage({ taken: null, buckets: [], objects: 0, bytes: 0 }), { taken: null, buckets: [], objects: 0, bytes: 0 });
-  assert.equal(readUsage({ taken: null, buckets: [{ bucket: "media", objects: "2", bytes: 30 }], objects: 0, bytes: 0 }), null);
+  const none = { taken: null, buckets: [], objects: 0, bytes: 0, inline_bytes: 0, raw_bytes: 0 };
+  assert.deepEqual(readUsage(none), none);
+  assert.equal(readUsage({ ...none, buckets: [{ ...media, objects: "2" }] }), null);
+  assert.equal(readUsage({ ...taken, buckets: [{ bucket: "media", objects: 2, bytes: 30 }] }), null, "a bucket without its occupancy");
+  assert.equal(readUsage({ taken: null, buckets: [], objects: 0, bytes: 0 }), null, "totals without the occupancy");
 });
 
 const ann = { name: "ann", space: "alpha", role: "member", create_buckets: true, operator: false, cluster_viewer: false, disabled: false, created: "2026-10-08T10:00:00.000Z" };
