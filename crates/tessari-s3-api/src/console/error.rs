@@ -61,6 +61,54 @@ impl ConsoleError {
         }
     }
 
+    pub(crate) const fn invalid(code: &'static str, message: &'static str) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code,
+            message,
+        }
+    }
+
+    pub(crate) const fn missing(code: &'static str, message: &'static str) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code,
+            message,
+        }
+    }
+
+    pub(crate) const fn conflict(code: &'static str, message: &'static str) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code,
+            message,
+        }
+    }
+
+    pub(crate) const fn precondition_failed() -> Self {
+        Self {
+            status: StatusCode::PRECONDITION_FAILED,
+            code: "precondition_failed",
+            message: "the object changed since it was read; reload it",
+        }
+    }
+
+    pub(crate) const fn unavailable() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "unavailable",
+            message: "the metadata store or the data nodes did not answer; try again",
+        }
+    }
+
+    pub(crate) const fn not_recorded() -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "action_not_recorded",
+            message: "the action was carried out but could not be recorded; it is in the server log",
+        }
+    }
+
     pub(crate) const fn internal() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -80,5 +128,18 @@ impl IntoResponse for ConsoleError {
             }),
         )
             .into_response()
+    }
+}
+
+impl From<tessari_s3_storage::Error> for ConsoleError {
+    /// A storage failure keeps its kind and loses its detail: the store being unreachable is `503`, anything else is
+    /// `500`, and the detail goes to the log rather than to the browser.
+    fn from(error: tessari_s3_storage::Error) -> Self {
+        tracing::error!(error = %error, "console request failed in storage");
+        if error.category() == tessari_s3_types::ErrorCategory::Unavailable {
+            Self::unavailable()
+        } else {
+            Self::internal()
+        }
     }
 }

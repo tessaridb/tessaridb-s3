@@ -53,7 +53,7 @@ impl Remaining {
 /// The body for bytes `start..=end` of data `id` holding `size` bytes. The first block is read and verified before
 /// this returns, so damage there becomes an error response; damage in a later block ends the body early, which a
 /// client sees as a body shorter than its Content-Length.
-pub(super) async fn send(
+pub(crate) async fn send(
     objects: &ObjectService,
     id: [u8; 16],
     size: u64,
@@ -68,7 +68,7 @@ pub(super) async fn send(
 /// The body for bytes `start..=end` of an object made of `parts` — `(data id, size)` in object order. The first part's
 /// first block is verified before this returns, as for one data file; each later part's file is opened when the body
 /// reaches it, and a failure there ends the body early.
-pub(super) async fn send_parts(
+pub(crate) async fn send_parts(
     objects: &ObjectService,
     parts: &[([u8; 16], u64)],
     start: u64,

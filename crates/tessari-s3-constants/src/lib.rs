@@ -160,6 +160,15 @@ pub const DEFAULT_CONSOLE_REQUESTS_PER_MINUTE: usize = 600;
 /// The most console actions one page of the action record answers.
 pub const CONSOLE_ACTIONS_PAGE_MAX: usize = 100;
 
+/// The longest reason, in characters, an operator may give for a console action.
+pub const CONSOLE_REASON_MAX_CHARS: usize = 500;
+
+/// How far the console counts the heal backlog before it says "more".
+pub const CONSOLE_BACKLOG_COUNT_MAX: usize = 1_000;
+
+/// Object keys (and common prefixes) on a console listing page when the request does not say.
+pub const CONSOLE_OBJECTS_PAGE_DEFAULT: usize = 100;
+
 /// Data ids one healing pass looks at.
 pub const HEAL_BATCH: usize = 100;
 

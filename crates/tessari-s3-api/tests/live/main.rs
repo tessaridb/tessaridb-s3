@@ -9,6 +9,7 @@
 mod buckets;
 mod cluster;
 mod complete;
+mod console;
 mod console_store;
 mod copy;
 mod copy_part;
@@ -82,6 +83,36 @@ pub(crate) async fn fresh_at(
     replication: Option<&str>,
     data_dir: Option<std::path::PathBuf>,
 ) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
+    let config = live_config(meta_addresses, replication, data_dir.as_ref());
+    let storage = prepared(&config).await;
+    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    (
+        ApiState::new(&config, ApiState::system_clock(), storage),
+        planter,
+        data_dir,
+    )
+}
+
+/// A server state and a console state over ONE storage in a fresh namespace on the test node, with no data
+/// directory: what an operator does through the console is what an S3 client then sees.
+pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) {
+    let config = live_config(test_node(), None, None);
+    let storage = prepared(&config).await;
+    let console =
+        tessari_s3_api::ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
+            .expect("a console is configured");
+    (
+        ApiState::new(&config, ApiState::system_clock(), storage),
+        console,
+    )
+}
+
+/// The configuration of a node over a fresh namespace, its console configured too.
+fn live_config(
+    meta_addresses: String,
+    replication: Option<&str>,
+    data_dir: Option<&std::path::PathBuf>,
+) -> S3Config {
     let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
     let mut vars = vec![
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
@@ -99,37 +130,33 @@ pub(crate) async fn fresh_at(
         (
             "TESSARIDB_S3_DATA_DIR",
             data_dir
-                .as_ref()
                 .map(|dir| dir.display().to_string())
                 .unwrap_or_default(),
         ),
+        ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
     ];
     if let Some(replication) = replication {
         vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));
     }
-    let config =
-        S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
-            .expect("live configuration");
+    S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+        .expect("live configuration")
+}
+
+/// The storage `config` describes, schema applied.
+async fn prepared(config: &S3Config) -> Storage {
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
     );
-    {
-        // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one
-        // store-wide catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not
-        // about concurrent start-up, so their setup takes turns; each still gets its own namespace.
-        let _turn = SCHEMA_TURN.lock().await;
-        storage
-            .prepare()
-            .await
-            .expect("schema applies on the test node");
-    }
-    let planter = MetaPool::new(config.meta.clone()).expect("pool");
-    (
-        ApiState::new(&config, ApiState::system_clock(), storage),
-        planter,
-        data_dir,
-    )
+    // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one store-wide
+    // catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not about
+    // concurrent start-up, so their setup takes turns; each still gets its own namespace.
+    let _turn = SCHEMA_TURN.lock().await;
+    storage
+        .prepare()
+        .await
+        .expect("schema applies on the test node");
+    storage
 }
 
 /// What a client sees.

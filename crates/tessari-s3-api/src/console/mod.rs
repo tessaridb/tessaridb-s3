@@ -2,16 +2,21 @@
 //! signing in requires a session, and — from the next wave — the page itself. Writes go through the same storage
 //! services the S3 handlers call.
 
+mod actions;
+mod buckets;
+mod content;
 mod error;
 mod guard;
+mod input;
 mod limits;
+mod objects;
 mod session;
 mod status;
 
 use std::sync::Arc;
 
 use axum::middleware::from_fn_with_state;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::SecretKey;
@@ -102,7 +107,6 @@ impl ConsoleState {
         self.inner.erasure.as_deref()
     }
 
-    #[expect(dead_code, reason = "the data routes of the next wave read through it")]
     fn storage(&self) -> &Storage {
         &self.inner.storage
     }
@@ -130,7 +134,19 @@ async fn not_found() -> ConsoleError {
 pub fn console_router(state: ConsoleState) -> axum::Router {
     let protected = axum::Router::new()
         .route("/api/v1/status", get(status::status))
-        .route("/api/v1/session", axum::routing::delete(session::sign_out))
+        .route("/api/v1/session", delete(session::sign_out))
+        .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
+        .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
+        .route("/api/v1/buckets/{bucket}/objects", get(objects::list))
+        .route(
+            "/api/v1/buckets/{bucket}/object",
+            get(objects::detail).delete(objects::delete),
+        )
+        .route(
+            "/api/v1/buckets/{bucket}/object/content",
+            get(content::download),
+        )
+        .route("/api/v1/actions", get(actions::list))
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()

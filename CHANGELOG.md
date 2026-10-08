@@ -35,6 +35,13 @@ section records which TessariDB version its metadata runs on.
   (`POST /api/v1/session`) takes the root access key and secret and answers a one-hour signed session cookie that
   any node of the cluster accepts; every other route answers `401` without it. Sign-ins are limited per client
   address and requests per signed-in key (`429`). `GET /api/v1/status` names the node, its build and its code.
+- The operator console's data (second part): `GET /api/v1/status` adds a cluster member's members and its heal
+  backlog; `GET/POST /api/v1/buckets` and `DELETE /api/v1/buckets/{bucket}` list, create and delete buckets
+  through the same rules as S3; `GET /api/v1/buckets/{bucket}/objects` lists a bucket a page at a time (prefix,
+  delimiter, cursor); `…/object?key=` describes an object, `…/object/content?key=` downloads it as an attachment
+  of an opaque type, and `DELETE …/object?key=` deletes it only under the ETag given (`412` when it changed).
+  Every change and every download is appended to a year-long action record in TessariDB with the signed-in key,
+  the outcome and the operator's reason — required to delete — and `GET /api/v1/actions` reads it newest first.
 - One node at a time heals or reclaims an object: each takes an expiring claim on the object's data in TessariDB
   first, so healers no longer duplicate work and a heal can no longer write a shard back behind a reclaim. Shard
   bytes left with no record of their object (older than the reclamation grace) are swept by the reclaimer.

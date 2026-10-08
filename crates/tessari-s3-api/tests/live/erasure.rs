@@ -25,6 +25,8 @@ pub(crate) struct Peer {
 /// This node's state and storage, the planter pool, its data directory and its five peers.
 pub(crate) struct Member {
     pub(crate) state: ApiState,
+    /// The member's console, over the same storage.
+    pub(crate) console: tessari_s3_api::ConsoleState,
     pub(crate) storage: Storage,
     pub(crate) planter: MetaPool,
     pub(crate) dir: PathBuf,
@@ -61,6 +63,7 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         ("TESSARIDB_S3_INTERNAL_LISTEN", "127.0.0.1:0".to_owned()),
         ("TESSARIDB_S3_INTERNAL_ADVERTISE", "127.0.0.1:1".to_owned()),
         ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET.to_owned()),
+        ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
     ];
     S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
         .expect("live configuration")
@@ -130,6 +133,12 @@ pub(crate) async fn member() -> Member {
     }
     Member {
         state: ApiState::new(&config, ApiState::system_clock(), storage.clone()),
+        console: tessari_s3_api::ConsoleState::new(
+            &config,
+            ApiState::system_clock(),
+            storage.clone(),
+        )
+        .expect("a console is configured"),
         storage,
         planter: MetaPool::new(config.meta.clone()).expect("pool"),
         dir,

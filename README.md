@@ -75,6 +75,7 @@ claims it; the two marked **tested** already are:
 |---|---|
 | Stage | pre-alpha |
 | Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented`; on a cluster (`TESSARIDB_S3_ERASURE`): RS(k, m) shards one per node, write quorum k (k + 1 when k = m), reads from any k verified shards, background healing (one node at a time per object, under a claim in TessariDB; shard bytes no object can reach are swept), the internal surface over mutual TLS when configured — tested with a node killed mid-write and mid-read and the metadata leader killed |
+| Console | JSON API (status, buckets, objects, downloads, ETag-guarded deletes, an append-only action record with reasons); no page yet |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -130,6 +131,14 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
 server after the grace period.
+
+With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console's JSON API under `/api/v1`
+(the page itself is not built yet). After signing in (`POST /api/v1/session`) an operator can read the node's
+status — on a cluster member its members and how many objects wait for healing — list, create and delete buckets,
+list a bucket a page at a time, describe an object, download it (always as an attachment) and delete it under the
+ETag they saw: a changed object answers `412` and is kept. Every change and every download is recorded with the
+signed-in key and the operator's reason, required to delete; `GET /api/v1/actions` reads that record newest first.
+It is kept a year in TessariDB, which refuses to change or remove an entry.
 
 The live tests need a TessariDB node; each test works in its own namespace:
 

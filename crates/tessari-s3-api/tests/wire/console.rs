@@ -126,9 +126,18 @@ async fn sign_in(state: &ConsoleState) -> String {
 }
 
 /// Every route that needs a session, as (method, path).
-const PROTECTED: [(&str, &str); 3] = [
+const PROTECTED: [(&str, &str); 12] = [
     ("GET", "/api/v1/status"),
     ("DELETE", "/api/v1/session"),
+    ("GET", "/api/v1/buckets"),
+    ("POST", "/api/v1/buckets"),
+    ("DELETE", "/api/v1/buckets/bkt"),
+    ("GET", "/api/v1/buckets/bkt/objects"),
+    ("GET", "/api/v1/buckets/bkt/object?key=k"),
+    ("DELETE", "/api/v1/buckets/bkt/object?key=k"),
+    ("GET", "/api/v1/buckets/bkt/object/content?key=k"),
+    ("GET", "/api/v1/actions"),
+    ("PUT", "/api/v1/buckets"),
     ("GET", "/api/v1/not-a-route"),
 ];
 
@@ -266,4 +275,86 @@ async fn requests_are_limited_per_signed_in_key() {
         (limited.status, limited.code.as_deref()),
         (429, Some("rate_limit"))
     );
+}
+
+#[tokio::test]
+async fn a_change_without_its_reason_or_with_a_bad_body_is_refused_before_storage() {
+    // The metadata address of this state answers nothing, so reaching storage would be a 503, not these answers.
+    let state = console(NOW, "10", "600");
+    let token = sign_in(&state).await;
+    let long = format!("{{\"reason\":\"{}\"}}", "x".repeat(501));
+    for (method, path, content_type, body, expected) in [
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt",
+            "application/json",
+            "{}",
+            (400, "reason_required"),
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt",
+            "application/json",
+            "{\"reason\":\"   \"}",
+            (400, "reason_required"),
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt",
+            "application/json",
+            long.as_str(),
+            (400, "reason_too_long"),
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt",
+            "text/plain",
+            "{\"reason\":\"cleanup\"}",
+            (415, "unsupported_media_type"),
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt/object?key=k",
+            "application/json",
+            "{\"reason\":\"cleanup\"}",
+            (400, "bad_request"),
+        ),
+        (
+            "DELETE",
+            "/api/v1/buckets/bkt/object?key=k",
+            "application/json",
+            "{\"etag\":\"\\\"e\\\"\"}",
+            (400, "reason_required"),
+        ),
+        (
+            "POST",
+            "/api/v1/buckets",
+            "application/json",
+            "{\"name\":\"Not_A_Bucket\"}",
+            (400, "invalid_bucket_name"),
+        ),
+        (
+            "GET",
+            "/api/v1/actions?limit=many",
+            "application/json",
+            "",
+            (400, "bad_request"),
+        ),
+    ] {
+        let answer = send(
+            &state,
+            method,
+            path,
+            Some(&token),
+            Some((content_type, body)),
+            HERE,
+        )
+        .await;
+        assert_eq!(
+            (answer.status, answer.code.as_deref()),
+            (expected.0, Some(expected.1)),
+            "{method} {path} {body}: {}",
+            answer.body
+        );
+    }
 }
