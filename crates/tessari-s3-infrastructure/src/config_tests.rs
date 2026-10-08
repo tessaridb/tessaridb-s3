@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use super::S3Config;
 use crate::Error;
+use crate::tessaridb::Replication;
 
 fn load(vars: &[(&str, &str)]) -> crate::Result<S3Config> {
     let map: HashMap<String, String> = vars
@@ -177,6 +178,73 @@ fn an_upload_lives_a_week_unless_configured_and_never_zero_seconds() {
                 })
             ),
             "{bad}"
+        );
+    }
+}
+
+fn with(vars: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+    let mut all = CREDENTIALS.to_vec();
+    for (key, value) in vars {
+        all.retain(|(k, _)| k != key);
+        all.push((key, value));
+    }
+    all
+}
+
+#[test]
+fn the_metadata_store_is_one_or_more_nodes() {
+    let one = load(&CREDENTIALS).expect("loads");
+    assert_eq!(one.meta.addresses, ["127.0.0.1:9080"]);
+    assert_eq!(
+        one.meta.replication,
+        Replication::None,
+        "one node keeps one copy unless told otherwise"
+    );
+    let three = load(&with(&[
+        ("TESSARIDB_S3_META_ADDRESS", " a:1, b:2 ,c:3"),
+        ("TESSARIDB_S3_META_REPLICATION", "3"),
+    ]))
+    .expect("loads");
+    assert_eq!(three.meta.addresses, ["a:1", "b:2", "c:3"]);
+    assert_eq!(three.meta.replication.clause(), "REPLICATION FACTOR 3");
+    assert_eq!(
+        load(&with(&[("TESSARIDB_S3_META_ADDRESS", " , ")])).map(|_| ()),
+        Err(Error::MissingConfig {
+            key: "TESSARIDB_S3_META_ADDRESS"
+        })
+    );
+}
+
+#[test]
+fn several_metadata_nodes_need_their_replication_said() {
+    let unsaid = load(&with(&[("TESSARIDB_S3_META_ADDRESS", "a:1,b:2")])).map(|_| ());
+    assert!(
+        matches!(
+            unsaid,
+            Err(Error::InvalidConfig {
+                key: "TESSARIDB_S3_META_REPLICATION",
+                ..
+            })
+        ),
+        "{unsaid:?}"
+    );
+    let declined = load(&with(&[
+        ("TESSARIDB_S3_META_ADDRESS", "a:1,b:2"),
+        ("TESSARIDB_S3_META_REPLICATION", "none"),
+    ]))
+    .expect("loads");
+    assert_eq!(declined.meta.replication.clause(), "REPLICATION NONE");
+    for bad in ["0", "two", "-3", "256", "nothing"] {
+        let refused = load(&with(&[("TESSARIDB_S3_META_REPLICATION", bad)])).map(|_| ());
+        assert!(
+            matches!(
+                refused,
+                Err(Error::InvalidConfig {
+                    key: "TESSARIDB_S3_META_REPLICATION",
+                    ..
+                })
+            ),
+            "{bad}: {refused:?}"
         );
     }
 }

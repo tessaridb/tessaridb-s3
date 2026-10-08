@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Metadata on a TessariDB cluster: `TESSARIDB_S3_META_ADDRESS` takes several nodes, tried in turn (a node that
+  does not answer is passed over; the client follows a redirect to the leader), and the namespace states its
+  replication (`TESSARIDB_S3_META_REPLICATION`), required when more than one node is listed.
 - Metadata runs on TessariDB `0.33.2-beta` or later: bucket and upload listings page with a bound `AFTER` cursor,
   which that release is the first to accept.
 - Repository, licence (BUSL-1.1 with an object-storage-service and resale

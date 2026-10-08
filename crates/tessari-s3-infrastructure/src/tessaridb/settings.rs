@@ -1,12 +1,37 @@
 //! Where the metadata store is and how to sign in to it.
 
+use std::num::NonZeroU8;
+
 use tessari_s3_types::SecretKey;
+
+/// How many copies the metadata cluster keeps of the namespace. Said out loud on purpose: a namespace that never
+/// declared its replication is refused on a cluster rather than quietly given one copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Replication {
+    /// One copy, declined deliberately — a single metadata node.
+    None,
+    /// This many copies across the cluster.
+    Factor(NonZeroU8),
+}
+
+impl Replication {
+    /// The clause `DEFINE NAMESPACE` takes.
+    #[must_use]
+    pub fn clause(self) -> String {
+        match self {
+            Self::None => "REPLICATION NONE".to_owned(),
+            Self::Factor(copies) => format!("REPLICATION FACTOR {copies}"),
+        }
+    }
+}
 
 /// The metadata store's address, credential, tenancy and trust.
 #[derive(Debug, Clone)]
 pub struct MetaSettings {
-    /// `host:port` of a node's wire surface.
-    pub address: String,
+    /// `host:port` of each metadata node's wire surface, tried in turn.
+    pub addresses: Vec<String>,
+    /// The namespace's replication, declared when the schema is applied.
+    pub replication: Replication,
     /// The user to sign in as.
     pub user: String,
     /// That user's password.
@@ -33,7 +58,19 @@ pub fn is_safe_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_safe_name;
+    use std::num::NonZeroU8;
+
+    use super::{Replication, is_safe_name};
+
+    #[test]
+    fn replication_is_written_as_the_clause_a_namespace_takes() {
+        assert_eq!(Replication::None.clause(), "REPLICATION NONE");
+        let three = NonZeroU8::new(3).map(Replication::Factor);
+        assert_eq!(
+            three.map(Replication::clause).as_deref(),
+            Some("REPLICATION FACTOR 3")
+        );
+    }
 
     #[test]
     fn only_lowercase_identifiers_reach_a_use() {

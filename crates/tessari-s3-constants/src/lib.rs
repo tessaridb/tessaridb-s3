@@ -54,6 +54,11 @@ pub const MIN_SECRET_KEY_LEN: usize = 16;
 /// Connections to the metadata store open at once, when `TESSARIDB_S3_META_MAX_CONNECTIONS` is unset.
 pub const DEFAULT_META_CONNECTIONS: usize = 32;
 
+/// Seconds a connection to one metadata node may take to open before the next listed node is tried: long enough for
+/// a TLS handshake across a data centre, short enough that a node behind a black-holed address does not hold a
+/// request for the operating system's connect timeout.
+pub const META_DIAL_TIMEOUT_SECS: u64 = 5;
+
 /// Times the start-up schema is attempted when the store answers `retry` (another node is defining it at once).
 pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 

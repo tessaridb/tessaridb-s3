@@ -13,6 +13,7 @@ mod copy_part;
 mod delete_many;
 mod large;
 mod listing;
+mod metadata;
 mod multipart;
 mod objects;
 mod reclaim;
@@ -58,14 +59,29 @@ pub(crate) fn scratch_dir() -> std::path::PathBuf {
 pub(crate) async fn fresh_with(
     data_dir: Option<std::path::PathBuf>,
 ) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
-    let need = |key: &str| {
-        std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for the live suite"))
-    };
+    fresh_at(test_node(), None, data_dir).await
+}
+
+/// The test node's wire address.
+pub(crate) fn test_node() -> String {
+    need("TESSARIDB_S3_TEST_META")
+}
+
+fn need(key: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for the live suite"))
+}
+
+/// As [`fresh_with`], with the metadata addresses (comma-separated) and replication chosen by the caller.
+pub(crate) async fn fresh_at(
+    meta_addresses: String,
+    replication: Option<&str>,
+    data_dir: Option<std::path::PathBuf>,
+) -> (ApiState, MetaPool, Option<std::path::PathBuf>) {
     let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
-    let vars = [
+    let mut vars = vec![
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET.to_owned()),
-        ("TESSARIDB_S3_META_ADDRESS", need("TESSARIDB_S3_TEST_META")),
+        ("TESSARIDB_S3_META_ADDRESS", meta_addresses),
         (
             "TESSARIDB_S3_META_USER",
             need("TESSARIDB_S3_TEST_META_USER"),
@@ -83,6 +99,9 @@ pub(crate) async fn fresh_with(
                 .unwrap_or_default(),
         ),
     ];
+    if let Some(replication) = replication {
+        vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));
+    }
     let config =
         S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
             .expect("live configuration");

@@ -2,6 +2,7 @@
 //! failing loudly by name.
 
 use std::net::SocketAddr;
+use std::num::NonZeroU8;
 
 use tessari_s3_constants::{
     DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_RECLAIM_GRACE_SECS,
@@ -10,7 +11,7 @@ use tessari_s3_constants::{
 };
 use tessari_s3_types::SecretKey;
 
-use crate::tessaridb::{MetaSettings, is_safe_name};
+use crate::tessaridb::{MetaSettings, Replication, is_safe_name};
 use crate::{Error, Result};
 
 /// Everything the S3 server reads from its environment.
@@ -145,7 +146,7 @@ impl S3Config {
     }
 }
 
-/// `TESSARIDB_S3_META_ADDRESS`, `_USER`, `_PASSWORD` (required), `_NAMESPACE` (`s3`), `_DATABASE` (`meta`),
+/// `TESSARIDB_S3_META_ADDRESS` (one or more `host:port`, comma-separated), `_REPLICATION`, `_USER`, `_PASSWORD` (required), `_NAMESPACE` (`s3`), `_DATABASE` (`meta`),
 /// `_CA` (a PEM file; unset speaks in the clear) and `_MAX_CONNECTIONS` (32).
 fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> {
     let required = |key: &'static str| get(key).ok_or(Error::MissingConfig { key });
@@ -169,8 +170,21 @@ fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> 
         ),
         None => None,
     };
+    let addresses: Vec<String> = required("TESSARIDB_S3_META_ADDRESS")?
+        .split(',')
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if addresses.is_empty() {
+        return Err(Error::MissingConfig {
+            key: "TESSARIDB_S3_META_ADDRESS",
+        });
+    }
+    let replication = replication(get("TESSARIDB_S3_META_REPLICATION"), addresses.len())?;
     Ok(MetaSettings {
-        address: required("TESSARIDB_S3_META_ADDRESS")?,
+        addresses,
+        replication,
         user: required("TESSARIDB_S3_META_USER")?,
         password: SecretKey::new(required("TESSARIDB_S3_META_PASSWORD")?),
         namespace: name("TESSARIDB_S3_META_NAMESPACE", "s3")?,
@@ -182,6 +196,33 @@ fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> 
         )?
         .unwrap_or(DEFAULT_META_CONNECTIONS),
     })
+}
+
+/// `TESSARIDB_S3_META_REPLICATION`: `none` or a number of copies. Unset means `none` for one metadata node and is
+/// refused for several, because a cluster refuses a namespace whose replication nobody stated and a guessed default
+/// would decide how many copies exist.
+fn replication(text: Option<String>, nodes: usize) -> Result<Replication> {
+    const KEY: &str = "TESSARIDB_S3_META_REPLICATION";
+    let Some(text) = text else {
+        return if nodes > 1 {
+            Err(Error::InvalidConfig {
+                key: KEY,
+                reason: "required when more than one metadata node is listed: a number of copies or none",
+            })
+        } else {
+            Ok(Replication::None)
+        };
+    };
+    let text = text.trim();
+    if text.eq_ignore_ascii_case("none") {
+        return Ok(Replication::None);
+    }
+    text.parse::<NonZeroU8>()
+        .map(Replication::Factor)
+        .map_err(|_| Error::InvalidConfig {
+            key: KEY,
+            reason: "a number of copies from 1 to 255, or none",
+        })
 }
 
 /// Parses an optional positive integer.

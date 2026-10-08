@@ -93,8 +93,10 @@ fn jitter(bound: u64) -> u64 {
 async fn apply_once(pool: &MetaPool) -> Result<()> {
     // The names come from configuration checked against `[a-z][a-z0-9_]*`; a name is grammar and is never bound.
     let (namespace, database) = pool.scope();
+    // The replication is stated, never left out: a metadata cluster refuses a namespace whose replication nobody said.
+    let replication = pool.replication().clause();
     let tenancy = format!(
-        "DEFINE NAMESPACE IF NOT EXISTS {namespace}; USE NAMESPACE {namespace};\n\
+        "DEFINE NAMESPACE IF NOT EXISTS {namespace} {replication}; USE NAMESPACE {namespace};\n\
          DEFINE DATABASE IF NOT EXISTS {database};"
     );
     pool.run_unscoped(&tenancy).await?;

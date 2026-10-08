@@ -12,7 +12,7 @@ tessari-s3-types.workspace = true
 tessari-s3-observability.workspace = true
 thiserror.workspace = true
 tessaridb-client.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
 
 [lints]

@@ -6,5 +6,5 @@ mod settings;
 
 pub use error::{MetaError, MetaResult};
 pub use pool::MetaPool;
-pub use settings::{MetaSettings, is_safe_name};
+pub use settings::{MetaSettings, Replication, is_safe_name};
 pub use tessaridb_client::{Answer, Number, RefusalClass, Value};

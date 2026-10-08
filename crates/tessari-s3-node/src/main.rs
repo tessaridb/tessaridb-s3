@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
     // start, rather than answering every request 503.
     storage.prepare().await?;
-    tracing::info!(meta = %config.meta.address, namespace = %config.meta.namespace, "metadata schema ready");
+    tracing::info!(meta = ?config.meta.addresses, namespace = %config.meta.namespace, "metadata schema ready");
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut daemons = JoinSet::new();
     if storage.objects().stores_data() {
