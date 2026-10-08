@@ -65,6 +65,15 @@ pub(crate) trait MultipartRepository: Send + Sync {
     ) -> impl Future<Output = Result<()>> + Send;
     /// The listing-order position a walk from `anchor` starts after.
     fn position_of(&self, bucket: &BucketName, anchor: &UploadAnchor<OpenUpload>) -> String;
+    /// Where an upload of `key` initiated at `initiated` with id `id` sits in the listing order, whether or not it is
+    /// still open.
+    fn position(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        initiated: Timestamp,
+        id: UploadId,
+    ) -> Result<String>;
     /// At most `limit` open uploads initiated before `cutoff`.
     fn initiated_before(
         &self,

@@ -3,7 +3,7 @@
 
 use tessari_s3_constants::LIST_UPLOADS_MAX;
 use tessari_s3_core::objects::upload_listing::{Marker, UploadLister, UploadSpec};
-use tessari_s3_types::{BucketName, UploadId};
+use tessari_s3_types::{BucketName, ObjectKey, Timestamp, UploadId};
 
 use super::model::{OpenUpload, UploadsListed};
 use super::repository::{MultipartRepository, UploadRecord};
@@ -20,7 +20,7 @@ impl MultipartService {
         &self,
         bucket: &BucketName,
         spec: UploadSpec,
-        upload_marker: Option<UploadId>,
+        upload_marker: Option<(UploadId, Option<Timestamp>)>,
     ) -> Result<UploadsListed> {
         let marker = self
             .marker(bucket, spec.key_marker.as_deref(), upload_marker)
@@ -73,17 +73,29 @@ impl MultipartService {
         Ok(UploadsListed::Page(lister.finish()))
     }
 
-    /// The upload-id-marker resolved against the key-marker: S3 ignores it without a key-marker, and an id that names
-    /// no open upload of that key in this bucket's current incarnation is gone.
+    /// The upload-id-marker resolved against the key-marker: S3 ignores it without a key-marker. A marker carrying
+    /// its initiation instant names its place in the listing order whether or not its upload is still open, so the
+    /// walk resumes right after it; an earlier build's marker carries none, and one that names no open upload of that
+    /// key in this bucket's current incarnation is gone.
     async fn marker(
         &self,
         bucket: &BucketName,
         key_marker: Option<&str>,
-        upload_marker: Option<UploadId>,
+        upload_marker: Option<(UploadId, Option<Timestamp>)>,
     ) -> Result<Marker<OpenUpload>> {
-        let (Some(key), Some(id)) = (key_marker, upload_marker) else {
+        let (Some(key), Some((id, initiated))) = (key_marker, upload_marker) else {
             return Ok(Marker::None);
         };
+        if let (Some(initiated), Ok(object_key)) = (initiated, ObjectKey::new(key)) {
+            let position = self
+                .repository
+                .position(bucket, &object_key, initiated, id)?;
+            return Ok(Marker::Found(OpenUpload {
+                id,
+                initiated,
+                position,
+            }));
+        }
         let Some(UploadRecord {
             bucket: upload_bucket,
             key: upload_key,

@@ -82,7 +82,14 @@ async fn parts_are_uploaded_replaced_listed_and_dropped_by_an_abort() {
     let (state, planter) = fresh().await;
     assert_eq!(call(&state, "PUT", "/mpart", vec![], b"").await.status, 200);
     let upload = create(&state, "/mpart/big").await;
-    assert_eq!(upload.len(), 32, "{upload}");
+    // The initiation instant (16 hex digits) and 128 random bits (32): one key's ids sort as they were initiated.
+    assert!(
+        upload.len() == 48
+            && upload
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "{upload}"
+    );
     let first = part(&state, "/mpart/big", &upload, "1", &body(64, 1)).await;
     assert_eq!(first.status, 200, "{}", first.body);
     let second = part(&state, "/mpart/big", &upload, "2", b"tail").await;

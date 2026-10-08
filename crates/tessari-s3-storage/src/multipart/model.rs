@@ -53,8 +53,8 @@ pub struct StoredPart {
 /// What CreateMultipartUpload ended in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Created {
-    /// The new upload.
-    Created(UploadId),
+    /// The new upload and the instant it was initiated, which its id as clients see it carries.
+    Created(UploadId, Timestamp),
     /// The bucket does not exist.
     NoSuchBucket,
 }

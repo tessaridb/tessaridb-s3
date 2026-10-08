@@ -10,7 +10,7 @@ use axum::http::{HeaderValue, Response, StatusCode};
 use tessari_s3_constants::{LIST_PARTS_MAX, SINGLE_PUT_MAX};
 use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_storage::multipart::{Created, NewPart, NewUpload, PartWritten};
-use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber, UploadId};
+use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber, Timestamp, UploadId};
 
 use super::objects::data;
 use super::objects::headers::{read_integrity, read_put_headers};
@@ -43,6 +43,16 @@ fn upload_id(call: &Call<'_>) -> Result<UploadId> {
     call.query_value("uploadId")
         .and_then(|text| UploadId::parse(text).ok())
         .ok_or_else(no_such_upload)
+}
+
+/// Upload `id` as clients see it; an instant outside what the id carries (before 1970, after 2554) is a server fault.
+pub(super) fn wire_id(id: UploadId, initiated: Timestamp) -> Result<String> {
+    id.wire(initiated).map_err(|_| {
+        Error::new(
+            ErrorCode::InternalError,
+            "an upload was initiated at an instant its id cannot carry",
+        )
+    })
 }
 
 /// The `partNumber` query parameter, 1 to 10,000.
@@ -93,7 +103,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         checksum_type,
     };
     let bucket = call.bucket()?;
-    let Created::Created(id) = call
+    let Created::Created(id, initiated) = call
         .state
         .storage()
         .multipart()
@@ -112,7 +122,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
              <UploadId>{}</UploadId></InitiateMultipartUploadResult>",
             escape(bucket.as_str()),
             key_text(key)?,
-            id.hex()
+            wire_id(id, initiated)?
         ),
     );
     for (name, value) in [
@@ -227,7 +237,7 @@ pub(crate) async fn list_parts(call: &Call<'_>, key: &ObjectKey) -> Result<Respo
          <PartNumberMarker>{marker}</PartNumberMarker>",
         escape(bucket.as_str()),
         key_text(key)?,
-        id.hex()
+        escape(call.query_value("uploadId").unwrap_or(""))
     );
     if let Some(last) = page.parts.last() {
         let _ = write!(

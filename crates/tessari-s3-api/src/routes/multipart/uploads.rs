@@ -11,27 +11,30 @@ use tessari_s3_core::objects::upload_listing::{UploadEntry, UploadSpec};
 use tessari_s3_storage::multipart::UploadsListed;
 use tessari_s3_types::{ErrorCode, UploadId};
 
+use super::wire_id;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
 use crate::routes::listing::{listed_name as name, url_encoded};
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
 
-/// `max-uploads`: a non-negative integer, at most 1,000 (a larger request gets 1,000, as max-keys does).
+/// `max-uploads`: an integer from 1, at most 1,000 (a larger request gets 1,000, as max-keys does); AWS documents the
+/// range as 1 to 1,000, so 0 is refused.
 fn max_uploads(call: &Call<'_>) -> Result<usize> {
+    let refused = || {
+        Error::new(
+            ErrorCode::InvalidArgument,
+            "max-uploads must be an integer from 1 to 1000",
+        )
+    };
     match call.query_value("max-uploads") {
         None => Ok(LIST_UPLOADS_MAX),
-        Some(text) => text
-            .parse::<u64>()
-            .map(|max| {
-                usize::try_from(max).map_or(LIST_UPLOADS_MAX, |max| max.min(LIST_UPLOADS_MAX))
-            })
-            .map_err(|_| {
-                Error::new(
-                    ErrorCode::InvalidArgument,
-                    "max-uploads must be a non-negative integer",
-                )
-            }),
+        Some(text) => match text.parse::<u64>() {
+            Ok(0) | Err(_) => Err(refused()),
+            Ok(max) => {
+                Ok(usize::try_from(max).map_or(LIST_UPLOADS_MAX, |max| max.min(LIST_UPLOADS_MAX)))
+            }
+        },
     }
 }
 
@@ -51,7 +54,7 @@ pub(crate) async fn list_uploads(call: &Call<'_>) -> Result<Response<Body>> {
         key_marker: key_marker.map(str::to_owned),
     };
     // An id this server could not have issued names no open upload: it resumes as a vanished one would.
-    let upload_marker = UploadId::parse(id_marker).ok();
+    let upload_marker = UploadId::parse_with_time(id_marker).ok();
     let bucket = call.bucket()?;
     let page = match call
         .state
@@ -81,7 +84,7 @@ pub(crate) async fn list_uploads(call: &Call<'_>) -> Result<Response<Body>> {
                 out,
                 "<NextKeyMarker>{}</NextKeyMarker><NextUploadIdMarker>{}</NextUploadIdMarker>",
                 name(url, key)?,
-                item.id.hex()
+                wire_id(item.id, item.initiated)?
             );
         }
         Some(UploadEntry::Prefix(prefix)) => {
@@ -113,7 +116,7 @@ pub(crate) async fn list_uploads(call: &Call<'_>) -> Result<Response<Body>> {
                      <Owner><ID>{owner}</ID><DisplayName>{owner}</DisplayName></Owner>\
                      <StorageClass>STANDARD</StorageClass><Initiated>{}</Initiated></Upload>",
                     name(url, key)?,
-                    item.id.hex(),
+                    wire_id(item.id, item.initiated)?,
                     item.initiated.iso8601_millis()
                 );
             }

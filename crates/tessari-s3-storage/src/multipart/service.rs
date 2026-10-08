@@ -74,7 +74,7 @@ impl MultipartService {
         self.repository
             .create(id, bucket, key, incarnation, initiated, upload)
             .await?;
-        Ok(Created::Created(id))
+        Ok(Created::Created(id, initiated))
     }
 
     /// What Create fixed for upload `id`, when it is an upload of `bucket/key` in the bucket's current incarnation.

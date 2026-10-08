@@ -1,5 +1,5 @@
 //! ListMultipartUploads against a real node: open uploads by key in byte order and, within a key, by initiation;
-//! paged by key-marker and upload-id-marker without a repeat or a gap; rolled up at a delimiter; an upload that ends
+//! paged by key-marker and upload-id-marker without a repeat or a gap, also when the marker's upload has ended; rolled up at a delimiter; an upload that ends
 //! leaves the listing; another bucket's uploads and an earlier incarnation's never appear.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, Value};
@@ -104,7 +104,7 @@ async fn open_uploads_list_by_key_then_initiation_and_page_by_markers() {
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn uploads_roll_up_once_and_a_vanished_marker_repeats_rather_than_skips() {
+async fn uploads_roll_up_once_and_a_vanished_marker_neither_repeats_nor_skips() {
     let _why = IGNORED;
     let (state, _) = fresh().await;
     assert_eq!(call(&state, "PUT", "/mpr", vec![], b"").await.status, 200);
@@ -134,9 +134,15 @@ async fn uploads_roll_up_once_and_a_vanished_marker_repeats_rather_than_skips() 
     .await;
     assert_eq!(texts(&second, "CommonPrefixes", "Prefix").len(), 0);
     assert_eq!(texts(&second, "Upload", "Key"), ["e"]);
-    // The marker's upload ended between pages: its key is listed again rather than skipped.
+    // The marker's upload ended between pages: the listing resumes after where it stood, so the upload before it is
+    // not listed again and the one after it is not skipped.
+    let g0 = create(&state, "/mpr/g").await;
     let g1 = create(&state, "/mpr/g").await;
     let g2 = create(&state, "/mpr/g").await;
+    assert!(
+        g0 < g1 && g1 < g2,
+        "one key's upload ids ascend as they were initiated"
+    );
     let gone = call(
         &state,
         "DELETE",
@@ -155,6 +161,19 @@ async fn uploads_roll_up_once_and_a_vanished_marker_repeats_rather_than_skips() 
     assert_eq!(texts(&resumed, "Upload", "UploadId"), [g2]);
     let prefixed = uploads(&state, "/mpr", &[("prefix", "d/")]).await;
     assert_eq!(texts(&prefixed, "Upload", "Key"), ["d/1", "d/1", "d/2"]);
+    let none = call(
+        &state,
+        "GET",
+        "/mpr",
+        vec![("uploads", None), ("max-uploads", Some("0"))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        (none.status, none.code.as_deref()),
+        (400, Some("InvalidArgument")),
+        "max-uploads is 1 to 1,000"
+    );
 }
 
 #[tokio::test]
