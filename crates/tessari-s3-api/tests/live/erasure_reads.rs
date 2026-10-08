@@ -4,6 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
+use tessari_s3_storage::Error as StorageError;
+use tessari_s3_storage::objects::Content;
+use tessari_s3_types::{BucketName, ObjectKey};
+
 use crate::erasure::{Member, count, member};
 use crate::{IGNORED, call, call_with};
 
@@ -120,5 +124,44 @@ async fn up_to_the_parity_shards_may_be_lost_and_one_more_refuses_the_read() {
         (503, Some("ServiceUnavailable")),
         "{}",
         read.body
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_object_whose_shard_set_is_gone_is_reported_as_an_error_never_as_absent() {
+    let _why = IGNORED;
+    let member = written().await;
+    member
+        .planter
+        .run("DELETE FROM shard_sets WHERE true LIMIT ALL;", Vec::new())
+        .await
+        .expect("shard set forgotten");
+    let read = call(&member.state, "GET", "/shards/big", vec![], b"").await;
+    assert_eq!(
+        (read.status, read.code.as_deref()),
+        (500, Some("InternalError")),
+        "{}",
+        read.body
+    );
+    // Below the wire: the store says the committed object's data is missing — corruption, never "absent".
+    let bucket = BucketName::new("shards").expect("bucket name");
+    let key = ObjectKey::new("big").expect("key");
+    let object = member
+        .storage
+        .objects()
+        .get(&bucket, &key)
+        .await
+        .expect("read")
+        .expect("bucket")
+        .expect("the record is still there");
+    let Content::Data(id) = object.content else {
+        panic!("a large object has a data id");
+    };
+    let opened = member.storage.objects().open(id, object.size).await;
+    assert!(
+        matches!(opened, Err(StorageError::Corrupt { .. })),
+        "{:?}",
+        opened.err()
     );
 }

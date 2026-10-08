@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::ObjectService;
-use crate::data::DataFiles;
+use crate::data::{DataFiles, hex};
 use crate::objects::ObjectReader;
 use crate::objects::model::{Healed, Reclaimed};
 use crate::objects::repository::ObjectRepository;
@@ -134,14 +134,26 @@ impl ObjectService {
     /// Opens data `id` holding an object of `size` bytes, its header and length checked.
     ///
     /// # Errors
-    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] or the drive's failure; for erasure-coded data the store's
-    /// refusal or a layout this node does not hold, and per block [`Error::Unreadable`].
+    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] (also when a committed object's data is missing — on a cluster
+    /// member that includes a forgotten shard set) or the drive's failure; for erasure-coded data the store's refusal
+    /// or a layout this node does not hold, and per block [`Error::Unreadable`].
     pub async fn open(&self, id: [u8; 16], size: u64) -> Result<ObjectReader> {
         if let Some(writes) = &self.erasure
             && let Some(reader) = writes.open(id, size).await?
         {
             return Ok(ObjectReader::Erasure(reader));
         }
-        Ok(ObjectReader::File(self.files()?.open(id, size).await?))
+        match self.files()?.open(id, size).await {
+            Ok(reader) => Ok(ObjectReader::File(reader)),
+            // Only committed objects are opened here, so missing data is loss, never absence.
+            Err(Error::DataIo {
+                kind: std::io::ErrorKind::NotFound,
+                ..
+            }) => Err(Error::Corrupt {
+                id: hex(id),
+                reason: "the data of a committed object is missing",
+            }),
+            Err(error) => Err(error),
+        }
     }
 }
