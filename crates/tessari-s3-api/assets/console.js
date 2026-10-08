@@ -65,11 +65,11 @@
   }
   var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] } : null;
   function readUsage(v) {
-    if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
+    if (!record(v) || !textOrNull(v["taken"]) || !flag(v["stale"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
       return null;
     }
     const buckets2 = list(v["buckets"], bucketUsage);
-    return buckets2 === null ? null : { taken: v["taken"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
+    return buckets2 === null ? null : { taken: v["taken"], stale: v["stale"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
   }
   var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] } : null;
   function readBuckets(v) {
@@ -1261,7 +1261,11 @@
     if (!usage.ok) {
       return `${listed2} · sizes could not be read`;
     }
-    return usage.value.taken === null ? `${listed2} · sizes not measured yet` : `${listed2} · sizes measured ${moment(usage.value.taken)}`;
+    if (usage.value.taken === null) {
+      return `${listed2} · sizes not measured yet`;
+    }
+    const measured = `${listed2} · sizes measured ${moment(usage.value.taken)}`;
+    return usage.value.stale ? `${measured} — too old to check quotas, so writes to limited buckets are refused until the next measurement` : measured;
   }
   async function buckets(screen) {
     loading(screen, TITLE2, "buckets");

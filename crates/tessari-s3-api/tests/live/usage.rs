@@ -85,7 +85,7 @@ async fn the_console_reports_the_last_measurement_and_this_nodes_drive() {
     assert_eq!(before.status, 200);
     assert_eq!(
         before.json(),
-        json!({"taken": null, "buckets": [], "objects": 0, "bytes": 0, "raw_bytes": 0}),
+        json!({"taken": null, "stale": true, "buckets": [], "objects": 0, "bytes": 0, "raw_bytes": 0}),
         "nothing measured yet"
     );
     assert_eq!(call(&state, "PUT", "/media", vec![], b"").await.status, 200);

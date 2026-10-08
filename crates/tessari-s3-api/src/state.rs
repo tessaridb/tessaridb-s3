@@ -36,6 +36,7 @@ struct Inner {
     root_secret_key: SecretKey,
     list_tokens: TokenKey,
     max_inflight: usize,
+    usage_interval_secs: u64,
     clock: Clock,
     storage: Storage,
     principals: Principals,
@@ -64,6 +65,7 @@ impl ApiState {
                 root_secret_key: config.root_secret_key.clone(),
                 list_tokens: TokenKey::derive(&config.root_secret_key),
                 max_inflight,
+                usage_interval_secs: config.usage_interval_secs,
                 clock,
                 storage,
                 principals: Principals::new(),
@@ -87,6 +89,12 @@ impl ApiState {
     #[must_use]
     pub fn now(&self) -> i64 {
         (self.inner.clock)()
+    }
+
+    /// Seconds between usage passes; a quota is checked only against a measurement this recent (twice over).
+    #[must_use]
+    pub fn usage_interval_secs(&self) -> u64 {
+        self.inner.usage_interval_secs
     }
 
     /// The region requests must be signed for.

@@ -1,6 +1,8 @@
 use crate::authz::{Need, required};
 use crate::dispatch::{Operation, is_implemented};
-use crate::quota::{ADDING, Adding, Exceeded, Held, Quota, adds_to_bucket, admits};
+use crate::quota::{
+    ADDING, Adding, Exceeded, Held, Quota, adds_to_bucket, admits, measured_recently,
+};
 
 const HELD: Held = Held {
     objects: 9,
@@ -84,4 +86,23 @@ fn the_adding_operations_are_implemented_writes_and_only_they_add() {
     ] {
         assert!(!adds_to_bucket(removes), "{removes:?}");
     }
+}
+
+#[test]
+fn a_measurement_counts_for_two_usage_intervals_and_not_a_second_longer() {
+    let taken = 1_000;
+    assert!(measured_recently(taken, taken, 60));
+    assert!(
+        measured_recently(taken, taken + 120, 60),
+        "the window's edge still counts"
+    );
+    assert!(!measured_recently(taken, taken + 121, 60));
+    assert!(
+        measured_recently(taken, taken - 5, 60),
+        "a clock a little behind the store's is not stale"
+    );
+    assert!(
+        !measured_recently(taken, taken + 1, u64::MAX),
+        "an interval too large to double is refused, never wrapped"
+    );
 }

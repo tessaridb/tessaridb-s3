@@ -1,5 +1,6 @@
 //! `GET /api/v1/usage`: how many objects and bytes each bucket holds as last measured (logical, and on the drives), the totals, and when the measurement was taken — over the buckets the caller can list. Never
-//! measured answers no time and no buckets.
+//! measured answers no time and no buckets. `stale` says the measurement is too old (or missing) for a quota check, so
+//! writes to a limited bucket are being refused until the usage scanner runs.
 
 use std::collections::BTreeSet;
 
@@ -7,6 +8,7 @@ use axum::Json;
 use axum::extract::{Extension, State};
 use serde::Serialize;
 use tessari_s3_core::authz::{Principal, Visible};
+use tessari_s3_core::quota::measured_recently;
 use tessari_s3_storage::usage::BucketUsage;
 
 use super::ConsoleState;
@@ -23,6 +25,7 @@ struct BucketUsageView {
 #[derive(Serialize)]
 pub(super) struct UsageView {
     taken: Option<String>,
+    stale: bool,
     buckets: Vec<BucketUsageView>,
     objects: u64,
     bytes: u64,
@@ -36,12 +39,18 @@ pub(super) async fn usage(
     let Some(mut measured) = state.storage().usage().latest().await? else {
         return Ok(Json(UsageView {
             taken: None,
+            stale: true,
             buckets: Vec::new(),
             objects: 0,
             bytes: 0,
             raw_bytes: 0,
         }));
     };
+    let stale = !measured_recently(
+        measured.taken.seconds,
+        state.now(),
+        state.usage_interval_secs(),
+    );
     // One measurement covers every bucket; a user sees the entries, and totals, of the buckets it can list.
     let visible = principal.visible();
     if visible != Visible::All {
@@ -70,6 +79,7 @@ pub(super) async fn usage(
     );
     Ok(Json(UsageView {
         taken: Some(measured.taken.iso8601_millis()),
+        stale,
         buckets: measured
             .buckets
             .into_iter()

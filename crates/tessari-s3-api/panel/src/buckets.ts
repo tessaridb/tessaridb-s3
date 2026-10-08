@@ -158,7 +158,11 @@ function measuredLine(count: number, usage: Answer<Usage>): string {
   if (!usage.ok) {
     return `${listed} · sizes could not be read`;
   }
-  return usage.value.taken === null ? `${listed} · sizes not measured yet` : `${listed} · sizes measured ${moment(usage.value.taken)}`;
+  if (usage.value.taken === null) {
+    return `${listed} · sizes not measured yet`;
+  }
+  const measured = `${listed} · sizes measured ${moment(usage.value.taken)}`;
+  return usage.value.stale ? `${measured} — too old to check quotas, so writes to limited buckets are refused until the next measurement` : measured;
 }
 
 export async function buckets(screen: Screen): Promise<void> {

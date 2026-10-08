@@ -1,6 +1,8 @@
 //! Bucket quotas (ADR-0007): an optional limit on a bucket's bytes and on its objects, checked before a write adds to
 //! it, against the last usage measurement plus what the write brings. Pure: everything it reads is in its arguments.
 
+use tessari_s3_constants::QUOTA_MEASUREMENT_INTERVALS;
+
 use crate::dispatch::Operation;
 
 /// The operations that add bytes or objects to a bucket, and so are refused when they would pass its quota.
@@ -78,4 +80,18 @@ pub fn admits(quota: Quota, held: Held, adding: Adding) -> Result<(), Exceeded> 
         return Err(Exceeded::Objects);
     }
     Ok(())
+}
+
+/// Whether a usage measurement `taken` at a time (seconds since the epoch) still counts `now` for a quota check: for
+/// `QUOTA_MEASUREMENT_INTERVALS` usage intervals, its edge included. A clock behind the one that took it is not stale;
+/// a window too large to compute counts nothing.
+#[must_use]
+pub fn measured_recently(taken: i64, now: i64, interval_secs: u64) -> bool {
+    let window = interval_secs
+        .checked_mul(QUOTA_MEASUREMENT_INTERVALS)
+        .and_then(|secs| i64::try_from(secs).ok());
+    match (window, now.checked_sub(taken)) {
+        (Some(window), Some(age)) => age <= window,
+        _ => false,
+    }
 }

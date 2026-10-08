@@ -58,6 +58,7 @@ struct Inner {
     code: Option<Code>,
     meta_addresses: Vec<String>,
     principals: Principals,
+    usage_interval_secs: u64,
 }
 
 impl ConsoleState {
@@ -86,6 +87,7 @@ impl ConsoleState {
                 code: config.cluster.as_ref().map(|cluster| cluster.code),
                 meta_addresses: config.meta.addresses.clone(),
                 principals: Principals::new(),
+                usage_interval_secs: config.usage_interval_secs,
             }),
         })
     }
@@ -122,6 +124,10 @@ impl ConsoleState {
 
     fn now(&self) -> i64 {
         (self.inner.clock)()
+    }
+
+    fn usage_interval_secs(&self) -> u64 {
+        self.inner.usage_interval_secs
     }
 
     fn secure_cookie(&self) -> bool {

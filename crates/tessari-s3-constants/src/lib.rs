@@ -225,6 +225,11 @@ pub const USAGE_CLAIM_SECS: u64 = 180;
 /// figures the console shows are at most this old.
 pub const DEFAULT_USAGE_INTERVAL_SECS: u64 = 60;
 
+/// How many usage intervals a measurement counts for when a write is checked against a bucket quota. One missed
+/// pass is tolerated; past two intervals a limited bucket's writes are refused rather than admitted on a figure
+/// nobody refreshed.
+pub const QUOTA_MEASUREMENT_INTERVALS: u64 = 2;
+
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 

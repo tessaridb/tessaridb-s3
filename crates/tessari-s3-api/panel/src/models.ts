@@ -25,6 +25,8 @@ export type BucketUsage = {
 };
 export type Usage = {
   readonly taken: string | null;
+  /** Too old (or missing) for a quota check: writes to a limited bucket are refused until the scanner runs. */
+  readonly stale: boolean;
   readonly buckets: readonly BucketUsage[];
   readonly objects: number;
   readonly bytes: number;
@@ -177,13 +179,13 @@ const bucketUsage = (v: unknown): BucketUsage | null =>
     : null;
 
 export function readUsage(v: unknown): Usage | null {
-  if (!record(v) || !textOrNull(v["taken"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
+  if (!record(v) || !textOrNull(v["taken"]) || !flag(v["stale"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
     return null;
   }
   const buckets = list(v["buckets"], bucketUsage);
   return buckets === null
     ? null
-    : { taken: v["taken"], buckets, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
+    : { taken: v["taken"], stale: v["stale"], buckets, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
 }
 
 const bucket = (v: unknown): Bucket | null =>

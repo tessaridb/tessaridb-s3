@@ -32,6 +32,7 @@ mod multipart;
 mod no_bytes;
 mod objects;
 mod quota;
+mod quota_window;
 mod reclaim;
 #[path = "../wire/signer.rs"]
 #[allow(

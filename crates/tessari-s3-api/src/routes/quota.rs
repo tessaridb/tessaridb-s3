@@ -1,9 +1,11 @@
 //! Bucket quotas on the write path (ADR-0007): an operation that adds to a bucket (`quota::ADDING`) asks for room
 //! before it does the work. A bucket with no limit costs one bucket read; one with a limit also reads the last usage
 //! measurement, so the stated bound is what is written within one usage interval. A store that cannot answer refuses
-//! the write — the quota fails closed.
+//! the write, and so does a measurement older than `QUOTA_MEASUREMENT_INTERVALS` usage intervals (or none at all) —
+//! the quota fails closed rather than admitting writes on a figure nobody refreshed.
 
-use tessari_s3_core::quota::{Adding, Held, Quota, admits};
+use tessari_s3_constants::QUOTA_MEASUREMENT_INTERVALS;
+use tessari_s3_core::quota::{Adding, Held, Quota, admits, measured_recently};
 use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
 
 use crate::pipeline::call::Call;
@@ -19,7 +21,8 @@ impl Room {
     /// The room in `bucket`, or `None` when it has no limit (or does not exist — the write then answers that).
     ///
     /// # Errors
-    /// The store's failure to read the bucket or the measurement.
+    /// `ServiceUnavailable` when a limited bucket has no recent enough measurement; the store's failure to read the
+    /// bucket or the measurement.
     pub(crate) async fn of(call: &Call<'_>, bucket: &BucketName) -> Result<Option<Self>> {
         let storage = call.state.storage();
         let Some(found) = storage.buckets().get(bucket).await? else {
@@ -28,17 +31,31 @@ impl Room {
         if !found.quota.limits() {
             return Ok(None);
         }
-        // A bucket missing from the measurement held nothing when it was taken.
-        let held = storage
+        let now = call.state.now();
+        let interval = call.state.usage_interval_secs();
+        let usage = storage
             .usage()
             .latest()
             .await?
-            .and_then(|usage| {
-                usage
-                    .buckets
-                    .into_iter()
-                    .find(|each| each.bucket == bucket.as_str())
-            })
+            .filter(|usage| measured_recently(usage.taken.seconds, now, interval));
+        let Some(usage) = usage else {
+            tracing::warn!(
+                bucket = bucket.as_str(),
+                interval_secs = interval,
+                intervals = QUOTA_MEASUREMENT_INTERVALS,
+                "refused a write to a limited bucket: no usage measurement within the quota window"
+            );
+            return Err(Error::new(
+                ErrorCode::ServiceUnavailable,
+                "the bucket's usage was not measured recently enough to check its quota; retry once the usage \
+                 scanner has run",
+            ));
+        };
+        // A bucket missing from the measurement held nothing when it was taken.
+        let held = usage
+            .buckets
+            .into_iter()
+            .find(|each| each.bucket == bucket.as_str())
             .map_or_else(Held::default, |each| Held {
                 objects: each.objects,
                 bytes: each.bytes,
