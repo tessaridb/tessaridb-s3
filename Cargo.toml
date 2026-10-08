@@ -44,9 +44,12 @@ reed-solomon-simd = "3"
 siphasher = "1"
 futures-util = { version = "0.3", default-features = false }
 # Internal shard traffic between S3 nodes; TLS arrives with the cluster CA (W7), so no TLS backend yet.
-reqwest = { version = "0.13", default-features = false, features = ["stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider"] }
 bytes = "1"
 rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"] }
 zeroize = { version = "1", features = ["derive"] }
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

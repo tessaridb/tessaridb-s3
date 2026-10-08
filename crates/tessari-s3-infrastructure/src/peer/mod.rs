@@ -11,6 +11,8 @@ use bytes::Bytes;
 use futures_util::stream::{BoxStream, Stream, StreamExt};
 use tessari_s3_constants::{PEER_CONNECT_TIMEOUT_SECS, PEER_READ_TIMEOUT_SECS};
 
+use crate::InternalTls;
+
 pub use error::PeerError;
 
 /// The methods peers call each other with.
@@ -42,22 +44,38 @@ pub struct PeerReply {
 #[derive(Debug, Clone)]
 pub struct PeerHttp {
     client: reqwest::Client,
+    scheme: &'static str,
 }
 
 impl PeerHttp {
-    /// A client with the cluster's connect and stall timeouts.
+    /// A client with the cluster's connect and stall timeouts, over mutual TLS with `tls` or in the clear without.
     ///
     /// # Errors
-    /// [`PeerError::Configuration`] when the HTTP stack cannot be initialised.
-    pub fn new() -> Result<Self, PeerError> {
-        reqwest::Client::builder()
+    /// [`PeerError::Configuration`] when the TLS material or the HTTP stack cannot be used.
+    pub fn new(tls: Option<&InternalTls>) -> Result<Self, PeerError> {
+        let builder = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(PEER_CONNECT_TIMEOUT_SECS))
-            .read_timeout(Duration::from_secs(PEER_READ_TIMEOUT_SECS))
+            .read_timeout(Duration::from_secs(PEER_READ_TIMEOUT_SECS));
+        let unusable = |_| PeerError::Configuration {
+            reason: "the internal TLS material cannot be used",
+        };
+        let (config, scheme) = match tls {
+            Some(tls) => (crate::tls::client_config(tls).map_err(unusable)?, "https"),
+            None => (crate::tls::plain_client_config().map_err(unusable)?, "http"),
+        };
+        let builder = builder.tls_backend_preconfigured(config);
+        builder
             .build()
-            .map(|client| Self { client })
+            .map(|client| Self { client, scheme })
             .map_err(|_| PeerError::Configuration {
                 reason: "the HTTP client could not be built",
             })
+    }
+
+    /// `https` over TLS, `http` in the clear.
+    #[must_use]
+    pub const fn scheme(&self) -> &'static str {
+        self.scheme
     }
 
     /// Sends `method url` with `headers` and `body`, and waits for the answer's status and headers for at most

@@ -39,6 +39,7 @@ pub(crate) fn caller(secret: &str) -> RemoteShards {
     RemoteShards::new(
         NodeId::new("n2").expect("node id"),
         SecretKey::new(secret.to_owned()),
+        None,
     )
     .expect("client")
 }

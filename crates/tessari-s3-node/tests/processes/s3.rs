@@ -24,6 +24,28 @@ pub struct Meta {
     pub password: String,
     /// `TESSARIDB_S3_META_REPLICATION`, required for more than one address.
     pub replication: Option<String>,
+    /// A directory holding `cert.pem`, `key.pem` and `ca.pem` for the internal surface; `None` keeps it plain.
+    pub internal_tls: Option<PathBuf>,
+}
+
+/// A certificate authority minted for one cluster and the certificate it issues for `127.0.0.1`, which every local
+/// node presents: written to a fresh directory the cluster removes when it is dropped.
+pub fn internal_tls() -> PathBuf {
+    let dir = scratch("tls");
+    std::fs::create_dir_all(&dir).expect("tls directory");
+    let mut authority = rcgen::CertificateParams::new(Vec::new()).expect("authority parameters");
+    authority.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let authority_key = rcgen::KeyPair::generate().expect("authority key");
+    let authority = authority.self_signed(&authority_key).expect("authority");
+    let node_key = rcgen::KeyPair::generate().expect("node key");
+    let node = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
+        .expect("node parameters")
+        .signed_by(&node_key, &authority, &authority_key)
+        .expect("node certificate");
+    std::fs::write(dir.join("ca.pem"), authority.pem()).expect("ca written");
+    std::fs::write(dir.join("cert.pem"), node.pem()).expect("cert written");
+    std::fs::write(dir.join("key.pem"), node_key.serialize_pem()).expect("key written");
+    dir
 }
 
 /// A free local port, released for the child to bind.
@@ -66,6 +88,9 @@ impl Drop for Cluster {
             std::fs::remove_dir_all(&node.dir).ok();
         }
         // A failing test names the logs in its message; they stay for the reader.
+        if let Some(dir) = &self.settings.internal_tls {
+            std::fs::remove_dir_all(dir).ok();
+        }
         if !std::thread::panicking() {
             std::fs::remove_dir_all(&self.logs).ok();
         }
@@ -103,6 +128,15 @@ fn environment(
         "TESSARIDB_S3_DATA_DIR".to_owned(),
         dir.display().to_string(),
     ));
+    if let Some(dir) = &meta.internal_tls {
+        for (key, file) in [
+            ("TESSARIDB_S3_INTERNAL_TLS_CERT", "cert.pem"),
+            ("TESSARIDB_S3_INTERNAL_TLS_KEY", "key.pem"),
+            ("TESSARIDB_S3_INTERNAL_TLS_CA", "ca.pem"),
+        ] {
+            vars.push((key.to_owned(), dir.join(file).display().to_string()));
+        }
+    }
     if let Some(replication) = &meta.replication {
         vars.push((
             "TESSARIDB_S3_META_REPLICATION".to_owned(),

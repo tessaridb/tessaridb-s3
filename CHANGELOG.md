@@ -22,6 +22,10 @@ section records which TessariDB version its metadata runs on.
   object listed for healing has every shard checked block by block; a missing or damaged shard is rebuilt from the
   others and written back to its node, byte for byte as it was written, and a shard that verifies is never touched.
   An object with fewer than k readable shards stays listed and is logged as at risk.
+- The internal shard surface over mutual TLS (`TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY`, `_CA`, all three or
+  none): nodes accept only connections whose certificate the cluster's authority issued and check each other's the
+  same way, so shard bytes are encrypted and cannot be swapped on the way. Without them the surface stays plain and
+  the node warns at start.
 - A write cut short no longer blocks the next one: a node removes the temporary files a crash left in its data
   directory on start-up, and a write that stops part way (a client gone, a healing pass stopped) removes its own.
   Before, such a file refused every later write of the same shard, so an object that lost a node mid-write stayed

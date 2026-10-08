@@ -51,7 +51,11 @@ impl ErasureWrites {
             key: PlacementKey::derive(settings.secret.expose().as_bytes()),
             cluster,
             shards,
-            peers: RemoteShards::new(settings.node.clone(), settings.secret.clone())?,
+            peers: RemoteShards::new(
+                settings.node.clone(),
+                settings.secret.clone(),
+                settings.tls.as_ref(),
+            )?,
             sets: TessariShardSets::new(pool),
             stall: Duration::from_secs(SHARD_STALL_SECS),
             layout: OnceCell::new(),

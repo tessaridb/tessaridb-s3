@@ -63,6 +63,7 @@ fn pool(wire: &str) -> MetaPool {
         user: USER.to_owned(),
         password: PASSWORD.to_owned(),
         replication: None,
+        internal_tls: None,
     };
     MetaPool::new(crate::s3::settings(&base, "probe")).expect("pool")
 }
@@ -252,6 +253,7 @@ impl MetaCluster {
             user: USER.to_owned(),
             password: PASSWORD.to_owned(),
             replication: Some("3".to_owned()),
+            internal_tls: None,
         }
     }
 

@@ -39,6 +39,13 @@ allow = [
 ]
 private = { ignore = true }
 
+# Mozilla's root certificates as data, pulled in by the HTTP client's TLS stack (its platform verifier, which every
+# TLS feature of that client carries; this server never uses it — the internal surface trusts only the cluster's
+# own authority). A permissive data licence with no copyleft, allowed for this one crate rather than everywhere.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

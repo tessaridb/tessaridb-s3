@@ -11,6 +11,7 @@ use tessari_s3_constants::{
     INTERNAL_DATE_HEADER, INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH, INTERNAL_SIGNATURE_HEADER,
 };
 use tessari_s3_core::internal::{InternalRequest, sign};
+use tessari_s3_infrastructure::InternalTls;
 use tessari_s3_infrastructure::peer::{PeerBody, PeerHttp, PeerMethod, PeerReply};
 use tessari_s3_types::{NodeId, SecretKey};
 
@@ -35,13 +36,13 @@ pub struct RemoteShards {
 }
 
 impl RemoteShards {
-    /// Calls made as `node`, signed with `secret`.
+    /// Calls made as `node`, signed with `secret`, over mutual TLS with `tls` or in the clear without.
     ///
     /// # Errors
-    /// [`Error::Peer`] when the HTTP client cannot be built.
-    pub fn new(node: NodeId, secret: SecretKey) -> Result<Self> {
+    /// [`Error::Peer`] when the TLS material or the HTTP client cannot be used.
+    pub fn new(node: NodeId, secret: SecretKey, tls: Option<&InternalTls>) -> Result<Self> {
         Ok(Self {
-            http: PeerHttp::new()?,
+            http: PeerHttp::new(tls)?,
             node,
             secret,
         })
@@ -144,7 +145,7 @@ impl RemoteShards {
             (INTERNAL_DATE_HEADER, date.to_string()),
             (INTERNAL_SIGNATURE_HEADER, signature),
         ];
-        let url = format!("http://{endpoint}{target}");
+        let url = format!("{}://{endpoint}{target}", self.http.scheme());
         Ok(self.http.send(method, &url, &headers, body, budget).await?)
     }
 }

@@ -48,7 +48,12 @@ fn signed(node: &Node, method: &str, path: &str, body: &[u8]) -> reqwest::Reques
         amz_date: &amz_date,
     };
     let (target, headers) = signer::sign_with_body(&unsigned, body);
-    let mut request = reqwest::Client::new()
+    // The HTTP stack needs a TLS provider even for plain HTTP; the node's own, which trusts nothing, is used.
+    let plain = tessari_s3_infrastructure::tls::plain_client_config().expect("a TLS stack");
+    let mut request = reqwest::Client::builder()
+        .tls_backend_preconfigured(plain)
+        .build()
+        .expect("an HTTP client")
         .request(
             reqwest::Method::from_bytes(method.as_bytes()).expect("method"),
             format!("http://{}{target}", node.s3),

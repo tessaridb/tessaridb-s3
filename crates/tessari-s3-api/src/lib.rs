@@ -8,7 +8,7 @@ mod state;
 mod xml;
 
 pub use error::{Error, Result};
-pub use internal::{InternalState, internal_router};
+pub use internal::{InternalState, internal_router, serve_internal};
 pub use state::{ApiState, Clock};
 
 /// The router: every request goes through the dispatch pipeline behind an in-flight limit that sheds load.

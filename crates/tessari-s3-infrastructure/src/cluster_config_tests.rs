@@ -94,3 +94,78 @@ fn healing_runs_every_minute_unless_told_otherwise() {
         })
     ));
 }
+
+#[test]
+fn internal_tls_is_three_files_read_together_or_none() {
+    let dir = std::env::temp_dir().join(format!("tessari-s3-tls-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let file = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("written");
+        path.to_string_lossy().into_owned()
+    };
+    let (cert, key, ca) = (
+        file("cert.pem", "CERT"),
+        file("key.pem", "PRIVATE-KEY-BYTES"),
+        file("ca.pem", "AUTHORITY"),
+    );
+    let tls = [
+        ("TESSARIDB_S3_INTERNAL_TLS_CERT", cert.as_str()),
+        ("TESSARIDB_S3_INTERNAL_TLS_KEY", key.as_str()),
+        ("TESSARIDB_S3_INTERNAL_TLS_CA", ca.as_str()),
+    ];
+    let cluster = |extra: &[(&str, &str)]| {
+        let mut vars: Vec<(&str, &str)> = with(&CLUSTER);
+        vars.extend_from_slice(extra);
+        load(&vars).map(|config| config.cluster.expect("clustered"))
+    };
+    assert!(
+        cluster(&[]).expect("loads").tls.is_none(),
+        "plain unless asked"
+    );
+    let read = cluster(&tls).expect("loads").tls.expect("tls");
+    assert_eq!(read.certificate_pem, b"CERT");
+    assert_eq!(read.authority_pem, b"AUTHORITY");
+    assert_eq!(read.key_pem(), b"PRIVATE-KEY-BYTES");
+    assert!(
+        !format!("{read:?}").contains("PRIVATE-KEY"),
+        "the key is never printed"
+    );
+    for (index, (missing, _)) in tls.iter().enumerate() {
+        let partial: Vec<(&'static str, &str)> = tls
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| *at != index)
+            .map(|(_, pair)| *pair)
+            .collect();
+        assert!(
+            matches!(cluster(&partial), Err(Error::MissingConfig { key }) if key == *missing),
+            "{missing} missing"
+        );
+    }
+    let unreadable = [
+        tls[0],
+        tls[1],
+        ("TESSARIDB_S3_INTERNAL_TLS_CA", "/nonexistent/ca.pem"),
+    ];
+    assert!(matches!(
+        cluster(&unreadable),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_INTERNAL_TLS_CA",
+            ..
+        })
+    ));
+    let mut stray = with(&CREDENTIALS);
+    stray.push(tls[0]);
+    assert!(
+        matches!(
+            load(&stray),
+            Err(Error::InvalidConfig {
+                key: "TESSARIDB_S3_ERASURE",
+                ..
+            })
+        ),
+        "TLS for a node that is not clustered is refused, not ignored"
+    );
+    std::fs::remove_dir_all(&dir).expect("cleanup");
+}

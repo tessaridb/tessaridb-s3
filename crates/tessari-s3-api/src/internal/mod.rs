@@ -5,7 +5,10 @@
 mod auth;
 mod params;
 mod refusal;
+mod serve;
 mod shards;
+
+pub use serve::serve_internal;
 
 use std::sync::Arc;
 

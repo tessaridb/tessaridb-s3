@@ -63,6 +63,9 @@ pub struct ClusterSettings {
     pub secret: SecretKey,
     /// `TESSARIDB_S3_HEAL_INTERVAL_SECS` — time between healing passes (positive).
     pub heal_interval_secs: u64,
+    /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS; `None` speaks in the
+    /// clear.
+    pub tls: Option<crate::tls::InternalTls>,
 }
 
 impl S3Config {

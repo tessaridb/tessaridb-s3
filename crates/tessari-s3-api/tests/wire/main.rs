@@ -7,6 +7,7 @@ mod erasure;
 mod internal;
 mod operations;
 mod peers;
+mod peers_tls;
 mod refusals;
 mod signer;
 

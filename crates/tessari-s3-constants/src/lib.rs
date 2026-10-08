@@ -78,6 +78,9 @@ pub const SHARD_STALL_SECS: u64 = 30;
 
 /// Seconds a node waits for a peer to accept a connection before calling it unavailable.
 pub const PEER_CONNECT_TIMEOUT_SECS: u64 = 5;
+/// How long a connection to the internal surface may take to finish its TLS handshake before it is dropped, so a
+/// peer that connects and says nothing cannot hold a connection open.
+pub const INTERNAL_TLS_HANDSHAKE_SECS: u64 = 10;
 
 /// Seconds a node waits on a peer that has stopped sending mid-answer before calling it unavailable.
 pub const PEER_READ_TIMEOUT_SECS: u64 = 30;
