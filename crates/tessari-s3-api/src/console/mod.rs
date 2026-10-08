@@ -209,7 +209,11 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/spaces", get(spaces::list).post(spaces::create))
         .route("/api/v1/users", get(users::list).post(users::create))
         .route("/api/v1/users/{user}/disabled", put(users::set_disabled))
-        .route("/api/v1/users/{user}/keys", post(keys::issue))
+        .route(
+            "/api/v1/users/{user}/keys",
+            get(keys::list).post(keys::issue),
+        )
+        .route("/api/v1/users/{user}/keys/{key}", delete(keys::revoke))
         .route(
             "/api/v1/users/{user}/grants/{bucket}",
             put(grants::set).delete(grants::remove),

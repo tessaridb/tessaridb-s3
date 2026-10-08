@@ -98,14 +98,14 @@ export type Problem = { readonly code: string; readonly message: string };
 
 type Fields = Readonly<Record<string, unknown>>;
 
-const record = (value: unknown): value is Fields =>
+export const record = (value: unknown): value is Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-const text = (value: unknown): value is string => typeof value === "string";
-const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+export const text = (value: unknown): value is string => typeof value === "string";
+export const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const textOrNull = (value: unknown): value is string | null => value === null || text(value);
 const countOrNull = (value: unknown): value is number | null => value === null || count(value);
 
-function list<T>(value: unknown, item: (entry: unknown) => T | null): T[] | null {
+export function list<T>(value: unknown, item: (entry: unknown) => T | null): T[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -244,7 +244,7 @@ export function readActions(v: unknown): Actions | null {
   return actions === null ? null : { actions, next: v["next"] };
 }
 
-const flag = (value: unknown): value is boolean => typeof value === "boolean";
+export const flag = (value: unknown): value is boolean => typeof value === "boolean";
 const role = (value: unknown): value is Role => value === "space_admin" || value === "member";
 
 const user = (v: unknown): User | null =>

@@ -18,7 +18,7 @@ use crate::{ACCESS_KEY, IGNORED, SECRET, call, call_with, fresh_console};
 pub(crate) struct Seen {
     pub(crate) status: u16,
     headers: HeaderMap,
-    bytes: Vec<u8>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 impl Seen {

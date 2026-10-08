@@ -33,6 +33,8 @@ use crate::Result;
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
 /// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
+/// `key_issues:<token>` remembers which key a console form's token issued, so a repeated submission answers that key;
+/// the store drops it once its window has passed.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -108,6 +110,8 @@ DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
 ALTER TABLE access_keys SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
+ALTER TABLE key_issues SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS grants (\
  user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;

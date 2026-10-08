@@ -5,8 +5,8 @@ use std::future::Future;
 use tessari_s3_core::authz::{Access, UserName, Visible};
 use tessari_s3_types::BucketName;
 
-use super::entity::{AccessKeyEntity, GrantEntity, UserEntity};
-use super::model::{KeyScope, NewUser};
+use super::entity::{AccessKeyEntity, GrantEntity, IssueEntity, KeyListedEntity, UserEntity};
+use super::model::{IssueToken, KeyScope, NewUser};
 use super::sealer::Sealed;
 use crate::Result;
 
@@ -42,6 +42,27 @@ pub(crate) trait UserRepository: Send + Sync {
         sealed: &Sealed,
         scope: Option<&KeyScope>,
     ) -> impl Future<Output = Result<bool>> + Send;
+    /// Writes a new, enabled full access key `id` for `user` and records that `token` issued it, both or neither,
+    /// the token remembered for `token_secs`; `false` when that id or that token is taken, or a concurrent write won.
+    fn insert_key_once(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        token: &IssueToken,
+        token_secs: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
+    /// What `token` recorded, while it is remembered.
+    fn get_issue(
+        &self,
+        token: &IssueToken,
+    ) -> impl Future<Output = Result<Option<IssueEntity>>> + Send;
+    /// `user`'s keys, at most `limit`, without their secrets.
+    fn keys_of(
+        &self,
+        user: &UserName,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<KeyListedEntity>>> + Send;
     /// The record of access key `id`, if any.
     fn get_key(&self, id: &str) -> impl Future<Output = Result<Option<AccessKeyEntity>>> + Send;
     /// Sets an existing key's `disabled` flag.

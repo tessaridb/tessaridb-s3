@@ -2,11 +2,11 @@
 //! `grants:<user>/<bucket>` (neither name may hold a `/`); every value is bound.
 
 use tessari_s3_core::authz::{Access, UserName, Visible};
-use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass, Value};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, RefusalClass, Value};
 use tessari_s3_types::BucketName;
 
-use super::entity::{AccessKeyEntity, GrantEntity, UserEntity};
-use super::model::{KeyScope, NewUser, role_text};
+use super::entity::{AccessKeyEntity, GrantEntity, IssueEntity, KeyListedEntity, UserEntity};
+use super::model::{IssueToken, KeyScope, NewUser, role_text};
 use super::repository::{Inserted, UserRepository};
 use super::sealer::Sealed;
 use crate::answers::{all_records, first_record};
@@ -49,6 +49,18 @@ fn text(name: &str, value: &str) -> (String, Value) {
 
 fn flag(name: &str, value: bool) -> (String, Value) {
     (name.to_owned(), Value::Bool(value))
+}
+
+/// A new key record's values: its id, holder and sealed secret.
+fn key_parameters(id: &str, user: &UserName, sealed: &Sealed) -> Vec<(String, Value)> {
+    vec![
+        text("id", id),
+        text("user", user.as_str()),
+        ("secret".to_owned(), Value::Bytes(sealed.ciphertext.clone())),
+        ("nonce".to_owned(), Value::Bytes(sealed.nonce.clone())),
+        text("kek_id", &sealed.kek_id),
+        text("algorithm", &sealed.algorithm),
+    ]
 }
 
 fn grant_id(user: &UserName, bucket: &BucketName) -> (String, Value) {
@@ -130,14 +142,7 @@ impl UserRepository for TessariUsers {
         sealed: &Sealed,
         scope: Option<&KeyScope>,
     ) -> Result<bool> {
-        let mut parameters = vec![
-            text("id", id),
-            text("user", user.as_str()),
-            ("secret".to_owned(), Value::Bytes(sealed.ciphertext.clone())),
-            ("nonce".to_owned(), Value::Bytes(sealed.nonce.clone())),
-            text("kek_id", &sealed.kek_id),
-            text("algorithm", &sealed.algorithm),
-        ];
+        let mut parameters = key_parameters(id, user, sealed);
         let script = match scope {
             None => {
                 "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
@@ -164,6 +169,72 @@ impl UserRepository for TessariUsers {
             Ok(_) => Ok(true),
             Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
             Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn insert_key_once(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        token: &IssueToken,
+        token_secs: i64,
+    ) -> Result<bool> {
+        let mut parameters = key_parameters(id, user, sealed);
+        parameters.extend([
+            text("token", token.as_str()),
+            ("token_secs".to_owned(), Value::from(token_secs)),
+        ]);
+        // One transaction: a submission that loses the race on the token record writes no key either. It loses as
+        // `conflict` when the winner committed before its snapshot and as `retry` when the two overlapped; both wrote
+        // nothing, and the caller reads the token to learn which key the winner issued.
+        let script = "BEGIN; \
+             CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, kek_id: $kek_id, \
+             algorithm: $algorithm, disabled: false, created: time::now() }; \
+             CREATE key_issues:$token = { user_name: $user, key_id: $id } \
+             EXPIRE time::from_unix(time::unix(time::now()) + $token_secs); \
+             COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error)
+                if error.is_class(RefusalClass::Conflict)
+                    || error.is_class(RefusalClass::Retry) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn get_issue(&self, token: &IssueToken) -> Result<Option<IssueEntity>> {
+        self.one(
+            "SELECT * FROM ONLY key_issues:$token;",
+            vec![text("token", token.as_str())],
+        )
+        .await?
+        .map(|value| IssueEntity::from_value(&value))
+        .transpose()
+    }
+
+    async fn keys_of(&self, user: &UserName, limit: usize) -> Result<Vec<KeyListedEntity>> {
+        // The projection names no secret, so a listing never fetches one.
+        let script = format!(
+            "SELECT disabled, created, scope_bucket, scope_key, expires FROM access_keys \
+             WHERE user_name = $user LIMIT {limit} USING INDEX by_key_user;"
+        );
+        let answers = self
+            .pool
+            .run(&script, vec![text("user", user.as_str())])
+            .await?;
+        match answers.into_iter().next() {
+            Some(Answer::Records { records, .. }) => records
+                .iter()
+                .map(|(identity, value)| KeyListedEntity::from_record(identity, value))
+                .collect(),
+            _ => Err(Error::Malformed {
+                record: "access key",
+                reason: "a listing answered no records",
+            }),
         }
     }
 

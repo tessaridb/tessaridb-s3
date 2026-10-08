@@ -86,11 +86,24 @@ impl KeyScope {
 
 /// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
 pub(crate) fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
+    scope_from(
+        key.scope_bucket.as_ref(),
+        key.scope_key.as_ref(),
+        key.expires,
+    )
+}
+
+/// A scope from its three stored fields, under the same all-or-none rule as [`scope_of`].
+pub(crate) fn scope_from(
+    bucket: Option<&String>,
+    key: Option<&String>,
+    expires: Option<(i64, u32)>,
+) -> Result<Option<KeyScope>> {
     let malformed = |reason| Error::Malformed {
         record: "access key",
         reason,
     };
-    match (&key.scope_bucket, &key.scope_key, key.expires) {
+    match (bucket, key, expires) {
         (None, None, None) => Ok(None),
         (Some(bucket), Some(object), Some((expires, _))) => Ok(Some(KeyScope {
             bucket: BucketName::new(bucket).map_err(|_| malformed("scope_bucket"))?,
@@ -101,6 +114,53 @@ pub(crate) fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
             "a scope needs scope_bucket, scope_key and expires together",
         )),
     }
+}
+
+/// The token a console form carries so that submitting it twice issues one key, not two: 16 to 64 characters of
+/// ASCII letters, digits and `-` (a UUID fits).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueToken(String);
+
+impl IssueToken {
+    /// The token `text` spells; `None` for any other shape.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let fits = (16..=64).contains(&text.len())
+            && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        fits.then(|| Self(text.to_owned()))
+    }
+
+    /// The token as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What issuing a key under a token ended in.
+#[derive(Debug)]
+pub enum IssuedOnce {
+    /// A new key; its secret is in this answer and nowhere else.
+    Issued(IssuedKey),
+    /// The token already issued this user a key: its id, and no secret.
+    AlreadyIssued(String),
+    /// The token issued a key to another user; nothing was issued.
+    TokenReused,
+    /// There is no such user.
+    NoSuchUser,
+}
+
+/// One of a user's keys as a listing shows it: never its secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedKey {
+    /// The access key id.
+    pub access_key_id: String,
+    /// When it was issued.
+    pub created: Timestamp,
+    /// A disabled key resolves to nothing.
+    pub disabled: bool,
+    /// A one-key credential's scope; `None` for a full key.
+    pub scope: Option<KeyScope>,
 }
 
 /// A live key's user and secret, for verifying a request it signed. Not `Clone`, for the same reason.

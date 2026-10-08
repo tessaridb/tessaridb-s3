@@ -18,6 +18,9 @@ use crate::{Error, Result};
 /// Draws of a fresh access key id before giving up; a collision among 90-bit ids is not expected even once.
 const ID_ATTEMPTS: usize = 3;
 
+#[path = "service_keys.rs"]
+mod keys;
+
 /// What creating a user ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UserCreated {

@@ -119,6 +119,10 @@ pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
 /// one's snapshot): the next attempt sees the committed layout and reads it back.
 pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
 
+/// Times an action is appended to the action record when the store answers `retry` (another action committed to the
+/// record after this one's snapshot); a refused append wrote nothing, so the next attempt cannot duplicate it.
+pub const ACTION_RECORD_ATTEMPTS: u32 = 5;
+
 /// Largest sum of user metadata names and values, in UTF-8 bytes (2 KB, S3's limit; MetadataTooLarge beyond it).
 pub const USER_METADATA_MAX: usize = 2 * 1024;
 
@@ -171,6 +175,13 @@ pub const CONSOLE_ACTIONS_PAGE_MAX: usize = 100;
 
 /// The longest reason, in characters, an operator may give for a console action.
 pub const CONSOLE_REASON_MAX_CHARS: usize = 500;
+
+/// Seconds a console key-issue token is remembered: a repeated submission inside this window answers the key the
+/// token first issued and never a second secret; past it the token is forgotten and a submission issues anew.
+pub const KEY_ISSUE_TOKEN_SECS: i64 = 86_400;
+
+/// The most access keys one user's console listing returns.
+pub const USER_KEYS_LISTED_MAX: usize = 1_000;
 
 /// The shortest life, in seconds, of a one-key upload credential: long enough to be used, and an expiry the metadata
 /// store will accept as still in the future.

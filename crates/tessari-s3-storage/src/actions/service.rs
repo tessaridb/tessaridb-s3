@@ -1,11 +1,12 @@
 //! Action-record rules: an action is recorded as it ended, and the record is read newest first a page at a time.
 
-use tessari_s3_constants::CONSOLE_ACTIONS_PAGE_MAX;
+use tessari_s3_constants::{ACTION_RECORD_ATTEMPTS, CONSOLE_ACTIONS_PAGE_MAX};
+use tessari_s3_infrastructure::tessaridb::RefusalClass;
 
 use super::model::{Action, NewAction};
 use super::repository::ActionRepository;
 use super::tessaridb::TessariActions;
-use crate::Result;
+use crate::{Error, Result};
 
 /// Action-record operations.
 #[derive(Clone)]
@@ -25,7 +26,20 @@ impl ActionService {
     /// # Errors
     /// The metadata store's refusal or outage.
     pub async fn record(&self, action: &NewAction) -> Result<()> {
-        self.repository.append(action).await
+        // Concurrent actions contend on the record's head, and the store answers the later commit `retry` rather
+        // than waiting; that refusal wrote nothing. Bounded, so a store that keeps answering it is reported.
+        let mut attempt: u32 = 1;
+        loop {
+            match self.repository.append(action).await {
+                Err(Error::Meta(error))
+                    if error.is_class(RefusalClass::Retry) && attempt < ACTION_RECORD_ATTEMPTS =>
+                {
+                    tracing::debug!(attempt, error = %error, "action record contended; appending again");
+                    attempt = attempt.saturating_add(1);
+                }
+                outcome => return outcome,
+            }
+        }
     }
 
     /// Up to `limit` actions (at most [`CONSOLE_ACTIONS_PAGE_MAX`]) before position `before` — or the newest when it

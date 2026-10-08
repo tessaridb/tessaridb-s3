@@ -670,11 +670,39 @@
     return form;
   }
 
-  // src/user-actions.ts
-  //! A user row's actions, each opening an inline region under the row: issuing
-  //! a key (its secret is shown here once and never again — the server keeps it
-  //! sealed and will not hand it back), disabling or enabling the user, and
-  //! granting or removing access to one bucket. Every one takes a reason.
+  // src/keys-model.ts
+  //! What the console answers about a user's access keys: an issue (a new key with
+  //! its secret, or the key the form's token already issued, without one) and a
+  //! listing, which never carries a secret.
+  function readIssue(v) {
+    if (!record(v) || !text(v["access_key_id"])) {
+      return null;
+    }
+    if (text(v["secret_access_key"])) {
+      return { kind: "issued", key: { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] } };
+    }
+    return v["already_issued"] === true ? { kind: "already", access_key_id: v["access_key_id"] } : null;
+  }
+  function reach(v) {
+    if (v === null) {
+      return null;
+    }
+    return record(v) && text(v["bucket"]) && text(v["key"]) && count(v["expires"]) ? { bucket: v["bucket"], key: v["key"], expires: v["expires"] } : void 0;
+  }
+  function listed(v) {
+    if (!record(v) || !text(v["access_key_id"]) || !text(v["created"]) || !flag(v["disabled"]) || !("upload" in v)) {
+      return null;
+    }
+    const upload = reach(v["upload"]);
+    return upload === void 0 ? null : { access_key_id: v["access_key_id"], created: v["created"], disabled: v["disabled"], upload };
+  }
+  function readKeys(v) {
+    return record(v) ? list(v["keys"], listed) : null;
+  }
+
+  // src/row-region.ts
+  //! The inline region a user row's action opens under the row, and how a failure
+  //! inside one is settled.
   var COLUMNS = "6";
   function settle(screen, failure) {
     if (failure.status === 401) {
@@ -692,6 +720,85 @@
     line.after(ask);
     return () => ask.remove();
   }
+
+  // src/user-keys.ts
+  //! A user's access keys, listed in a region under the user's row — never a
+  //! secret, which the server does not hand back — each revocable. Revoking names
+  //! the key, cannot be undone, and takes a reason; every node refuses the key
+  //! within five seconds.
+  function reach2(key) {
+    if (key.upload === null) {
+      return "Full";
+    }
+    const until = new Date(key.upload.expires * 1e3).toISOString();
+    return el("span", {}, "Upload of ", mono(`${key.upload.bucket}/${key.upload.key}`), ` until ${moment(until)}`);
+  }
+  function keys(screen, user2, line, opener) {
+    const region = el("div", { class: "keys", "aria-live": "polite" });
+    const close = open(line, region);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    const route = `/users/${encodeURIComponent(user2.name)}/keys`;
+    const done = el("button", { type: "button", class: "quiet" }, "Close");
+    done.addEventListener("click", back);
+    const revoke = (key, button) => {
+      const ask = el("div", {});
+      button.after(ask);
+      fill(
+        ask,
+        confirmation(
+          `revoke-${key.access_key_id}`,
+          mono(key.access_key_id),
+          `Every node refuses this key of ${user2.name} within five seconds. It cannot be restored; a new key has a new secret.`,
+          "Revoke key",
+          async (reason) => {
+            const answer = await call("DELETE", `${route}/${encodeURIComponent(key.access_key_id)}`, ignored, { reason });
+            if (!answer.ok) {
+              return settle(screen, answer);
+            }
+            announce(`Revoked key ${key.access_key_id} of ${user2.name}.`);
+            void show();
+            return null;
+          },
+          () => {
+            ask.remove();
+            button.focus();
+          }
+        )
+      );
+    };
+    const show = async () => {
+      fill(region, el("p", { class: "muted" }, `Loading the keys of ${user2.name}…`));
+      const answer = await call("GET", route, readKeys);
+      if (!answer.ok) {
+        const shown = settle(screen, answer);
+        if (shown !== null) {
+          fill(region, refusal(shown), done);
+        }
+        return;
+      }
+      if (answer.value.length === 0) {
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done);
+        return;
+      }
+      const rows = answer.value.map((key) => {
+        const button = el("button", { type: "button", class: "danger" }, "Revoke…");
+        button.addEventListener("click", () => revoke(key, button));
+        return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
+      });
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done);
+    };
+    void show();
+  }
+
+  // src/user-actions.ts
+  //! A user row's actions, each opening an inline region under the row: issuing
+  //! a key (its secret is shown here once and never again — the server keeps it
+  //! sealed and will not hand it back), listing and revoking keys, disabling or
+  //! enabling the user, and granting or removing access to one bucket. Every
+  //! change takes a reason.
   function shownOnce(key, done) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
@@ -715,6 +822,17 @@
       said
     );
   }
+  function alreadyIssued(id, done) {
+    const finish = el("button", { type: "button", class: "primary" }, "Close");
+    finish.addEventListener("click", done);
+    queueMicrotask(() => finish.focus());
+    return el(
+      "div",
+      { class: "once", role: "status" },
+      el("p", {}, "This form already issued key ", mono(id), ". Its secret was shown once and cannot be shown again; if it was not stored, revoke the key and issue a new one."),
+      el("div", { class: "actions" }, finish)
+    );
+  }
   function issueKey(screen, user2, line, opener) {
     const region = el("div", {});
     const close = open(line, region);
@@ -722,6 +840,8 @@
       close();
       opener.focus();
     };
+    const token = crypto.randomUUID();
+    let secretShown = false;
     fill(
       region,
       confirmation(
@@ -730,12 +850,22 @@
         "A new access key for this user. Its secret is shown once, right here.",
         "Issue key",
         async (reason) => {
-          const answer = await call("POST", `/users/${encodeURIComponent(user2.name)}/keys`, readIssued, { reason });
+          const answer = await call("POST", `/users/${encodeURIComponent(user2.name)}/keys`, readIssue, { reason, idempotency_key: token });
           if (!answer.ok) {
             return settle(screen, answer);
           }
+          const issued = answer.value;
+          if (issued.kind === "already") {
+            if (secretShown) {
+              return null;
+            }
+            announce(`This form already issued ${user2.name} a key.`);
+            fill(region, alreadyIssued(issued.access_key_id, back));
+            return null;
+          }
+          secretShown = true;
           announce(`Issued a key for ${user2.name}. Store its secret now.`);
-          fill(region, shownOnce(answer.value, () => {
+          fill(region, shownOnce(issued.key, () => {
             fill(region);
             back();
           }));
@@ -836,12 +966,14 @@
   }
   function rowActions(screen, user2, line) {
     const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
+    const list2 = el("button", { type: "button", class: "quiet" }, "Keys…");
     const state2 = el("button", { type: "button", class: "quiet" }, user2.disabled ? "Enable…" : "Disable…");
     const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
     key.addEventListener("click", () => issueKey(screen, user2, line, key));
+    list2.addEventListener("click", () => keys(screen, user2, line, list2));
     state2.addEventListener("click", () => setDisabled(screen, user2, line, state2));
     access.addEventListener("click", () => grants(screen, user2, line, access));
-    return [key, state2, access];
+    return [key, list2, state2, access];
   }
 
   // src/bucket-upload-key.ts
@@ -1044,11 +1176,11 @@
     return line;
   }
   function measuredLine(count2, usage) {
-    const listed = `${count2.toLocaleString()} on this cluster`;
+    const listed2 = `${count2.toLocaleString()} on this cluster`;
     if (!usage.ok) {
-      return `${listed} · sizes could not be read`;
+      return `${listed2} · sizes could not be read`;
     }
-    return usage.value.taken === null ? `${listed} · sizes not measured yet` : `${listed} · sizes measured ${moment(usage.value.taken)}`;
+    return usage.value.taken === null ? `${listed2} · sizes not measured yet` : `${listed2} · sizes measured ${moment(usage.value.taken)}`;
   }
   async function buckets(screen) {
     loading(screen, TITLE2, "buckets");
@@ -1065,12 +1197,12 @@
     const form = createForm(screen, opener);
     form.id = "new-bucket-form";
     const filter = field("bucket-filter", "Filter by name", { type: "search", spellcheck: "false", autocomplete: "off" });
-    const listed = el("div", {});
+    const listed2 = el("div", {});
     const draw2 = () => {
       const wanted = filter.input.value.trim();
       const shown = all2.filter((bucket2) => bucket2.name.includes(wanted));
       fill(
-        listed,
+        listed2,
         all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "On drives", "Limit", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
       );
     };
@@ -1080,7 +1212,7 @@
       screen.main,
       head(TITLE2, measuredLine(all2.length, usage), opener),
       form,
-      el("section", { class: "card flush" }, all2.length === 0 ? null : el("div", { class: "toolbar" }, filter.row), listed)
+      el("section", { class: "card flush" }, all2.length === 0 ? null : el("div", { class: "toolbar" }, filter.row), listed2)
     );
   }
 

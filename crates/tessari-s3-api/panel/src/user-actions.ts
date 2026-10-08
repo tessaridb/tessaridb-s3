@@ -1,35 +1,17 @@
 //! A user row's actions, each opening an inline region under the row: issuing
 //! a key (its secret is shown here once and never again — the server keeps it
-//! sealed and will not hand it back), disabling or enabling the user, and
-//! granting or removing access to one bucket. Every one takes a reason.
+//! sealed and will not hand it back), listing and revoking keys, disabling or
+//! enabling the user, and granting or removing access to one bucket. Every
+//! change takes a reason.
 
 import { call } from "./api.ts";
 import { confirmation } from "./confirm.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
-import { ignored, readIssued, type IssuedKey, type User } from "./models.ts";
+import { readIssue } from "./keys-model.ts";
+import { ignored, type IssuedKey, type User } from "./models.ts";
+import { open, settle } from "./row-region.ts";
 import { refusal, type Failure, type Screen } from "./screen.ts";
-
-const COLUMNS = "6";
-
-/** The failure to show, after handing a lost session to sign-in. */
-function settle(screen: Screen, failure: Failure): Failure | null {
-  if (failure.status === 401) {
-    screen.signIn();
-    return null;
-  }
-  return failure;
-}
-
-/** Opens `region` under `line`, replacing any region already open there. */
-function open(line: HTMLTableRowElement, region: HTMLElement): () => void {
-  const next = line.nextElementSibling;
-  if (next instanceof HTMLTableRowElement && next.classList.contains("asking")) {
-    next.remove();
-  }
-  const ask = el("tr", { class: "asking" }, el("td", { colspan: COLUMNS }, region));
-  line.after(ask);
-  return () => ask.remove();
-}
+import { keys } from "./user-keys.ts";
 
 /** The one view of a new key's secret: copy it now, then dismiss it. */
 export function shownOnce(key: IssuedKey, done: () => void): HTMLElement {
@@ -56,6 +38,19 @@ export function shownOnce(key: IssuedKey, done: () => void): HTMLElement {
   );
 }
 
+/** A repeated submission's answer: the key exists, and its secret was shown once already. */
+function alreadyIssued(id: string, done: () => void): HTMLElement {
+  const finish = el("button", { type: "button", class: "primary" }, "Close");
+  finish.addEventListener("click", done);
+  queueMicrotask(() => finish.focus());
+  return el(
+    "div",
+    { class: "once", role: "status" },
+    el("p", {}, "This form already issued key ", mono(id), ". Its secret was shown once and cannot be shown again; if it was not stored, revoke the key and issue a new one."),
+    el("div", { class: "actions" }, finish),
+  );
+}
+
 function issueKey(screen: Screen, user: User, line: HTMLTableRowElement, opener: HTMLButtonElement): void {
   const region = el("div", {});
   const close = open(line, region);
@@ -63,6 +58,11 @@ function issueKey(screen: Screen, user: User, line: HTMLTableRowElement, opener:
     close();
     opener.focus();
   };
+  // Minted as the form opens and sent with every submission of it, so a submission repeated after a lost answer
+  // gets the key this form already issued rather than a second one.
+  const token = crypto.randomUUID();
+  // The secret is on screen once it arrives; a repeated submission's later "already issued" must not cover it.
+  let secretShown = false;
   fill(
     region,
     confirmation(
@@ -71,12 +71,22 @@ function issueKey(screen: Screen, user: User, line: HTMLTableRowElement, opener:
       "A new access key for this user. Its secret is shown once, right here.",
       "Issue key",
       async (reason) => {
-        const answer = await call("POST", `/users/${encodeURIComponent(user.name)}/keys`, readIssued, { reason });
+        const answer = await call("POST", `/users/${encodeURIComponent(user.name)}/keys`, readIssue, { reason, idempotency_key: token });
         if (!answer.ok) {
           return settle(screen, answer);
         }
+        const issued = answer.value;
+        if (issued.kind === "already") {
+          if (secretShown) {
+            return null;
+          }
+          announce(`This form already issued ${user.name} a key.`);
+          fill(region, alreadyIssued(issued.access_key_id, back));
+          return null;
+        }
+        secretShown = true;
         announce(`Issued a key for ${user.name}. Store its secret now.`);
-        fill(region, shownOnce(answer.value, () => {
+        fill(region, shownOnce(issued.key, () => {
           fill(region);
           back();
         }));
@@ -181,10 +191,12 @@ function grants(screen: Screen, user: User, line: HTMLTableRowElement, opener: H
 /** The buttons for `user`'s row. */
 export function rowActions(screen: Screen, user: User, line: HTMLTableRowElement): HTMLButtonElement[] {
   const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
+  const list = el("button", { type: "button", class: "quiet" }, "Keys…");
   const state = el("button", { type: "button", class: "quiet" }, user.disabled ? "Enable…" : "Disable…");
   const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
   key.addEventListener("click", () => issueKey(screen, user, line, key));
+  list.addEventListener("click", () => keys(screen, user, line, list));
   state.addEventListener("click", () => setDisabled(screen, user, line, state));
   access.addEventListener("click", () => grants(screen, user, line, access));
-  return [key, state, access];
+  return [key, list, state, access];
 }

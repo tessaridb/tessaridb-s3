@@ -52,6 +52,32 @@ pub struct AccessKeyEntity {
     pub expires: Option<(i64, u32)>,
 }
 
+/// One access key as a listing reads it: never the secret, which the listing does not fetch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyListedEntity {
+    /// The access key id.
+    pub id: String,
+    /// A disabled key resolves to nothing.
+    pub disabled: bool,
+    /// Creation time: seconds and nanoseconds since the epoch.
+    pub created: (i64, u32),
+    /// A one-key credential's bucket; absent on a full key, as are the two below.
+    pub scope_bucket: Option<String>,
+    /// A one-key credential's key.
+    pub scope_key: Option<String>,
+    /// A one-key credential's expiry: seconds and nanoseconds since the epoch.
+    pub expires: Option<(i64, u32)>,
+}
+
+/// What a key-issue token recorded: whom it issued a key to, and which key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueEntity {
+    /// The user the key was issued to.
+    pub user_name: String,
+    /// The key it issued.
+    pub key_id: String,
+}
+
 /// The stored fields of one grant: a user's access to one bucket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GrantEntity {
@@ -170,6 +196,42 @@ impl AccessKeyEntity {
             scope_bucket: fields.optional_text("scope_bucket")?,
             scope_key: fields.optional_text("scope_key")?,
             expires: fields.optional_instant("expires")?,
+        })
+    }
+}
+
+impl KeyListedEntity {
+    /// Reads a listed record: its identity as the store spells it (a quoted text id) and its value.
+    ///
+    /// # Errors
+    /// [`Error::Malformed`] when the identity is not a quoted text id, or a field is missing or of another type.
+    pub fn from_record(identity: &str, value: &Value) -> Result<Self> {
+        let fields = Fields::of(value, "access key")?;
+        let id = identity
+            .strip_prefix('\'')
+            .and_then(|rest| rest.strip_suffix('\''))
+            .ok_or_else(|| fields.malformed("id"))?;
+        Ok(Self {
+            id: id.to_owned(),
+            disabled: fields.flag("disabled")?,
+            created: fields.instant("created")?,
+            scope_bucket: fields.optional_text("scope_bucket")?,
+            scope_key: fields.optional_text("scope_key")?,
+            expires: fields.optional_instant("expires")?,
+        })
+    }
+}
+
+impl IssueEntity {
+    /// Reads a record's value.
+    ///
+    /// # Errors
+    /// [`Error::Malformed`] when a field is missing or of another type.
+    pub fn from_value(value: &Value) -> Result<Self> {
+        let fields = Fields::of(value, "key issue")?;
+        Ok(Self {
+            user_name: fields.text("user_name")?,
+            key_id: fields.text("key_id")?,
         })
     }
 }

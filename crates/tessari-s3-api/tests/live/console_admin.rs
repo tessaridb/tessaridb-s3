@@ -93,7 +93,7 @@ async fn an_operator_creates_spaces_and_users_and_a_key_is_shown_once() {
         &console,
         &root,
         "/api/v1/users/boss/keys",
-        "{\"reason\":\"first key\"}",
+        "{\"reason\":\"first key\",\"idempotency_key\":\"boss-first-key-0001\"}",
     )
     .await;
     assert_eq!(key.status, 201, "{:?}", key.json());
@@ -138,7 +138,7 @@ async fn an_operator_creates_spaces_and_users_and_a_key_is_shown_once() {
             &console,
             &boss_token,
             "/api/v1/users/boss/keys",
-            "{\"reason\":\"mine\"}"
+            "{\"reason\":\"mine\",\"idempotency_key\":\"boss-own-key-00001\"}"
         )
         .await
         .status,
