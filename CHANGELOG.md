@@ -5,6 +5,22 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- GetObject and HeadObject with a `partNumber` past the object's last part answer `InvalidPartNumber` (416), and
+  `partNumber=1` on a single-part object answers the whole object.
+- Upload ids sort by when the upload began (128 random bits kept), so ListMultipartUploads pages with
+  `upload-id-marker` neither repeat nor skip an upload, even one that has ended; `max-uploads=0` is refused
+  `InvalidArgument`. Upload ids from an earlier build still work.
+- UploadPartCopy with `x-amz-copy-source-range` on a source of 5 MiB or less is refused `InvalidRequest`, as S3 does.
+- Console access keys: issuing takes a token the form minted when it opened, so a submission sent twice issues one
+  key and the repeat shows no secret; each user's keys are listed without secrets and revoked with a reason, refused
+  on every node within 5 seconds. Row actions are icon buttons with tooltips.
+- Bucket quotas no longer trust an old measurement: when the usage measurement is older than two usage intervals (or
+  missing), a write to a limited bucket counts that bucket on the spot (within 2 seconds, through a new index, or it
+  is refused `ServiceUnavailable`), logs a warning, and the console marks the sizes stale.
+- The console's green and amber text clear 4.5:1 contrast on every light surface (checked by a test).
+- The server signs in to TessariDB as its own account — an editor of its one database, never the owner. Start-up
+  creates the namespace only when its account may; `compose.yaml` declares the account once with a new
+  `S3_META_PASSWORD` (see `.env.example`).
 - Spaces, users and grants: an operator creates spaces and users; every user belongs to one space as its
   administrator or a member, may be allowed to create buckets there, and may be made a store-wide operator or cluster
   viewer. A bucket belongs to the space it was created in; a user lists and reaches only its own space's buckets — a
