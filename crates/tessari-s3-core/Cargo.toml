@@ -18,6 +18,7 @@ crc-fast.workspace = true
 base64.workspace = true
 subtle.workspace = true
 zeroize.workspace = true
+reed-solomon-simd.workspace = true
 
 [lints]
 workspace = true

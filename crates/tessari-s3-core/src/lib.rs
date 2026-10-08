@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod buckets;
 pub mod dispatch;
+pub mod erasure;
 mod error;
 pub mod multipart;
 pub mod objects;
