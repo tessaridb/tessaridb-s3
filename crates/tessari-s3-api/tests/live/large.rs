@@ -1,4 +1,4 @@
-//! Objects in data files on the node's drive, the `gc` queue in TessariDB, bitrot on read.
+//! Objects in data files on the node's drive, the `reclaims` queue in TessariDB, bitrot on read.
 
 use std::path::{Path, PathBuf};
 
@@ -51,17 +51,17 @@ async fn records(planter: &MetaPool, script: &str, parameters: Vec<(String, Valu
     }
 }
 
-/// The data ids queued in `gc`, sorted.
+/// The data ids queued in `reclaims`, sorted.
 pub(crate) async fn queued(planter: &MetaPool) -> Vec<[u8; 16]> {
-    let mut ids: Vec<[u8; 16]> = records(planter, "SELECT * FROM gc;", Vec::new())
+    let mut ids: Vec<[u8; 16]> = records(planter, "SELECT * FROM reclaims;", Vec::new())
         .await
         .into_iter()
         .map(|record| match record {
             Value::Object(fields) => match fields.get("data") {
                 Some(Value::Uuid(id)) => *id,
-                other => panic!("gc record without a data id: {other:?}"),
+                other => panic!("reclaims record without a data id: {other:?}"),
             },
-            other => panic!("gc record is not an object: {other:?}"),
+            other => panic!("reclaims record is not an object: {other:?}"),
         })
         .collect();
     ids.sort_unstable();

@@ -113,7 +113,7 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata store |
 | `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS` | `30` | how long a metadata statement may wait for its answer; past it the request answers `503` and a write's data stays queued, because the statement may have committed |
 | `TESSARIDB_S3_DATA_DIR` | required | where every object's bytes are stored (`<dir>/s3data/…`); unset, the node refuses to start |
-| `TESSARIDB_S3_RECLAIM_GRACE_SECS` | `86400` | how long a replaced, deleted or abandoned data file is kept before the reclaimer removes it |
+| `TESSARIDB_S3_RECLAIM_GRACE_SECS` | `86400` | how long a replaced, deleted or abandoned data file is kept before the reclaimer removes it; recorded in the metadata store at start and applied to files queued from then on |
 | `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` | `300` | time between reclamation passes |
 | `TESSARIDB_S3_USAGE_INTERVAL_SECS` | `60` | time between passes measuring each bucket's objects and bytes; every node runs one and one member measures per pass |
 | `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` | `604800` | how long a multipart upload may stay open (from its initiation) before the reaper aborts it; the reaper runs on the reclamation interval |

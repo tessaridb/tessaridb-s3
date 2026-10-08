@@ -80,12 +80,15 @@ impl ObjectService {
         }
     }
 
-    /// One reclamation pass over at most `limit` queue entries older than `grace_secs`.
+    /// One reclamation pass over at most `limit` queue entries past their grace, taken from the queue so no other
+    /// node works on them meanwhile; on a cluster member it also removes shard files older than `grace_secs` that no
+    /// data id queued or committed.
     ///
     /// # Errors
-    /// The metadata store's or the drive's failure.
+    /// The metadata store's or the drive's failure; the entries this pass held go back to the queue when their
+    /// hold lapses.
     pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
-        let due = self.repository.due(grace_secs, limit).await?;
+        let due = self.repository.claim(limit).await?;
         let mut done = Reclaimed {
             examined: due.len(),
             ..Reclaimed::default()
@@ -105,8 +108,12 @@ impl ObjectService {
                 continue;
             }
             match self.remove_data(id).await {
-                // Another node is healing it; the entry stays marked and a later pass removes it.
-                Err(Error::Held) => continue,
+                // Another node is healing it; the entry stays marked and goes back to the queue for a later pass,
+                // behind the entries waiting after it.
+                Err(Error::Held) => {
+                    self.repository.defer(id).await?;
+                    continue;
+                }
                 removed => removed?,
             }
             self.repository.unqueue(id).await?;

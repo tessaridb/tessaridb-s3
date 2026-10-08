@@ -176,8 +176,22 @@ async fn a_data_id_being_healed_elsewhere_is_not_reclaimed_under_it() {
         shard_file_exists(&member, 0),
         "shards removed under another node's claim"
     );
-    assert_eq!(count(&member.planter, "gc").await, 1, "still queued");
+    assert_eq!(count(&member.planter, "reclaims").await, 1, "still queued");
+    let ahead = crate::reclaim::due_in(&member.planter, id).await;
+    assert!(
+        (50..=60).contains(&ahead),
+        "deferred {ahead} s, not behind the entries waiting after it"
+    );
     claim_elsewhere(&member.planter, id, false).await;
+    // The deferral's minute passes.
+    member
+        .planter
+        .run(
+            "UPDATE reclaims:$data SET due = time::now();",
+            vec![("data".to_owned(), Value::Uuid(id))],
+        )
+        .await
+        .expect("due moved to now");
     let reclaimed = member
         .storage
         .objects()

@@ -218,7 +218,7 @@ impl MultipartRepository for TessariMultipart {
         // leaves the reclamation queue only while no reclaimer has claimed it.
         let script = "BEGIN; UPDATE uploads:$upload SET last_part = time::now() RETURN AFTER; \
                       UPSERT parts:$id = object::merge($part, { modified: time::now() }); \
-                      UPDATE gc:$data SET data = $data WHERE reclaiming = NONE; DELETE gc:$data; COMMIT;";
+                      UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; DELETE reclaims:$data; COMMIT;";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
             Err(error)

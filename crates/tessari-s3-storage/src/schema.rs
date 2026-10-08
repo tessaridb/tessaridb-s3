@@ -8,9 +8,12 @@ use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass};
 
 use crate::Result;
 
-/// The table definitions, run inside the configured namespace and database. `gc` holds the data ids whose files may
-/// be reclaimed: an upload's own id from before its file exists until the commit that references it, and — through
-/// the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it replaced.
+/// The table definitions, run inside the configured namespace and database. The `reclaims` queue holds the data ids
+/// whose files may be reclaimed: an upload's own id from before its file exists until the commit that references it,
+/// and — through the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it
+/// replaced. Each record is held back until `due`, the queuing instant plus the grace in `s3_settings:'reclaim'`
+/// (written here from configuration, in the same transaction, because an event takes no parameter); its
+/// `reclaiming` mark is the fence a commit asserts against, set by a reclaimer before it removes a byte (ADR-0009).
 /// Multipart uploads keep their own records (`uploads`, `parts`), never seen by an object read or a listing, and a
 /// replaced or removed part queues its data the same way (`part_superseded`). A completed upload's parts become an
 /// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
@@ -45,11 +48,18 @@ DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
  data uuid, upload uuid, parts int);
-DEFINE TABLE IF NOT EXISTS gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime);
+DEFINE TABLE IF NOT EXISTS s3_settings (grace int REQUIRED);
+UPSERT s3_settings:'reclaim' SET grace = $grace;
+DEFINE QUEUE IF NOT EXISTS reclaims TIMEOUT 5m SCHEMAFULL NOT BEFORE due;
+DEFINE FIELD IF NOT EXISTS data ON reclaims TYPE uuid REQUIRED;
+DEFINE FIELD IF NOT EXISTS due ON reclaims TYPE datetime REQUIRED;
+DEFINE FIELD IF NOT EXISTS reclaiming ON reclaims TYPE datetime;
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
-THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
+THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
+LET $grace = $settings.grace; \
+UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
 DEFINE TABLE IF NOT EXISTS uploads (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, initiated datetime REQUIRED,\
  headers object REQUIRED, metadata object REQUIRED, checksum_algorithm string, checksum_type string,\
@@ -61,7 +71,9 @@ DEFINE INDEX IF NOT EXISTS by_upload ON parts FIELDS upload;
 DEFINE INDEX IF NOT EXISTS by_part_data ON parts FIELDS data;
 DEFINE EVENT IF NOT EXISTS part_superseded ON parts FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
-THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); };
+THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
+LET $grace = $settings.grace; \
+UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
 DEFINE EVENT IF NOT EXISTS parts_released ON objects FOR UPDATE, DELETE \
 WHEN $before.upload != NONE AND $before.upload != $after.upload \
 THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
@@ -106,10 +118,10 @@ COMMIT;
 ///
 /// # Errors
 /// The metadata store's refusal or outage, or the last `retry` refusal when every attempt lost.
-pub async fn apply(pool: &MetaPool) -> Result<()> {
+pub async fn apply(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
     let mut attempt: u32 = 1;
     loop {
-        match apply_once(pool).await {
+        match apply_once(pool, reclaim_grace_secs).await {
             Err(crate::Error::Meta(error))
                 if error.is_class(RefusalClass::Retry) && attempt < SCHEMA_RETRY_ATTEMPTS =>
             {
@@ -125,6 +137,26 @@ pub async fn apply(pool: &MetaPool) -> Result<()> {
     }
 }
 
+/// Queues data `$data` for reclamation, held back by the grace the schema recorded — the one statement every
+/// server-side path queues with, so it and the events compute `due` from the same value.
+pub(crate) const QUEUE_FOR_RECLAIM: &str = "LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
+LET $grace = $settings.grace; \
+UPSERT reclaims:$data SET data = $data, due = time::from_unix(time::unix(time::now()) + $grace);";
+
+/// The schema's one parameter: the reclamation grace, in seconds.
+fn grace(
+    reclaim_grace_secs: u64,
+) -> Result<Vec<(String, tessari_s3_infrastructure::tessaridb::Value)>> {
+    let seconds = i64::try_from(reclaim_grace_secs).map_err(|_| crate::Error::Malformed {
+        record: "s3_settings",
+        reason: "a grace beyond i64",
+    })?;
+    Ok(vec![(
+        "grace".to_owned(),
+        tessari_s3_infrastructure::tessaridb::Value::from(seconds),
+    )])
+}
+
 /// A random value in `0..bound` from the standard library's randomly keyed hasher; no dependency needed for a
 /// back-off spread.
 fn jitter(bound: u64) -> u64 {
@@ -134,7 +166,7 @@ fn jitter(bound: u64) -> u64 {
     hasher.finish().checked_rem(bound).unwrap_or(0)
 }
 
-async fn apply_once(pool: &MetaPool) -> Result<()> {
+async fn apply_once(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
     // The names come from configuration checked against `[a-z][a-z0-9_]*`; a name is grammar and is never bound.
     let (namespace, database) = pool.scope();
     // The replication is stated, never left out: a metadata cluster refuses a namespace whose replication nobody said.
@@ -144,7 +176,7 @@ async fn apply_once(pool: &MetaPool) -> Result<()> {
          DEFINE DATABASE IF NOT EXISTS {database};"
     );
     pool.run_unscoped(&tenancy).await?;
-    pool.run(TABLES, Vec::new()).await?;
+    pool.run(TABLES, grace(reclaim_grace_secs)?).await?;
     fill_spaces(pool).await
 }
 

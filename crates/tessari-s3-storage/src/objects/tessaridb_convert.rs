@@ -80,7 +80,7 @@ impl TessariObjects {
         let script = "BEGIN; \
                       UPDATE objects:$id SET data = $data, inline = NONE \
                       WHERE inline != NONE AND incarnation = $incarnation; \
-                      UPDATE gc:$data SET data = $data WHERE reclaiming = NONE; DELETE gc:$data; COMMIT;";
+                      UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; DELETE reclaims:$data; COMMIT;";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
             Err(error) if is_condition_refusal(&error) => Ok(false),

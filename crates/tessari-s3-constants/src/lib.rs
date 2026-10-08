@@ -209,6 +209,13 @@ pub const DEFAULT_USAGE_INTERVAL_SECS: u64 = 60;
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 
+/// Records one `CLAIM` may take: the metadata store refuses more (TessariDB `MAX_CLAIM_RECORDS`, 0.33.2-beta).
+pub const QUEUE_CLAIM_MAX: usize = 500;
+
+/// Seconds a queued data id a pass could not finish (another node holds its shards) waits before it is handed out
+/// again, so it leaves the head of the queue.
+pub const RECLAIM_RETRY_SECS: u64 = 60;
+
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 

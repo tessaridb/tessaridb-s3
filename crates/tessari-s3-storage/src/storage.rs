@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use tessari_s3_constants::DATA_BLOCK_SIZE;
+use tessari_s3_constants::{DATA_BLOCK_SIZE, DEFAULT_RECLAIM_GRACE_SECS};
 use tessari_s3_core::authz::SpaceName;
 use tessari_s3_infrastructure::ClusterSettings;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
@@ -36,6 +36,7 @@ pub struct Storage {
     spaces: SpaceService,
     users: UserService,
     pool: MetaPool,
+    reclaim_grace_secs: u64,
 }
 
 impl Storage {
@@ -58,6 +59,7 @@ impl Storage {
             objects,
             shards,
             pool,
+            reclaim_grace_secs: DEFAULT_RECLAIM_GRACE_SECS,
         }
     }
 
@@ -98,13 +100,23 @@ impl Storage {
         }
     }
 
+    /// The same services with a queued data file held back `secs` seconds before it may be reclaimed (unset:
+    /// [`DEFAULT_RECLAIM_GRACE_SECS`]); [`Storage::prepare`] records it in the store, where every queuing reads it.
+    #[must_use]
+    pub fn with_reclaim_grace(self, secs: u64) -> Self {
+        Self {
+            reclaim_grace_secs: secs,
+            ..self
+        }
+    }
+
     /// Creates the schema when it is missing, the default space with it, and clears what writes cut short by a crash
     /// left on the drive; run once at start-up, before the node serves.
     ///
     /// # Errors
     /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
-        crate::schema::apply(&self.pool).await?;
+        crate::schema::apply(&self.pool, self.reclaim_grace_secs).await?;
         self.spaces.create(&SpaceName::default_space()).await?;
         let cleared = self.objects.recover().await?;
         if cleared > 0 {

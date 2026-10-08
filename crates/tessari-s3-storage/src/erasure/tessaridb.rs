@@ -6,6 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 
 use super::repository::{ShardSet, ShardSetRepository};
 use crate::answers::first_record;
+use crate::schema::QUEUE_FOR_RECLAIM;
 use crate::{Error, Result};
 
 /// Shard-set records over a metadata pool.
@@ -34,9 +35,10 @@ impl ShardSetRepository for TessariShardSets {
         parameters.push(("layout".to_owned(), Value::from(i64::from(set.layout))));
         parameters.push(("size".to_owned(), Value::from(size)));
         // One transaction: an id is never queued without its shard set, nor recorded without being queued.
-        let script = "BEGIN; UPSERT gc:$data SET data = $data, queued = time::now(); \
-                      CREATE shard_sets:$data = { layout: $layout, size: $size }; COMMIT;";
-        self.pool.run(script, parameters).await?;
+        let script = format!(
+            "BEGIN; {QUEUE_FOR_RECLAIM} CREATE shard_sets:$data = {{ layout: $layout, size: $size }}; COMMIT;"
+        );
+        self.pool.run(&script, parameters).await?;
         Ok(())
     }
 

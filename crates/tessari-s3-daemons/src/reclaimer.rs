@@ -1,4 +1,4 @@
-//! The reclaimer: removes data files the `gc` queue names once they are past the grace period (see
+//! The reclaimer: removes data files the `reclaims` queue hands out once they are past the grace period (see
 //! `ObjectService::reclaim` for what makes that safe against a racing commit).
 
 use std::time::Duration;

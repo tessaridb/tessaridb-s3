@@ -1,5 +1,6 @@
 //! Objects in TessariDB: one `objects` record per key, id `<bucket>/<key>`; every value is bound.
 
+use tessari_s3_constants::{QUEUE_CLAIM_MAX, RECLAIM_RETRY_SECS};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
@@ -7,6 +8,7 @@ use super::entity::{read, record};
 use super::model::{Content, NewObject, Part};
 use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
 use crate::answers::{first_record, incarnation_of};
+use crate::schema::QUEUE_FOR_RECLAIM;
 use crate::{Error, Result};
 
 #[path = "tessaridb_convert.rs"]
@@ -112,7 +114,7 @@ impl ObjectRepository for TessariObjects {
                  WHERE incarnation = $stale RETURN AFTER;"
             }
         };
-        // A data object commits together with the removal of its pending `gc` entry, and only while that entry exists
+        // A data object commits together with the removal of its pending `reclaims` entry, and only while that entry exists
         // unmarked — the `UPDATE` refuses, and the whole transaction with it, once a reclaimer has taken the file. The
         // `supersede` event queues whatever data the record held before, in the same transaction. The write's answer
         // follows `BEGIN`.
@@ -141,8 +143,8 @@ impl ObjectRepository for TessariObjects {
                 parameters.push(("data".to_owned(), Value::Uuid(*data)));
                 (
                     format!(
-                        "BEGIN; {statement} UPDATE gc:$data SET data = $data WHERE reclaiming = NONE; \
-                         DELETE gc:$data; COMMIT;"
+                        "BEGIN; {statement} UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; \
+                         DELETE reclaims:$data; COMMIT;"
                     ),
                     1,
                 )
@@ -163,37 +165,24 @@ impl ObjectRepository for TessariObjects {
 
     async fn queue(&self, id: [u8; 16]) -> Result<()> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        self.pool
-            .run(
-                "UPSERT gc:$data SET data = $data, queued = time::now();",
-                parameters,
-            )
-            .await?;
+        self.pool.run(QUEUE_FOR_RECLAIM, parameters).await?;
         Ok(())
     }
 
     async fn unqueue(&self, id: [u8; 16]) -> Result<()> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        self.pool.run("DELETE gc:$data;", parameters).await?;
+        self.pool.run("DELETE reclaims:$data;", parameters).await?;
         Ok(())
     }
 
-    async fn due(&self, grace_secs: u64, limit: usize) -> Result<Vec<([u8; 16], bool)>> {
-        let number = |value: u64| {
-            i64::try_from(value).map_err(|_| Error::Malformed {
-                record: "gc",
-                reason: "a bound beyond i64",
-            })
-        };
-        let parameters = vec![("grace".to_owned(), Value::from(number(grace_secs)?))];
-        // The cutoff is computed by the store, from the same clock that stamped `queued`. `LIMIT` takes a literal
-        // (0.33.1 refuses a parameter there); the limit is this server's own integer, never a caller's value, and an
-        // integer formats to digits only.
-        let script = format!(
-            "SELECT data, reclaiming FROM gc \
-             WHERE time::unix(queued) <= time::unix(time::now()) - $grace LIMIT {limit};"
-        );
-        let answers = self.pool.run(&script, parameters).await?;
+    async fn claim(&self, limit: usize) -> Result<Vec<([u8; 16], bool)>> {
+        // `CLAIM` takes a literal count, refused above the store's ceiling; it is this server's own integer, clamped,
+        // never a caller's value, and an integer formats to digits only.
+        let count = limit.min(QUEUE_CLAIM_MAX);
+        let answers = self
+            .pool
+            .run(&format!("CLAIM {count} FROM reclaims;"), Vec::new())
+            .await?;
         let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
             return Ok(Vec::new());
         };
@@ -206,16 +195,27 @@ impl ObjectRepository for TessariObjects {
                         matches!(fields.get("reclaiming"), Some(Value::Datetime { .. })),
                     )),
                     _ => Err(Error::Malformed {
-                        record: "gc",
+                        record: "reclaims",
                         reason: "data",
                     }),
                 },
                 _ => Err(Error::Malformed {
-                    record: "gc",
+                    record: "reclaims",
                     reason: "not an object",
                 }),
             })
             .collect()
+    }
+
+    async fn defer(&self, id: [u8; 16]) -> Result<()> {
+        let parameters = vec![("data".to_owned(), Value::Uuid(id))];
+        // The retry delay is this server's own constant, formatted to digits only.
+        let script = format!(
+            "BEGIN; UPDATE reclaims:$data SET due = time::from_unix(time::unix(time::now()) + {RECLAIM_RETRY_SECS}); \
+             RELEASE reclaims:$data; COMMIT;"
+        );
+        self.pool.run(&script, parameters).await?;
+        Ok(())
     }
 
     async fn referenced(&self, id: [u8; 16]) -> Result<bool> {
@@ -231,8 +231,7 @@ impl ObjectRepository for TessariObjects {
 
     async fn mark(&self, id: [u8; 16]) -> Result<bool> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        let script =
-            "UPDATE gc:$data SET reclaiming = time::now() WHERE reclaiming = NONE RETURN AFTER;";
+        let script = "UPDATE reclaims:$data SET reclaiming = time::now() WHERE reclaiming = NONE RETURN AFTER;";
         match self.pool.run(script, parameters).await {
             Ok(answers) => Ok(first_record(answers.into_iter().next())?.is_some()),
             Err(error) if is_condition_refusal(&error) => Ok(false),
@@ -244,7 +243,7 @@ impl ObjectRepository for TessariObjects {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
         let answers = self
             .pool
-            .run("SELECT reclaiming FROM ONLY gc:$data;", parameters)
+            .run("SELECT reclaiming FROM ONLY reclaims:$data;", parameters)
             .await?;
         Ok(match first_record(answers.into_iter().next())? {
             Some(Value::Object(fields)) => {

@@ -122,7 +122,7 @@ pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) 
 }
 
 /// The configuration of a node over a fresh namespace, its console configured too.
-fn live_config(
+pub(crate) fn live_config(
     meta_addresses: String,
     replication: Option<&str>,
     data_dir: &std::path::Path,
@@ -142,6 +142,8 @@ fn live_config(
         ),
         ("TESSARIDB_S3_META_NAMESPACE", namespace),
         ("TESSARIDB_S3_DATA_DIR", data_dir.display().to_string()),
+        // A queued file is reclaimable at once, so a test drives reclamation by calling a pass.
+        ("TESSARIDB_S3_RECLAIM_GRACE_SECS", "0".to_owned()),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
         // The live suite's own root key for sealing user access-key secrets; it seals nothing outside the test node.
         ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
@@ -154,12 +156,13 @@ fn live_config(
 }
 
 /// The storage `config` describes, schema applied.
-async fn prepared(config: &S3Config) -> Storage {
+pub(crate) async fn prepared(config: &S3Config) -> Storage {
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
     )
-    .with_iam_key(config.iam_key.clone());
+    .with_iam_key(config.iam_key.clone())
+    .with_reclaim_grace(config.reclaim_grace_secs);
     // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one store-wide
     // catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not about
     // concurrent start-up, so their setup takes turns; each still gets its own namespace.

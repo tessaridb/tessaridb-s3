@@ -76,7 +76,7 @@ pub(crate) trait ObjectRepository: Send + Sync {
         key: &ObjectKey,
     ) -> impl Future<Output = Result<Snapshot>> + Send;
     /// Writes `object` under `guard` as ONE statement: UPSERT, CREATE, or UPDATE … WHERE. When the object's bytes
-    /// are in a data file, the same transaction removes that file's pending `gc` entry.
+    /// are in a data file, the same transaction removes that file's pending `reclaims` entry.
     fn write(
         &self,
         bucket: &BucketName,
@@ -89,13 +89,11 @@ pub(crate) trait ObjectRepository: Send + Sync {
     fn queue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Takes data `id` off the reclamation queue, after its file was removed.
     fn unqueue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
-    /// Queue entries older than `grace_secs` by the store's clock, at most `limit`, each with whether a reclaimer
-    /// already marked it.
-    fn due(
-        &self,
-        grace_secs: u64,
-        limit: usize,
-    ) -> impl Future<Output = Result<Vec<([u8; 16], bool)>>> + Send;
+    /// Takes and holds at most `limit` queue entries past their grace, each with whether a reclaimer already marked
+    /// it; a hold this node does not finish lapses and the entry is handed out again.
+    fn claim(&self, limit: usize) -> impl Future<Output = Result<Vec<([u8; 16], bool)>>> + Send;
+    /// Hands held data `id` back to the queue, not to be handed out again for a while.
+    fn defer(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Whether any object or multipart part record references data `id`.
     fn referenced(&self, id: [u8; 16]) -> impl Future<Output = Result<bool>> + Send;
     /// Marks data `id` as being reclaimed; `false` when its entry is gone or already marked.

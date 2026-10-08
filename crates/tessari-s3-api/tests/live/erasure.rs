@@ -58,6 +58,7 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         ),
         ("TESSARIDB_S3_META_NAMESPACE", namespace.to_owned()),
         ("TESSARIDB_S3_DATA_DIR", dir.display().to_string()),
+        ("TESSARIDB_S3_RECLAIM_GRACE_SECS", "0".to_owned()),
         ("TESSARIDB_S3_ERASURE", "4+2".to_owned()),
         ("TESSARIDB_S3_NODE_ID", "n1".to_owned()),
         ("TESSARIDB_S3_INTERNAL_LISTEN", "127.0.0.1:0".to_owned()),
@@ -107,7 +108,8 @@ pub(crate) async fn member() -> Member {
         config.data_dir.clone(),
         config.cluster.as_ref().expect("clustered"),
     )
-    .expect("clustered storage");
+    .expect("clustered storage")
+    .with_reclaim_grace(config.reclaim_grace_secs);
     {
         let _turn = SCHEMA_TURN.lock().await;
         storage
@@ -286,7 +288,7 @@ async fn below_the_write_quorum_nothing_is_acknowledged_or_committed() {
     let head = call(&member.state, "HEAD", "/shards/big", vec![], b"").await;
     assert_eq!(head.status, 404, "nothing committed");
     assert_eq!(
-        count(&member.planter, "gc").await,
+        count(&member.planter, "reclaims").await,
         1,
         "the data id stays queued"
     );
