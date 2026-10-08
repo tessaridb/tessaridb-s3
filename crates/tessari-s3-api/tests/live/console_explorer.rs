@@ -153,3 +153,128 @@ async fn an_objects_details_come_from_its_record_with_no_byte_of_it_read() {
     assert_eq!(shown["parts"], Value::Null);
     std::fs::remove_dir_all(&data_dir).expect("scratch removed");
 }
+
+/// Writes `keys` into `bucket`, a bounded number at a time.
+async fn put_many(state: &tessari_s3_api::ApiState, bucket: &str, keys: &[String]) {
+    for chunk in keys.chunks(32) {
+        let mut writes = tokio::task::JoinSet::new();
+        for key in chunk {
+            let (state, path) = (state.clone(), format!("/{bucket}/{key}"));
+            writes.spawn(async move {
+                let seen = call(&state, "PUT", &path, vec![], b"x").await;
+                (seen.status, seen.body)
+            });
+        }
+        while let Some(done) = writes.join_next().await {
+            let (status, body) = done.expect("the write ran");
+            assert_eq!(status, 200, "{body}");
+        }
+    }
+}
+
+/// One console listing page: its keys, its rolled-up prefixes and where the next page starts.
+async fn page(
+    console: &tessari_s3_api::ConsoleState,
+    root: &str,
+    limit: usize,
+    cursor: Option<&str>,
+) -> (Vec<String>, Vec<String>, Option<String>) {
+    let mut path = format!("/api/v1/buckets/many/objects?delimiter=%2F&limit={limit}");
+    if let Some(cursor) = cursor {
+        // This test's keys hold only digits, letters, `.` and `/`, all legal in a query as they are.
+        path.push_str("&cursor=");
+        path.push_str(cursor);
+    }
+    let seen = send(console, "GET", &path, Some(root), None).await;
+    assert_eq!(seen.status, 200, "{:?}", seen.json());
+    let body = seen.json();
+    let texts = |value: &Value, field: Option<&str>| -> Vec<String> {
+        value
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|item| {
+                field
+                    .map_or(item, |name| &item[name])
+                    .as_str()
+                    .expect("text")
+                    .to_owned()
+            })
+            .collect()
+    };
+    (
+        texts(&body["objects"], Some("key")),
+        texts(&body["prefixes"], None),
+        body["next"].as_str().map(str::to_owned),
+    )
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn five_thousand_keys_scroll_by_cursor_with_none_repeated_or_skipped() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    assert_eq!(call(&state, "PUT", "/many", vec![], b"").await.status, 200);
+    let mut keys: Vec<String> = (0..5_000).map(|n| format!("{n:05}.bin")).collect();
+    keys.extend((0..30).map(|n| format!("f{n:02}/inside")));
+    put_many(&state, "many", &keys).await;
+
+    let (capped, _, more) = page(&console, &root, 5_000, None).await;
+    assert_eq!(capped.len(), 1_000, "a page never exceeds the console cap");
+    assert!(more.is_some());
+
+    // Walk 250 at a time; after the third page, change the bucket on both sides of the cursor.
+    let (mut listed, mut folders, mut cursor) = (Vec::new(), Vec::new(), None);
+    let mut pages = 0;
+    loop {
+        let (objects, prefixes, next) = page(&console, &root, 250, cursor.as_deref()).await;
+        assert!(objects.len() + prefixes.len() <= 250);
+        listed.extend(objects);
+        folders.extend(prefixes);
+        pages += 1;
+        if pages == 3 {
+            for (method, key) in [
+                ("DELETE", "00100.bin"),
+                ("DELETE", "04000.bin"),
+                ("PUT", "00100a.bin"),
+                ("PUT", "04000a.bin"),
+            ] {
+                assert!(
+                    call(&state, method, &format!("/many/{key}"), vec![], b"x")
+                        .await
+                        .status
+                        < 300
+                );
+            }
+        }
+        match next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    let mut sorted = listed.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(listed, sorted, "keys arrive in byte order, each once");
+    let steady: Vec<&String> = keys
+        .iter()
+        .filter(|key| !key.contains('/') && *key != "00100.bin" && *key != "04000.bin")
+        .collect();
+    let missing: Vec<&&String> = steady.iter().filter(|key| !listed.contains(key)).collect();
+    assert!(
+        missing.is_empty(),
+        "keys present throughout were skipped: {missing:?}"
+    );
+    assert!(
+        listed.iter().any(|key| key == "04000a.bin"),
+        "a key written ahead of the cursor is reached"
+    );
+    assert!(
+        !listed.iter().any(|key| key == "04000.bin"),
+        "a key deleted ahead of the cursor is not"
+    );
+    let expected: Vec<String> = (0..30).map(|n| format!("f{n:02}/")).collect();
+    assert_eq!(folders, expected, "every folder rolls up once");
+    assert!(pages >= 20, "the walk took {pages} pages");
+}

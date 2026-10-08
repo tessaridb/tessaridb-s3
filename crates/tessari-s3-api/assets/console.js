@@ -1659,9 +1659,10 @@
   }
 
   // src/objects.ts
-  //! A bucket's keys a page at a time, in the server's byte order, rolled up at
-  //! `/` like a folder tree. Paging is by the server's cursor alone: there is no
-  //! total to show, because counting a large bucket is a scan. Selecting a key
+  //! A bucket's keys in the server's byte order, rolled up at `/` like a folder
+  //! tree. Pages are appended as the operator scrolls (or asks with "Load more"),
+  //! each one fetched from the server's cursor: there is no total to show,
+  //! because counting a large bucket is a scan. Selecting a key
   //! shows its metadata in a side pane beside the list (the selection is in the
   //! URL); the arrow keys move the selection and Escape closes the pane.
   var PAGE2 = 100;
@@ -1683,11 +1684,12 @@
   async function objects(screen, bucket2, prefix, cursor, selected) {
     const title = bucket2;
     loading(screen, title, "keys");
-    const answer = await call(
+    const fetchPage = (after) => call(
       "GET",
-      `/buckets/${encodeURIComponent(bucket2)}/objects${search([["prefix", prefix === "" ? null : prefix], ["delimiter", "/"], ["cursor", cursor], ["limit", PAGE2]])}`,
+      `/buckets/${encodeURIComponent(bucket2)}/objects${search([["prefix", prefix === "" ? null : prefix], ["delimiter", "/"], ["cursor", after], ["limit", PAGE2]])}`,
       readListing
     );
+    const answer = await fetchPage(cursor);
     if (!answer.ok) {
       failed(screen, title, answer);
       return;
@@ -1698,10 +1700,8 @@
     const page = answer.value;
     const here = (key) => format({ kind: "objects", bucket: bucket2, prefix, cursor, key });
     const links = /* @__PURE__ */ new Map();
-    const folders = page.prefixes.map(
-      (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "")
-    );
-    const files = page.objects.map((object2) => {
+    const folderRow = (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "");
+    const fileRow = (object2) => {
       const kind = kindOf(object2.contentType);
       const link = el("a", { class: "name", href: here(object2.key), "data-key": object2.key }, icon(kind.icon), mono(object2.key.slice(prefix.length)));
       link.addEventListener("click", (event) => {
@@ -1718,21 +1718,75 @@
         moment(object2.modified),
         mono(object2.etag)
       );
-    });
+    };
+    const rowsOf = (listing) => [...listing.prefixes.map(folderRow), ...listing.objects.map(fileRow)];
+    const first = rowsOf(page);
     const nothing = cursor !== null ? empty("No more keys on this page.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null, key: null }) }, "Back to the first page")) : prefix === "" ? empty("This bucket is empty.") : empty("Nothing under this prefix.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: "", cursor: null, key: null }) }, "Back to the top of the bucket"));
-    const paging = cursor === null && page.next === null ? null : el(
+    let loaded = first.length;
+    let next2 = page.next;
+    let busy = false;
+    const status2 = el("span", { role: "status" });
+    const more = el("button", { type: "button" }, "Load more");
+    const paging = el(
       "p",
       { class: "paging" },
-      cursor === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null, key: null }) }, "First page"),
-      cursor !== null && page.next !== null ? " · " : null,
-      page.next === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: page.next, key: null }) }, "Next page")
+      status2,
+      more,
+      cursor === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null, key: null }) }, "Back to the first page")
     );
+    const settle2 = () => {
+      more.hidden = next2 === null;
+      status2.textContent = next2 === null ? `All ${loaded.toLocaleString()} keys and folders shown.` : `${loaded.toLocaleString()} keys and folders shown.`;
+    };
     const list2 = el(
       "section",
       { class: "card flush" },
-      folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], [...folders, ...files]),
-      paging
+      first.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], first),
+      first.length === 0 && next2 === null ? null : paging
     );
+    const near = () => paging.isConnected && paging.getBoundingClientRect().top < window.innerHeight * 2;
+    const loadMore = async () => {
+      if (busy || next2 === null) {
+        return;
+      }
+      busy = true;
+      more.setAttribute("aria-busy", "true");
+      status2.textContent = "Loading more keys…";
+      const answer2 = await fetchPage(next2);
+      busy = false;
+      more.removeAttribute("aria-busy");
+      if (!screen.live()) {
+        return;
+      }
+      if (!answer2.ok) {
+        if (answer2.status === 401) {
+          screen.signIn();
+          return;
+        }
+        status2.textContent = `${answer2.message} Use "Load more" to try again.`;
+        return;
+      }
+      const rows = rowsOf(answer2.value);
+      list2.querySelector("tbody")?.append(...rows);
+      loaded += rows.length;
+      next2 = answer2.value.next;
+      settle2();
+      if (near()) {
+        void loadMore();
+      }
+    };
+    more.addEventListener("click", () => void loadMore());
+    const watch = new IntersectionObserver(
+      (entries) => {
+        if (!screen.live() || next2 === null) {
+          watch.disconnect();
+        } else if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMore();
+        }
+      },
+      { rootMargin: "0px 0px 100% 0px" }
+    );
+    settle2();
     const pane = el("aside", { class: "pane card", "aria-labelledby": "pane-title", hidden: "" });
     const split = el("div", { class: "split" }, list2, pane);
     let shown = null;
@@ -1773,18 +1827,19 @@
         return;
       }
       const names2 = Array.from(list2.querySelectorAll("a.name"));
-      const next2 = names2[names2.indexOf(target) + (event.key === "ArrowDown" ? 1 : -1)];
-      if (next2 === void 0) {
+      const next3 = names2[names2.indexOf(target) + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next3 === void 0) {
         return;
       }
       event.preventDefault();
-      next2.focus();
-      const key = next2.dataset["key"];
+      next3.focus();
+      const key = next3.dataset["key"];
       if (key !== void 0) {
         select(key);
       }
     });
     fill(screen.main, head(title, trail(bucket2, prefix)), split);
+    watch.observe(paging);
     if (selected !== null) {
       select(selected);
     }
