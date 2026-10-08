@@ -40,6 +40,8 @@ fn probe(
     }
 }
 
+const VERSIONING_BODY: &[u8] =
+    b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
 const COMPLETE_BODY: &[u8] =
     b"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"x\"</ETag></Part></CompleteMultipartUpload>";
@@ -59,6 +61,21 @@ fn table(upload: &str) -> Vec<Probe> {
             "/ann-photos",
             &[("location", None)],
         ),
+        probe(
+            Operation::GetBucketVersioning,
+            "GET",
+            "/ann-photos",
+            &[("versioning", None)],
+        ),
+        Probe {
+            body: VERSIONING_BODY,
+            ..probe(
+                Operation::PutBucketVersioning,
+                "PUT",
+                "/ann-photos",
+                &[("versioning", None)],
+            )
+        },
         probe(Operation::ListObjects, "GET", "/ann-photos", &[]),
         probe(
             Operation::ListObjectsV2,

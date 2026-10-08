@@ -195,6 +195,8 @@ pub enum Action {
     CreateBucket(SpaceName),
     /// Delete a bucket.
     DeleteBucket(BucketResource),
+    /// Change a bucket's configuration — who may delete it may configure it; a grant confers neither.
+    ConfigureBucket(BucketResource),
     /// Describe a bucket or list what it holds.
     ReadBucket(BucketResource),
     /// Read an object of a bucket.

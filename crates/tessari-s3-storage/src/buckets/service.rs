@@ -2,6 +2,7 @@
 
 use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_core::quota::Quota;
+use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::BucketName;
 
 use super::model::Bucket;
@@ -91,6 +92,19 @@ impl BucketService {
         self.repository
             .set_limits(name, stored(quota.max_bytes)?, stored(quota.max_objects)?)
             .await?;
+        Ok(true)
+    }
+
+    /// Sets `name`'s versioning state, answering `false` when there is no such bucket. A state is always one of the
+    /// two versioned ones, so a versioned bucket can never be returned to never-versioned.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_versioning(&self, name: &BucketName, state: Versioning) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository.set_versioning(name, state.as_str()).await?;
         Ok(true)
     }
 

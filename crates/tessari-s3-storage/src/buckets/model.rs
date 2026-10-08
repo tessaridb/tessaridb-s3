@@ -2,6 +2,7 @@
 
 use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_core::quota::Quota;
+use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
@@ -25,6 +26,8 @@ pub struct Bucket {
     pub creator: Option<String>,
     /// Its limits, set by an operator; none by default.
     pub quota: Quota,
+    /// Its versioning state; `None` while it was never versioned.
+    pub versioning: Option<Versioning>,
 }
 
 impl Bucket {
@@ -65,6 +68,16 @@ impl TryFrom<BucketEntity> for Bucket {
             max_bytes: limit(entity.max_bytes)?,
             max_objects: limit(entity.max_objects)?,
         };
+        let versioning = entity
+            .versioning
+            .as_deref()
+            .map(|state| {
+                Versioning::parse(state).ok_or(Error::Malformed {
+                    record: "bucket",
+                    reason: "versioning is neither Enabled nor Suspended",
+                })
+            })
+            .transpose()?;
         Ok(Self {
             name,
             created: Timestamp { seconds, nanos },
@@ -73,6 +86,7 @@ impl TryFrom<BucketEntity> for Bucket {
             space,
             creator: entity.creator,
             quota,
+            versioning,
         })
     }
 }

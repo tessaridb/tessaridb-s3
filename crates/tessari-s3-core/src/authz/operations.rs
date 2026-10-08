@@ -12,6 +12,8 @@ pub enum Need {
     CreateBucket,
     /// Delete the named bucket.
     DeleteBucket,
+    /// Change the named bucket's configuration (versioning).
+    ConfigureBucket,
     /// Describe the bucket or list what it holds.
     ReadBucket,
     /// Read an object of the bucket.
@@ -62,8 +64,10 @@ pub const fn required(operation: Operation) -> Option<Required> {
         Operation::ListBuckets => on(Need::ListBuckets),
         Operation::CreateBucket => on(Need::CreateBucket),
         Operation::DeleteBucket => on(Need::DeleteBucket),
+        Operation::PutBucketVersioning => on(Need::ConfigureBucket),
         Operation::HeadBucket
         | Operation::GetBucketLocation
+        | Operation::GetBucketVersioning
         | Operation::ListObjects
         | Operation::ListObjectsV2
         | Operation::ListMultipartUploads => on(Need::ReadBucket),

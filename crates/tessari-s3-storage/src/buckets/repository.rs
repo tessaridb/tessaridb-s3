@@ -38,6 +38,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         max_objects: Option<i64>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s versioning state.
+    fn set_versioning(
+        &self,
+        name: &BucketName,
+        state: &'static str,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;
     /// Whether any object record lies in `name`'s range.
     fn holds_objects(&self, name: &BucketName) -> impl Future<Output = Result<bool>> + Send;

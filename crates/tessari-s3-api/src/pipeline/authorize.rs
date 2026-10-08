@@ -47,6 +47,9 @@ pub async fn authorize_operation(
         Need::ListBuckets => Action::ListBuckets,
         Need::CreateBucket => Action::CreateBucket(space.clone()),
         Need::DeleteBucket => Action::DeleteBucket(bucket(state, addressed.bucket.as_ref()).await?),
+        Need::ConfigureBucket => {
+            Action::ConfigureBucket(bucket(state, addressed.bucket.as_ref()).await?)
+        }
         Need::ReadBucket => Action::ReadBucket(bucket(state, addressed.bucket.as_ref()).await?),
         Need::ReadObject => Action::ReadObject(bucket(state, addressed.bucket.as_ref()).await?),
         Need::WriteObject => Action::WriteObject(bucket(state, addressed.bucket.as_ref()).await?),

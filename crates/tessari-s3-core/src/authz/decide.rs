@@ -67,7 +67,9 @@ pub fn authorize(principal: &Principal, action: &Action) -> Decision {
                 )
             }
         }
-        Action::DeleteBucket(bucket) => on_bucket(user, bucket, |_| false),
+        Action::DeleteBucket(bucket) | Action::ConfigureBucket(bucket) => {
+            on_bucket(user, bucket, |_| false)
+        }
         Action::ReadBucket(bucket) | Action::ReadObject(bucket) => {
             on_bucket(user, bucket, |access| access.read)
         }

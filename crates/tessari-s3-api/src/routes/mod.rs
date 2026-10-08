@@ -14,6 +14,7 @@ pub mod listing;
 pub mod multipart;
 pub mod objects;
 mod quota;
+mod versioning;
 
 /// Runs the handler for `operation`.
 ///
@@ -30,6 +31,8 @@ pub(crate) async fn route(
         Operation::DeleteBucket => buckets::delete(call).await,
         Operation::ListBuckets => buckets::list(call).await,
         Operation::GetBucketLocation => buckets::location(call).await,
+        Operation::GetBucketVersioning => versioning::get(call).await,
+        Operation::PutBucketVersioning => versioning::put(call, body).await,
         Operation::ListObjects => listing::list_v1(call).await,
         Operation::ListObjectsV2 => listing::list_v2(call).await,
         Operation::PutObject => objects::put(call, objects::key(call)?, body).await,

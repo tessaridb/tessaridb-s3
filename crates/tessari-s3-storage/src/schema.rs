@@ -45,6 +45,7 @@ DEFINE FIELD IF NOT EXISTS space_name ON buckets TYPE string DEFAULT 'default';
 DEFINE FIELD IF NOT EXISTS creator ON buckets TYPE string;
 DEFINE FIELD IF NOT EXISTS max_bytes ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS max_objects ON buckets TYPE int;
+DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\

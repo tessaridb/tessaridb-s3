@@ -82,6 +82,15 @@ impl BucketRepository for TessariBuckets {
             .transpose()
     }
 
+    async fn set_versioning(&self, name: &BucketName, state: &'static str) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("state".to_owned(), Value::String(state.to_owned())));
+        self.pool
+            .run("UPDATE buckets:$name SET versioning = $state;", parameters)
+            .await?;
+        Ok(())
+    }
+
     async fn set_limits(
         &self,
         name: &BucketName,

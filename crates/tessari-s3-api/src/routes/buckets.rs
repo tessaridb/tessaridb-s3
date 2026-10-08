@@ -176,7 +176,7 @@ pub(crate) async fn list(call: &Call<'_>) -> Result<Response<Body>> {
 }
 
 /// The addressed bucket, or `NoSuchBucket`.
-async fn existing(call: &Call<'_>) -> Result<Bucket> {
+pub(super) async fn existing(call: &Call<'_>) -> Result<Bucket> {
     call.state
         .storage()
         .buckets()
@@ -185,7 +185,7 @@ async fn existing(call: &Call<'_>) -> Result<Bucket> {
         .ok_or_else(no_such_bucket)
 }
 
-fn no_such_bucket() -> Error {
+pub(super) fn no_such_bucket() -> Error {
     Error::new(
         ErrorCode::NoSuchBucket,
         "the specified bucket does not exist",

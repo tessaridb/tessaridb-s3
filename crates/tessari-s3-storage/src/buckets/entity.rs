@@ -23,6 +23,8 @@ pub struct BucketEntity {
     pub max_bytes: Option<i64>,
     /// The object limit an operator set; absent for none.
     pub max_objects: Option<i64>,
+    /// `'Enabled'` or `'Suspended'`; absent while the bucket was never versioned.
+    pub versioning: Option<String>,
 }
 
 impl BucketEntity {
@@ -63,6 +65,11 @@ impl BucketEntity {
             Some(Value::String(creator)) => Some(creator.clone()),
             Some(_) => return Err(malformed("creator")),
         };
+        let versioning = match fields.get("versioning") {
+            None | Some(Value::None) => None,
+            Some(Value::String(state)) => Some(state.clone()),
+            Some(_) => return Err(malformed("versioning")),
+        };
         let limit = |field: &'static str| match fields.get(field) {
             None | Some(Value::None) => Ok(None),
             Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
@@ -77,6 +84,7 @@ impl BucketEntity {
             creator,
             max_bytes: limit("max_bytes")?,
             max_objects: limit("max_objects")?,
+            versioning,
         })
     }
 }

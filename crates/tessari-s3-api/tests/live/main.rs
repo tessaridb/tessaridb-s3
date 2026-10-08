@@ -49,6 +49,7 @@ mod uploads;
 mod usage;
 mod users;
 mod users_sealed;
+mod versioning;
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
