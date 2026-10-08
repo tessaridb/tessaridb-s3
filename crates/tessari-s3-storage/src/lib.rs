@@ -4,6 +4,7 @@ mod answers;
 pub mod buckets;
 pub mod cluster;
 pub mod data;
+pub mod erasure;
 mod error;
 pub mod multipart;
 pub mod objects;

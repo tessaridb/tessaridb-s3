@@ -14,7 +14,7 @@ tessari-s3-infrastructure.workspace = true
 tessari-s3-observability.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["time", "fs"] }
+tokio = { workspace = true, features = ["time", "fs", "rt", "sync"] }
 blake3.workspace = true
 uuid.workspace = true
 getrandom.workspace = true

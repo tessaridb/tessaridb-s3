@@ -3,6 +3,7 @@
 
 #![cfg(test)]
 
+mod erasure;
 mod internal;
 mod operations;
 mod peers;

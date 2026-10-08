@@ -21,7 +21,7 @@ const SHARD: ShardRef = ShardRef {
 const BUDGET: Duration = Duration::from_secs(10);
 
 /// A node serving the internal routes on a free local port: its address and the task serving it.
-async fn serving() -> (String, tokio::task::JoinHandle<()>, std::path::PathBuf) {
+pub(crate) async fn serving() -> (String, tokio::task::JoinHandle<()>, std::path::PathBuf) {
     let (state, dir) = internal_with(ApiState::system_clock());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -35,7 +35,7 @@ async fn serving() -> (String, tokio::task::JoinHandle<()>, std::path::PathBuf) 
     (address, server, dir)
 }
 
-fn caller(secret: &str) -> RemoteShards {
+pub(crate) fn caller(secret: &str) -> RemoteShards {
     RemoteShards::new(
         NodeId::new("n2").expect("node id"),
         SecretKey::new(secret.to_owned()),

@@ -24,11 +24,22 @@ fn internal() -> (InternalState, std::path::PathBuf) {
     internal_with(std::sync::Arc::new(|| NOW))
 }
 
-/// An internal state by `clock` over a fresh data directory, which it returns for removal. The metadata pool points
-/// at a port that refuses every connection and is never dialled: shards live on the drive alone.
+/// An internal state by `clock` over a fresh data directory, which it returns for removal.
 pub(crate) fn internal_with(clock: tessari_s3_api::Clock) -> (InternalState, std::path::PathBuf) {
     let dir =
         std::env::temp_dir().join(format!("tessari-s3-data-{}", uuid::Uuid::new_v4().simple()));
+    let state = InternalState::new(
+        SecretKey::new(CLUSTER_SECRET.to_owned()),
+        clock,
+        storage_at(dir.clone()),
+        16,
+    );
+    (state, dir)
+}
+
+/// Storage over data directory `dir`. The metadata pool points at a port that refuses every connection and is never
+/// dialled: shards live on the drive alone.
+pub(crate) fn storage_at(dir: std::path::PathBuf) -> Storage {
     let vars = [
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
         (
@@ -45,17 +56,10 @@ pub(crate) fn internal_with(clock: tessari_s3_api::Clock) -> (InternalState, std
             .map(|(_, v)| (*v).to_owned())
     })
     .expect("test configuration loads");
-    let storage = Storage::new(
+    Storage::new(
         MetaPool::new(config.meta).expect("pool settings"),
-        Some(dir.clone()),
-    );
-    let state = InternalState::new(
-        SecretKey::new(CLUSTER_SECRET.to_owned()),
-        clock,
-        storage,
-        16,
-    );
-    (state, dir)
+        Some(dir),
+    )
 }
 
 /// 2.5 blocks of 64 bytes.

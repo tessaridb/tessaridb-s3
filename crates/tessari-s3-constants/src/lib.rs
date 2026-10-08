@@ -70,6 +70,12 @@ pub const INTERNAL_DATE_HEADER: &str = "x-tessari-date";
 /// The header carrying an internal request's signature, lowercase hex.
 pub const INTERNAL_SIGNATURE_HEADER: &str = "x-tessari-signature";
 
+/// Blocks queued for one shard before the encoder waits for its node: a stripe in flight and the next one.
+pub const SHARD_QUEUE_BLOCKS: usize = 2;
+
+/// Seconds a shard's node may keep its queue full before the shard is given up and the write goes on without it.
+pub const SHARD_STALL_SECS: u64 = 30;
+
 /// Seconds a node waits for a peer to accept a connection before calling it unavailable.
 pub const PEER_CONNECT_TIMEOUT_SECS: u64 = 5;
 

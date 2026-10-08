@@ -13,6 +13,14 @@ pub enum Error {
     /// Another node of the cluster could not be reached, or stopped answering.
     #[error(transparent)]
     Peer(#[from] PeerError),
+    /// Fewer shards than the write quorum were made durable; the write is not acknowledged.
+    #[error("{durable} shards durable, the write quorum is {needed}")]
+    Quorum {
+        /// Shards that reached their node's disk (or could still, when the write stopped early).
+        durable: u8,
+        /// The write quorum.
+        needed: u8,
+    },
     /// Another node answered a shard request with a refusal.
     #[error("a peer refused the shard request with status {status}")]
     PeerRefused {
@@ -93,6 +101,7 @@ impl Error {
         match self {
             Self::Meta(meta) => meta.category(),
             Self::Peer(peer) => peer.category(),
+            Self::Quorum { .. } => ErrorCategory::Unavailable,
             Self::PeerRefused { status: 404 } => ErrorCategory::NotFound,
             Self::PeerRefused { status: 409 } => ErrorCategory::Conflict,
             Self::PeerRefused { status: 503 } => ErrorCategory::Unavailable,
