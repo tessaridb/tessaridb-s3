@@ -176,12 +176,14 @@ async fn put_many(state: &tessari_s3_api::ApiState, bucket: &str, keys: &[String
 async fn page(
     console: &tessari_s3_api::ConsoleState,
     root: &str,
+    prefix: &str,
     limit: usize,
     cursor: Option<&str>,
 ) -> (Vec<String>, Vec<String>, Option<String>) {
-    let mut path = format!("/api/v1/buckets/many/objects?delimiter=%2F&limit={limit}");
+    // This test's keys and prefixes hold only digits, letters, `.` and `/`, all legal in a query as they are.
+    let mut path =
+        format!("/api/v1/buckets/many/objects?delimiter=%2F&limit={limit}&prefix={prefix}");
     if let Some(cursor) = cursor {
-        // This test's keys hold only digits, letters, `.` and `/`, all legal in a query as they are.
         path.push_str("&cursor=");
         path.push_str(cursor);
     }
@@ -220,7 +222,7 @@ async fn five_thousand_keys_scroll_by_cursor_with_none_repeated_or_skipped() {
     keys.extend((0..30).map(|n| format!("f{n:02}/inside")));
     put_many(&state, "many", &keys).await;
 
-    let (capped, _, more) = page(&console, &root, 5_000, None).await;
+    let (capped, _, more) = page(&console, &root, "", 5_000, None).await;
     assert_eq!(capped.len(), 1_000, "a page never exceeds the console cap");
     assert!(more.is_some());
 
@@ -228,7 +230,7 @@ async fn five_thousand_keys_scroll_by_cursor_with_none_repeated_or_skipped() {
     let (mut listed, mut folders, mut cursor) = (Vec::new(), Vec::new(), None);
     let mut pages = 0;
     loop {
-        let (objects, prefixes, next) = page(&console, &root, 250, cursor.as_deref()).await;
+        let (objects, prefixes, next) = page(&console, &root, "", 250, cursor.as_deref()).await;
         assert!(objects.len() + prefixes.len() <= 250);
         listed.extend(objects);
         folders.extend(prefixes);
@@ -277,4 +279,55 @@ async fn five_thousand_keys_scroll_by_cursor_with_none_repeated_or_skipped() {
     let expected: Vec<String> = (0..30).map(|n| format!("f{n:02}/")).collect();
     assert_eq!(folders, expected, "every folder rolls up once");
     assert!(pages >= 20, "the walk took {pages} pages");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_name_filter_is_a_prefix_the_store_lists_and_pages_within() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    assert_eq!(call(&state, "PUT", "/many", vec![], b"").await.status, 200);
+    let mut keys: Vec<String> = (0..300).map(|n| format!("a/{n}")).collect();
+    keys.extend((0..50).map(|n| format!("b/{n}")));
+    keys.push("a.txt".to_owned());
+    put_many(&state, "many", &keys).await;
+
+    // Inside folder `a/`, names starting `1`: a/1, a/10..a/19, a/100..a/199.
+    let mut expected: Vec<String> = keys
+        .iter()
+        .filter(|key| key.starts_with("a/1"))
+        .cloned()
+        .collect();
+    expected.sort();
+    assert_eq!(expected.len(), 111);
+    let (mut listed, mut cursor, mut pages) = (Vec::new(), None, 0);
+    loop {
+        let (objects, prefixes, next) = page(&console, &root, "a/1", 40, cursor.as_deref()).await;
+        assert!(prefixes.is_empty());
+        listed.extend(objects);
+        pages += 1;
+        match next {
+            Some(next) => cursor = Some(next),
+            None => break,
+        }
+    }
+    assert_eq!(
+        listed, expected,
+        "exactly the names that start so, in byte order, each once"
+    );
+    assert!(pages >= 3, "the filtered set paged: {pages} pages");
+
+    // At the top, names starting `a`: the folder `a/` rolls up and `a.txt` is listed; nothing under `b/`.
+    let (objects, prefixes, next) = page(&console, &root, "a", 100, None).await;
+    assert_eq!(
+        (objects, prefixes, next),
+        (vec!["a.txt".to_owned()], vec!["a/".to_owned()], None)
+    );
+
+    let (objects, prefixes, next) = page(&console, &root, "zz", 100, None).await;
+    assert!(
+        objects.is_empty() && prefixes.is_empty() && next.is_none(),
+        "no name starts so"
+    );
 }

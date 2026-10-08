@@ -87,7 +87,7 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
   const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket.name}`) : null;
   const held = figures(usage, bucket);
   const line = row(
-    el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null, key: null }) }, icon("buckets"), mono(bucket.name)),
+    el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket.name)),
     numeric(held === null ? "—" : amount(held.objects)),
     numeric(held === null ? "—" : size(held.bytes)),
     numeric(held === null ? "—" : size(held.raw_bytes)),

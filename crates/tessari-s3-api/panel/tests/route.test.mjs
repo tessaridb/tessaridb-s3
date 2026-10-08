@@ -18,9 +18,10 @@ test("every route survives format then parse", () => {
     { kind: "actions", before: 42 },
   ];
   for (const text of hostile) {
-    routes.push({ kind: "objects", bucket: "my-bucket", prefix: text, cursor: null, key: null });
-    routes.push({ kind: "objects", bucket: "my-bucket", prefix: "", cursor: `key:${text}`, key: null });
-    if (text !== "") routes.push({ kind: "objects", bucket: "my-bucket", prefix: "a/", cursor: null, key: `a/${text}` });
+    routes.push({ kind: "objects", bucket: "my-bucket", prefix: text, cursor: null, key: null, filter: "" });
+    routes.push({ kind: "objects", bucket: "my-bucket", prefix: "", cursor: `key:${text}`, key: null, filter: "" });
+    routes.push({ kind: "objects", bucket: "my-bucket", prefix: "a/", cursor: null, key: null, filter: text });
+    if (text !== "") routes.push({ kind: "objects", bucket: "my-bucket", prefix: "a/", cursor: null, key: `a/${text}`, filter: "" });
     if (text !== "") routes.push({ kind: "object", bucket: "my.bucket", key: text });
   }
   for (const route of routes) {
@@ -56,7 +57,12 @@ test("the cluster is its own view", () => {
 });
 
 test("a listing names the key selected beside it, and an empty selection is none", () => {
-  assert.equal(format({ kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: "p/a b" }), "#/b/b1b?prefix=p%2F&key=p%2Fa%20b");
-  assert.deepEqual(parse("#/b/b1b?prefix=p%2F&key="), { kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null });
-  assert.deepEqual(parse("#/b/b1b"), { kind: "objects", bucket: "b1b", prefix: "", cursor: null, key: null });
+  assert.equal(format({ kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: "p/a b", filter: "" }), "#/b/b1b?prefix=p%2F&key=p%2Fa%20b");
+  assert.deepEqual(parse("#/b/b1b?prefix=p%2F&key="), { kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null, filter: "" });
+  assert.deepEqual(parse("#/b/b1b"), { kind: "objects", bucket: "b1b", prefix: "", cursor: null, key: null, filter: "" });
+});
+
+test("a listing names the start of the names it is filtered to, within its folder", () => {
+  assert.equal(format({ kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null, filter: "ca t" }), "#/b/b1b?prefix=p%2F&filter=ca%20t");
+  assert.deepEqual(parse("#/b/b1b?prefix=p%2F&filter=ca"), { kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null, filter: "ca" });
 });

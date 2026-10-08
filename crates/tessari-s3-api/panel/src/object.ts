@@ -29,7 +29,7 @@ export async function object(screen: Screen, bucket: string, key: string): Promi
     return;
   }
   const detail = answer.value;
-  const back = format({ kind: "objects", bucket, prefix: parent(key), cursor: null, key });
+  const back = format({ kind: "objects", bucket, prefix: parent(key), cursor: null, key, filter: "" });
 
   const reason = field("download-reason", "Reason (optional)", { maxlength: "500" }, "Downloads are recorded with your key id.");
   const download = el("a", { class: "button", download: "" }, icon("download"), "Download");

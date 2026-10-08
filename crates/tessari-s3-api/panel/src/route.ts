@@ -9,7 +9,7 @@ export type Route =
   | { readonly kind: "users" }
   | { readonly kind: "spaces" }
   | { readonly kind: "cluster" }
-  | { readonly kind: "objects"; readonly bucket: string; readonly prefix: string; readonly cursor: string | null; readonly key: string | null }
+  | { readonly kind: "objects"; readonly bucket: string; readonly prefix: string; readonly cursor: string | null; readonly key: string | null; readonly filter: string }
   | { readonly kind: "object"; readonly bucket: string; readonly key: string }
   | { readonly kind: "actions"; readonly before: number | null };
 
@@ -38,6 +38,7 @@ export function format(route: Route): string {
     case "objects":
       return `#/b/${encodeURIComponent(route.bucket)}${query([
         ["prefix", route.prefix === "" ? null : route.prefix],
+        ["filter", route.filter === "" ? null : route.filter],
         ["cursor", route.cursor],
         ["key", route.key],
       ])}`;
@@ -83,7 +84,7 @@ export function parse(hash: string): Route {
       const bucket = decodeURIComponent(path.slice(3));
       return bucket === ""
         ? { kind: "buckets" }
-        : { kind: "objects", bucket, prefix: params.get("prefix") ?? "", cursor: params.get("cursor"), key: params.get("key") || null };
+        : { kind: "objects", bucket, prefix: params.get("prefix") ?? "", cursor: params.get("cursor"), key: params.get("key") || null, filter: params.get("filter") ?? "" };
     }
     if (path.startsWith("/o/")) {
       const bucket = decodeURIComponent(path.slice(3));
