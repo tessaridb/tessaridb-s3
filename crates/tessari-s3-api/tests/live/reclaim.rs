@@ -272,3 +272,115 @@ async fn a_removal_a_dead_reclaimer_marked_is_finished_by_the_next_pass() {
     assert!(queued(&planter).await.is_empty());
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
+
+/// The tables of the test store's database.
+async fn tables(planter: &MetaPool) -> Vec<String> {
+    let answers = planter
+        .run("INFO FOR DATABASE;", Vec::new())
+        .await
+        .expect("database info");
+    match answers.into_iter().next() {
+        Some(Answer::Value {
+            value: Value::Object(info),
+            ..
+        }) => match info.get("tables") {
+            Some(Value::Array(names)) => names
+                .iter()
+                .filter_map(|name| match name {
+                    Value::String(name) => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+            other => panic!("no table list: {other:?}"),
+        },
+        other => panic!("not a value answer: {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn work_lists_from_before_the_queues_are_converted_at_start() {
+    let dir = scratch_dir();
+    let mut config = crate::live_config(crate::test_node(), None, &dir);
+    config.reclaim_grace_secs = 600;
+    let storage = crate::prepared(&config).await;
+    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    let old = |byte: u8| [byte; 16];
+    // Catalog definitions contend store-wide (Q-S3-2): the planting and the conversions take the schema turn.
+    let turn = crate::SCHEMA_TURN.lock().await;
+    // A store an earlier build wrote: its events queue replaced data into `gc`, two files are queued there (one already
+    // marked) and one id is listed for healing.
+    planter
+        .run(
+            "BEGIN; DROP EVENT supersede ON objects; DROP EVENT part_superseded ON parts; \
+             DEFINE EVENT supersede ON objects FOR UPDATE, DELETE \
+             WHEN $before.data != NONE AND $before.data != $after.data \
+             THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); }; \
+             DEFINE EVENT part_superseded ON parts FOR UPDATE, DELETE \
+             WHEN $before.data != NONE AND $before.data != $after.data \
+             THEN { LET $old = $before.data; UPSERT gc:$old SET data = $old, queued = time::now(); }; COMMIT;",
+            Vec::new(),
+        )
+        .await
+        .expect("an earlier build's events");
+    planter
+        .run(
+            "DEFINE TABLE gc (data uuid REQUIRED, queued datetime REQUIRED, reclaiming datetime); \
+             DEFINE TABLE heals (data uuid REQUIRED, queued datetime REQUIRED); \
+             CREATE gc:$a = { data: $a, queued: datetime '2026-10-01T00:00:00Z' }; \
+             CREATE gc:$b = { data: $b, queued: datetime '2026-10-01T00:00:00Z', \
+                              reclaiming: datetime '2026-10-02T00:00:00Z' }; \
+             CREATE heals:$c = { data: $c, queued: datetime '2026-10-01T00:00:00Z' };",
+            vec![
+                ("a".to_owned(), Value::Uuid(old(0xa1))),
+                ("b".to_owned(), Value::Uuid(old(0xb2))),
+                ("c".to_owned(), Value::Uuid(old(0xc3))),
+            ],
+        )
+        .await
+        .expect("an earlier build's work lists");
+    for _ in 0..2 {
+        storage
+            .prepare()
+            .await
+            .expect("the start converts, and again changes nothing");
+    }
+    drop(turn);
+    let tables = tables(&planter).await;
+    assert!(
+        !tables.iter().any(|name| name == "gc" || name == "heals"),
+        "the old work lists are gone: {tables:?}"
+    );
+    assert_eq!(queued(&planter).await, vec![old(0xa1), old(0xb2)]);
+    let moved = planter
+        .run(
+            "SELECT data, time::unix(due) - time::unix(datetime '2026-10-01T00:00:00Z') AS after, reclaiming \
+             FROM reclaims; SELECT data, due FROM heal_queue;",
+            Vec::new(),
+        )
+        .await
+        .expect("the queues read");
+    let rendered = format!("{moved:?}");
+    assert_eq!(
+        rendered.matches("Integer(600)").count(),
+        2,
+        "due = queued + the 600 s grace: {rendered}"
+    );
+    assert_eq!(
+        rendered.matches("Datetime").count(),
+        2,
+        "one mark kept, one heal due: {rendered}"
+    );
+    // The events were brought forward too: an overwrite queues what it replaced on the queue.
+    let state =
+        tessari_s3_api::ApiState::new(&config, tessari_s3_api::ApiState::system_clock(), storage);
+    assert_eq!(call(&state, "PUT", "/later", vec![], b"").await.status, 200);
+    assert_eq!(
+        call(&state, "PUT", "/later/k", vec![], b"one").await.status,
+        200
+    );
+    let replaced = data_of(&planter, "later", "k").await.expect("data");
+    let overwrite = call(&state, "PUT", "/later/k", vec![], b"two").await;
+    assert_eq!(overwrite.status, 200, "{}", overwrite.body);
+    assert!(queued(&planter).await.contains(&replaced));
+}

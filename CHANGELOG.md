@@ -26,6 +26,11 @@ section records which TessariDB version its metadata runs on.
   on a cluster); TessariDB holds sizes, ETags, checksums and where the bytes are. `TESSARIDB_S3_DATA_DIR` is now
   required. A store written by an earlier build has its small objects moved to data files at start, and the column
   that held them is dropped, after which the metadata store refuses object bytes in a record.
+- Reclamation and healing run on TessariDB queues: a replaced, deleted or abandoned data file waits in a queue until
+  its grace ends, and the ids waiting for healing in another; each node takes distinct entries one at a time, and an
+  entry a node dies holding is handed out again 30 seconds later. A heal that keeps failing steps aside and, after
+  ten attempts, is shown at risk in the console's healing backlog. A store written by an earlier build has its
+  reclamation and healing lists moved onto the queues at start.
 - The console for users: sign in with any key (root or a user's); menus, screens and routes follow what that key
   may do — the cluster view only for those allowed to see it; spaces, users, keys, grants and quotas for operators and
   space administrators (their own space only).

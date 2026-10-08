@@ -110,13 +110,18 @@ impl Storage {
         }
     }
 
-    /// Creates the schema when it is missing, the default space with it, and clears what writes cut short by a crash
-    /// left on the drive; run once at start-up, before the node serves.
+    /// Creates the schema when it is missing, moves an earlier build's work lists onto the queues, creates the
+    /// default space, and clears what writes cut short by a crash left on the drive; run once at start-up, before the
+    /// node serves.
     ///
     /// # Errors
     /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
         crate::schema::apply(&self.pool, self.reclaim_grace_secs).await?;
+        let moved = crate::schema_queues::convert(&self.pool, self.reclaim_grace_secs).await?;
+        if moved > 0 {
+            tracing::info!(moved, "work-list entries moved onto the queues");
+        }
         self.spaces.create(&SpaceName::default_space()).await?;
         let cleared = self.objects.recover().await?;
         if cleared > 0 {

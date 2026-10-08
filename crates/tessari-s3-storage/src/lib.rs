@@ -11,6 +11,7 @@ pub mod multipart;
 pub mod objects;
 pub mod peers;
 mod schema;
+mod schema_queues;
 pub mod shards;
 pub mod spaces;
 mod storage;
