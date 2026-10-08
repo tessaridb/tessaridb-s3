@@ -1,7 +1,9 @@
 //! The operator console's surface (ADR-0006): its own listener, a JSON API under `/api/v1` where every route but
 //! signing in requires a session, and the page itself, which carries no data and is served without one. Writes go through the same storage
-//! services the S3 handlers call.
+//! services the S3 handlers call. Any live access key signs in; what it may see and do is decided per request by the
+//! same evaluator the S3 path uses.
 
+mod access;
 mod actions;
 mod buckets;
 mod content;
@@ -19,11 +21,13 @@ use std::sync::Arc;
 
 use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post};
+use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::SecretKey;
 
 use crate::Clock;
+use crate::principals::{Principals, resolve_user_key};
 use error::ConsoleError;
 use limits::Window;
 
@@ -44,6 +48,7 @@ struct Inner {
     node: Option<String>,
     region: String,
     erasure: Option<String>,
+    principals: Principals,
 }
 
 impl ConsoleState {
@@ -69,12 +74,32 @@ impl ConsoleState {
                     .cluster
                     .as_ref()
                     .map(|cluster| format!("{}+{}", cluster.code.data(), cluster.code.parity())),
+                principals: Principals::new(),
             }),
         })
     }
 
     fn key_id(&self) -> &str {
         &self.inner.key_id
+    }
+
+    /// Who signs in with `key_id`, and that key's secret: the root credential from configuration, a user's key
+    /// through the principal cache (5 s); `None` for a key that does not resolve.
+    async fn principal_for(
+        &self,
+        key_id: &str,
+    ) -> Result<Option<(Principal, SecretKey)>, ConsoleError> {
+        if key_id == self.key_id() {
+            return Ok(Some((Principal::Root, self.inner.secret.clone())));
+        }
+        let live = resolve_user_key(
+            &self.inner.principals,
+            self.inner.storage.users(),
+            key_id,
+            self.now(),
+        )
+        .await?;
+        Ok(live.map(|live| (Principal::User(live.principal), live.secret)))
     }
 
     fn secret(&self) -> &[u8] {

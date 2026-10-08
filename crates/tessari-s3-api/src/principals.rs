@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use scc::TreeIndex;
 use tessari_s3_core::authz::UserPrincipal;
+use tessari_s3_storage::users::UserService;
 use tessari_s3_types::SecretKey;
 
 /// How long a resolution is believed, in seconds: the published revocation window.
@@ -96,6 +97,32 @@ impl Principals {
         self.entries.upsert_async(id.to_owned(), entry).await;
         Ok(Some(live))
     }
+}
+
+/// User key `id` resolved through `cache` at `now`: its user, with grants, and its secret while both are enabled.
+///
+/// # Errors
+/// The store's failure; nothing cached past its window is served in its place.
+pub(crate) async fn resolve_user_key(
+    cache: &Principals,
+    users: &UserService,
+    id: &str,
+    now: i64,
+) -> Result<Option<Live>, tessari_s3_storage::Error> {
+    cache
+        .resolve(id, now, || async {
+            let Some(resolved) = users.resolve(id).await? else {
+                return Ok(Fetched::Unknown);
+            };
+            Ok(match users.principal(&resolved.user.name).await? {
+                Some(principal) => Fetched::Live {
+                    principal,
+                    secret: resolved.secret,
+                },
+                None => Fetched::Unknown,
+            })
+        })
+        .await
 }
 
 #[cfg(test)]

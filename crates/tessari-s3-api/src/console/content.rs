@@ -12,12 +12,14 @@ use axum::http::header::{
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
 use tessari_s3_storage::objects::Content;
 use tessari_s3_types::ErrorCategory;
 
 use super::ConsoleState;
+use super::access::on_bucket;
 use super::actions::record;
 use super::buckets::bucket_name;
 use super::error::ConsoleError;
@@ -60,12 +62,14 @@ fn failed(error: &crate::Error) -> ConsoleError {
 pub(super) async fn download(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
     Path(bucket): Path<String>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
 ) -> Result<Response, ConsoleError> {
     let Query(query) = query.map_err(|_| ConsoleError::bad_request("key is required"))?;
     let why = reason(query.reason, false)?;
     let bucket = bucket_name(&bucket)?;
+    on_bucket(&state, &principal, &bucket, Action::ReadObject).await?;
     let key = object_key(query.key.as_deref())?;
     let objects = state.storage().objects();
     let object = match objects.get(&bucket, &key).await? {

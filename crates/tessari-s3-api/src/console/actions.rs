@@ -3,12 +3,14 @@
 
 use axum::Json;
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Query, State};
+use axum::extract::{Extension, Query, State};
 use serde::{Deserialize, Serialize};
 use tessari_s3_constants::CONSOLE_ACTIONS_PAGE_MAX;
+use tessari_s3_core::authz::{self, Principal};
 use tessari_s3_storage::actions::{Action, NewAction};
 
 use super::ConsoleState;
+use super::access::allow;
 use super::error::ConsoleError;
 
 /// Records `action`. A record that cannot be written is logged in full and answered as an error, so the operator is
@@ -69,8 +71,11 @@ pub(super) struct Actions {
 
 pub(super) async fn list(
     State(state): State<ConsoleState>,
+    Extension(principal): Extension<Principal>,
     query: Result<Query<PageQuery>, QueryRejection>,
 ) -> Result<Json<Actions>, ConsoleError> {
+    // The record spans every space, so only those who operate the store read it.
+    allow(&principal, &authz::Action::Operate)?;
     let Query(page) =
         query.map_err(|_| ConsoleError::bad_request("before and limit are whole numbers"))?;
     let limit = page

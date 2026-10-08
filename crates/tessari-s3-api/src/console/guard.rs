@@ -1,5 +1,6 @@
 //! The session guard on every protected console route: no session, a tampered one or an expired one is `401`
-//! before anything else runs; a valid one is then limited per signed-in key.
+//! before anything else runs; a valid one is limited per signed-in key, and its key is resolved again — through the
+//! 5-second principal cache — so a disabled key or user loses its session within that window.
 
 use axum::extract::{Request, State};
 use axum::http::HeaderMap;
@@ -33,7 +34,6 @@ pub(super) async fn require_session(
     let now = state.now();
     let session: Session = token(request.headers())
         .and_then(|token| verify(state.secret(), token, now).ok())
-        .filter(|session| session.key_id == state.key_id())
         .ok_or(ConsoleError::unauthorized())?;
     if !state
         .requests()
@@ -42,6 +42,11 @@ pub(super) async fn require_session(
     {
         return Err(ConsoleError::rate_limited());
     }
+    let (principal, _) = state
+        .principal_for(&session.key_id)
+        .await?
+        .ok_or(ConsoleError::unauthorized())?;
+    request.extensions_mut().insert(principal);
     request.extensions_mut().insert(session);
     Ok(next.run(request).await)
 }

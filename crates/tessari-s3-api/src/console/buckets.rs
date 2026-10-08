@@ -7,13 +7,14 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use tessari_s3_core::authz::{SpaceName, Visible};
+use tessari_s3_core::authz::{Action, Principal, SpaceName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
 use tessari_s3_storage::buckets::{Created, Deleted};
 use tessari_s3_types::BucketName;
 
 use super::ConsoleState;
+use super::access::{allow, on_bucket};
 use super::actions::record;
 use super::error::ConsoleError;
 use super::input::{json, reason};
@@ -40,8 +41,11 @@ pub(super) fn bucket_name(name: &str) -> Result<BucketName, ConsoleError> {
     })
 }
 
-pub(super) async fn list(State(state): State<ConsoleState>) -> Result<Json<Buckets>, ConsoleError> {
-    let buckets = state.storage().buckets().list(&Visible::All).await?;
+pub(super) async fn list(
+    State(state): State<ConsoleState>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<Buckets>, ConsoleError> {
+    let buckets = state.storage().buckets().list(&principal.visible()).await?;
     Ok(Json(Buckets {
         buckets: buckets
             .into_iter()
@@ -68,6 +72,7 @@ struct CreatedView {
 pub(super) async fn create(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
@@ -77,10 +82,15 @@ pub(super) async fn create(
     } = json(&headers, &body, "expected name and reason")?;
     let why = reason(given, false)?;
     let name = bucket_name(&name)?;
+    let (space, creator) = match &principal {
+        Principal::Root => (SpaceName::default_space(), None),
+        Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
+    };
+    allow(&principal, &Action::CreateBucket(space.clone()))?;
     let created = state
         .storage()
         .buckets()
-        .create(&name, state.region(), &SpaceName::default_space(), None)
+        .create(&name, state.region(), &space, creator)
         .await?;
     let outcome = match created {
         Created::Created(_) => "done",
@@ -120,6 +130,7 @@ pub(super) struct Delete {
 pub(super) async fn delete(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -127,6 +138,7 @@ pub(super) async fn delete(
     let Delete { reason: given } = json(&headers, &body, "expected reason")?;
     let why = reason(given, true)?;
     let name = bucket_name(&bucket)?;
+    on_bucket(&state, &principal, &name, Action::DeleteBucket).await?;
     let deleted = state.storage().buckets().delete(&name).await?;
     let outcome = match deleted {
         Deleted::Deleted => "done",

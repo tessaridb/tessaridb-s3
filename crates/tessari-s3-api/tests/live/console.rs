@@ -26,6 +26,13 @@ impl Seen {
         serde_json::from_slice(&self.bytes).expect("a JSON body")
     }
 
+    /// The session token a sign-in set, if it set one.
+    pub(crate) fn cookie(&self) -> Option<String> {
+        let header = self.headers.get("set-cookie")?.to_str().ok()?;
+        let value = header.strip_prefix("tessaridb_s3_console=")?;
+        value.split(';').next().map(str::to_owned)
+    }
+
     fn code(&self) -> Option<String> {
         self.json()
             .get("code")

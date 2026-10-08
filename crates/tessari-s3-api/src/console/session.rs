@@ -1,6 +1,6 @@
-//! Signing in and out. A sign-in is limited per client address BEFORE the credential is looked at, compares the key
-//! id and the secret with the root credential in constant time, and answers with a session cookie the browser cannot
-//! read from script (HttpOnly) and will not send cross-site (SameSite=Strict).
+//! Signing in and out. A sign-in is limited per client address BEFORE the credential is looked at, compares the
+//! secret of the key it names (the root credential or a user's live key) in constant time, and answers with a session
+//! cookie the browser cannot read from script (HttpOnly) and will not send cross-site (SameSite=Strict).
 
 use std::net::SocketAddr;
 
@@ -72,9 +72,16 @@ pub(super) async fn sign_in(
         secret_access_key,
     } = serde_json::from_slice(&body)
         .map_err(|_| ConsoleError::bad_request("expected access_key_id and secret_access_key"))?;
-    let key_matches = access_key_id.as_bytes().ct_eq(state.key_id().as_bytes());
-    let secret_matches = secret_access_key.as_bytes().ct_eq(state.secret());
-    if !bool::from(key_matches & secret_matches) {
+    // The key id names the credential (root or a user's live key); the secret is then compared in constant time.
+    let secret_matches = match state.principal_for(&access_key_id).await? {
+        Some((_, secret)) => bool::from(
+            secret_access_key
+                .as_bytes()
+                .ct_eq(secret.expose().as_bytes()),
+        ),
+        None => false,
+    };
+    if !secret_matches {
         tracing::warn!(client = %client.ip(), "console sign-in refused");
         return Err(ConsoleError::unauthorized());
     }
@@ -82,14 +89,14 @@ pub(super) async fn sign_in(
     getrandom::fill(&mut nonce).map_err(|_| ConsoleError::internal())?;
     let token = tessari_s3_core::console::issue(
         state.secret(),
-        state.key_id(),
+        &access_key_id,
         now,
         CONSOLE_SESSION_SECS,
         nonce,
     );
-    tracing::info!(client = %client.ip(), key_id = state.key_id(), "console sign-in");
+    tracing::info!(client = %client.ip(), key_id = access_key_id, "console sign-in");
     let mut response = Json(Signed {
-        key_id: state.key_id(),
+        key_id: &access_key_id,
         expires: now.saturating_add(CONSOLE_SESSION_SECS),
     })
     .into_response();

@@ -1,16 +1,18 @@
 //! `GET /api/v1/status`: what this node is — its name in the cluster, the build, the region it signs for, the space of
 //! its data drive — and, on a cluster member, the registered members with whether each answers now and its drive's
-//! space, and how many objects wait for healing.
+//! space, and how many objects wait for healing. The drive, the members and the backlog are the cluster view, answered
+//! only to a principal that may see the cluster.
 
 use std::time::Duration;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
 use tessari_s3_constants::{
     CONSOLE_BACKLOG_COUNT_MAX, CONSOLE_MEMBER_PROBE_SECS, ERASURE_MAX_WIDTH,
 };
+use tessari_s3_core::authz::{Action, Decision, Principal, authorize};
 use tessari_s3_storage::cluster::Member;
 use tessari_s3_storage::data::DriveSpace;
 
@@ -67,7 +69,20 @@ pub(super) struct Status {
 
 pub(super) async fn status(
     State(state): State<ConsoleState>,
+    Extension(principal): Extension<Principal>,
 ) -> Result<Json<Status>, ConsoleError> {
+    // The members, their drives and the heal backlog are the cluster view: shown only to who may see the cluster.
+    if authorize(&principal, &Action::ViewCluster) != Decision::Allow {
+        return Ok(Json(Status {
+            version: env!("CARGO_PKG_VERSION"),
+            node: state.node().map(str::to_owned),
+            region: state.region().to_owned(),
+            erasure: state.erasure().map(str::to_owned),
+            members: None,
+            heal_backlog: None,
+            drive: None,
+        }));
+    }
     let storage = state.storage();
     let drive = storage.shards().drive().await?;
     let members = match state.node() {

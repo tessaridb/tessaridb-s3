@@ -29,6 +29,14 @@ impl ConsoleError {
         }
     }
 
+    pub(crate) const fn forbidden() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "forbidden",
+            message: "this key may not do that",
+        }
+    }
+
     pub(crate) const fn rate_limited() -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
