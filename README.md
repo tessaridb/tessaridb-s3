@@ -75,7 +75,7 @@ claims it; the two marked **tested** already are:
 |---|---|
 | Stage | pre-alpha |
 | Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented`; on a cluster (`TESSARIDB_S3_ERASURE`): RS(k, m) shards one per node, write quorum k (k + 1 when k = m), reads from any k verified shards, background healing (one node at a time per object, under a claim in TessariDB; shard bytes no object can reach are swept), the internal surface over mutual TLS when configured — tested with a node killed mid-write and mid-read and the metadata leader killed |
-| Console | JSON API (status, buckets, objects, downloads, ETag-guarded deletes, an append-only action record with reasons); no page yet |
+| Console | a web page on its own listener (sign-in, overview, buckets, object browser, downloads, ETag-guarded deletes with reasons, the action record; light and dark) over a JSON API |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -132,13 +132,28 @@ The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
 server after the grace period.
 
-With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console's JSON API under `/api/v1`
-(the page itself is not built yet). After signing in (`POST /api/v1/session`) an operator can read the node's
+With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console: open that address in a browser
+and sign in with the root access key. The page needs nothing from the network — no font, no script from anywhere
+else — and runs only its own script under a strict content security policy. Everything it does goes through the
+JSON API under `/api/v1`, which can be called directly. After signing in (`POST /api/v1/session`) an operator can read the node's
 status — on a cluster member its members and how many objects wait for healing — list, create and delete buckets,
 list a bucket a page at a time, describe an object, download it (always as an attachment) and delete it under the
 ETag they saw: a changed object answers `412` and is kept. Every change and every download is recorded with the
 signed-in key and the operator's reason, required to delete; `GET /api/v1/actions` reads that record newest first.
 It is kept a year in TessariDB, which refuses to change or remove an entry.
+
+The page is built from TypeScript in `crates/tessari-s3-api/panel/`; its output is committed to
+`crates/tessari-s3-api/assets/` and embedded in the binary, so building the server never needs Node. Only changing
+the page does:
+
+```sh
+cd crates/tessari-s3-api/panel
+npm install
+npm run build    # writes ../assets/
+npm run verify   # typecheck, unit tests, build; fails if the committed assets differ from what the source builds
+```
+
+Never edit `crates/tessari-s3-api/assets/` by hand — the next build overwrites it and `npm run verify` reports it.
 
 The live tests need a TessariDB node; each test works in its own namespace:
 

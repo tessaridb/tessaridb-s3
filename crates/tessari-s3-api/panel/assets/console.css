@@ -1,0 +1,916 @@
+/*
+ * The TessariDB S3 console. Mode: neo-grotesque (a calm modern product
+ * surface with room between things, owner 2026-10-08). Dressed in TessariDB's own tokens (the product
+ * site's violet and its neutrals on hue 286) so the console reads as part of
+ * the same product. System fonts only: nothing is fetched from off this node.
+ *
+ * Three token tiers, never skipped: PRIMITIVE values, SEMANTIC roles (the only
+ * thing rules below read), COMPONENT values. A theme is a remap of the semantic
+ * tier: dark by the system preference unless the operator chose light, or by
+ * `data-theme="dark"` on <html>; every semantic token is mapped in both.
+ */
+
+/* ─────────────────────────────────────────────────────────── 1. PRIMITIVE ── */
+
+:root {
+  --violet-300: oklch(0.8 0.11 289);
+  --violet-400: oklch(0.72 0.145 289);
+  --violet-500: oklch(0.647 0.137 289);
+  --violet-600: oklch(0.54 0.15 289);
+  --violet-a12: oklch(0.647 0.137 289 / 0.12);
+  --violet-a20: oklch(0.647 0.137 289 / 0.2);
+
+  --n-1000: oklch(0.13 0.009 286);
+  --n-950: oklch(0.16 0.011 286);
+  --n-900: oklch(0.18 0.013 286);
+  --n-850: oklch(0.2 0.015 286);
+  --n-800: oklch(0.24 0.016 286);
+  --n-700: oklch(0.28 0.018 286);
+  --n-500: oklch(0.52 0.022 286);
+  --n-450: oklch(0.62 0.02 286);
+  --n-400: oklch(0.7 0.018 286);
+  --n-200: oklch(0.93 0.01 286);
+  --n-150: oklch(0.95 0.008 286);
+  --n-100: oklch(0.97 0.006 286);
+  --n-50: oklch(0.985 0.003 286);
+  --n-0: oklch(1 0 0);
+
+  --green-400: oklch(0.76 0.14 155);
+  --green-600: oklch(0.52 0.13 155);
+  --amber-400: oklch(0.79 0.13 75);
+  --amber-600: oklch(0.55 0.12 75);
+  --red-400: oklch(0.7 0.17 25);
+  --red-600: oklch(0.53 0.19 25);
+
+  --s-1: 0.25rem;
+  --s-2: 0.5rem;
+  --s-3: 0.75rem;
+  --s-4: 1rem;
+  --s-5: 1.5rem;
+  --s-6: 2rem;
+  --s-7: 2.5rem;
+  --s-8: 3rem;
+
+  /* Type: four sizes on a compact ratio (≈1.333) for a data-dense surface —
+     caption 12, data 14 (tables, chips), body 16, heading/figure 28. */
+  --t-caption: 0.75rem;
+  --t-data: 0.875rem;
+  --t-body: 1rem;
+  --t-heading: 1.75rem;
+
+  /* Layers: one named scale, never a literal. */
+  --z-sticky: 20;
+  --z-toast: 50;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  /* Dials (designer ref 28): quiet, near-static, airy enough to breathe. */
+  --dial-variance: 30;
+  --dial-motion: 25;
+  --dial-density: 55;
+
+  /* MOTION 20: state feedback only — one short duration, a strong ease-out. */
+  --dur-fast: 120ms;
+  --dur-press: 160ms;
+  --ease: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* ──────────────────────────────────────────────────────────── 2. SEMANTIC ── */
+
+/* Light. */
+:root {
+  color-scheme: light;
+  --surface: var(--n-100);
+  --surface-raised: var(--n-0);
+  --surface-sunken: var(--n-150);
+  --side: var(--n-50);
+  --border: var(--n-200);
+  --border-strong: var(--n-450);
+  --text: var(--n-1000);
+  --text-muted: var(--n-500);
+  --accent: var(--violet-600);
+  --accent-hover: var(--violet-500);
+  --accent-text: var(--violet-600);
+  --accent-wash: var(--violet-a12);
+  --on-accent: var(--n-0);
+  --ok: var(--green-600);
+  --warn: var(--amber-600);
+  --bad: var(--red-600);
+  --on-bad: var(--n-0);
+  --focus: var(--violet-600);
+  --shadow: 0 1px 2px oklch(0.13 0.009 286 / 0.06);
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+/* Dark — the site's own surfaces. Written twice (system preference, explicit
+   choice) because CSS cannot name one block for two conditions. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface: var(--n-950);
+    --surface-raised: var(--n-850);
+    --surface-sunken: var(--n-1000);
+    --side: var(--n-900);
+    --border: var(--n-700);
+    --border-strong: var(--n-500);
+    --text: var(--n-200);
+    --text-muted: var(--n-400);
+    --accent: var(--violet-400);
+    --accent-hover: var(--violet-300);
+    --accent-text: var(--violet-300);
+    --accent-wash: var(--violet-a20);
+    --on-accent: var(--n-1000);
+    --ok: var(--green-400);
+    --warn: var(--amber-400);
+    --bad: var(--red-400);
+    --on-bad: var(--n-1000);
+    --focus: var(--violet-300);
+    --shadow: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: var(--n-950);
+  --surface-raised: var(--n-850);
+  --surface-sunken: var(--n-1000);
+  --side: var(--n-900);
+  --border: var(--n-700);
+  --border-strong: var(--n-500);
+  --text: var(--n-200);
+  --text-muted: var(--n-400);
+  --accent: var(--violet-400);
+  --accent-hover: var(--violet-300);
+  --accent-text: var(--violet-300);
+  --accent-wash: var(--violet-a20);
+  --on-accent: var(--n-1000);
+  --ok: var(--green-400);
+  --warn: var(--amber-400);
+  --bad: var(--red-400);
+  --on-bad: var(--n-1000);
+  --focus: var(--violet-300);
+  --shadow: none;
+}
+
+/* ─────────────────────────────────────────────────────────── 3. COMPONENT ── */
+
+:root {
+  --side-width: 16rem;
+  --row-height: 3rem; /* 48px — the 40-48px band DENSITY 55 asks for */
+  --control-height: 2.5rem; /* 40px controls, one height across every form */
+  --card-radius: var(--radius-lg);
+  --button-radius: var(--radius-pill); /* the product site's buttons are pills */
+  --card-inset: var(--s-6);
+  --control-radius: var(--radius-md);
+  --page-inset: var(--s-7);
+  --stack: var(--s-6); /* between cards and sections */
+  --page-max: 80rem;
+  --measure: 65ch;
+  --icon: 1.125rem;
+}
+
+/* ≤768px: DENSITY 65, body never under 16px, targets taller, sidebar on top. */
+@media (max-width: 48rem) {
+  :root {
+    --dial-density: 50;
+    --row-height: 3rem;
+    --control-height: 2.75rem; /* 44px touch targets */
+    --card-inset: var(--s-5);
+    --page-inset: var(--s-4);
+    --stack: var(--s-5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dial-motion: 0;
+    --dur-fast: 0ms;
+    --dur-press: 0ms;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────── base ── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--t-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tracking tightens as size grows; leading loosens as size falls. */
+h1 {
+  margin: 0;
+  font-size: var(--t-heading);
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  margin: 0 0 var(--s-5);
+  font-size: var(--t-caption);
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+p {
+  margin: 0 0 var(--s-2);
+}
+
+a {
+  color: var(--accent-text);
+  text-underline-offset: 0.15em;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* `hidden` must win over the display a control's own rule sets. */
+[hidden] {
+  display: none;
+}
+
+.muted,
+.hint {
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: var(--t-caption);
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+.icon {
+  inline-size: var(--icon);
+  block-size: var(--icon);
+  flex: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip {
+  position: absolute;
+  inset-inline-start: var(--s-2);
+  inset-block-start: -10rem;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface-raised);
+  border-radius: var(--control-radius);
+  z-index: var(--z-toast);
+}
+
+.skip:focus {
+  inset-block-start: var(--s-2);
+}
+
+/* ─────────────────────────────────────────────────────────────── shell ── */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--side-width) minmax(0, 1fr);
+  min-height: 0;
+  /* The sidebar's colour and edge run the whole height of a long page, while
+     the sidebar itself stays pinned to the viewport. */
+  background: linear-gradient(
+    to right,
+    var(--side) calc(var(--side-width) - 1px),
+    var(--border) calc(var(--side-width) - 1px),
+    var(--border) var(--side-width),
+    transparent var(--side-width)
+  );
+}
+
+.side {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: var(--z-sticky);
+  align-self: start;
+  block-size: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-7);
+  padding: var(--s-6) var(--s-4);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin: 0;
+  padding-inline: var(--s-2);
+  font-weight: 650;
+}
+
+.brand b {
+  color: var(--accent-text);
+}
+
+.logo {
+  inline-size: 1.75rem;
+  block-size: 1.75rem;
+}
+
+.side nav {
+  display: grid;
+  gap: var(--s-1);
+}
+
+.side nav a {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-block-size: var(--control-height);
+  padding: 0 var(--s-3);
+  border-radius: var(--control-radius);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.side nav a:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+}
+
+.side nav a[aria-current="page"] {
+  color: var(--accent-text);
+  background: var(--accent-wash);
+}
+
+.side-foot {
+  margin-block-start: auto;
+  display: grid;
+  gap: var(--s-1);
+}
+
+.side-foot button {
+  justify-content: flex-start;
+  padding-inline: var(--s-3);
+}
+
+main {
+  padding: var(--page-inset);
+  min-inline-size: 0;
+  max-inline-size: var(--page-max);
+}
+
+main:focus,
+.view-title:focus {
+  /* Focus lands here after a route change so a screen reader starts at the
+     new view; neither is a control, so there is no ring to show. */
+  outline: none;
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--s-2) var(--s-4);
+  padding: var(--s-4) var(--page-inset);
+  border-block-start: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--t-caption);
+}
+
+.foot p {
+  margin: 0;
+}
+
+@media (max-width: 48rem) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    background: none;
+  }
+
+  .side {
+    position: static;
+    block-size: auto;
+    padding: var(--s-3) var(--s-4);
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-2) var(--s-4);
+    background: var(--side);
+    border-block-end: 1px solid var(--border);
+  }
+
+  .side nav {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .side-foot {
+    margin-block-start: 0;
+    margin-inline-start: auto;
+    display: flex;
+  }
+
+}
+
+/* ─────────────────────────────────────────────────────────── page header ── */
+
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-block-end: var(--s-7);
+}
+
+.page-head .lede {
+  margin: var(--s-2) 0 0;
+  max-inline-size: var(--measure);
+  color: var(--text-muted);
+}
+
+/* ───────────────────────────────────────────────────────────── surfaces ── */
+
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow);
+  padding: var(--card-inset);
+  margin-block-end: var(--stack);
+}
+
+.card.flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.card.flush > h2 {
+  padding: var(--s-5) var(--card-inset) var(--s-3);
+  margin: 0;
+}
+
+.card.flush > h2 + .scroll {
+  border-block-start: 1px solid var(--border);
+}
+
+.card.flush > h2 + .empty {
+  padding-block-start: 0;
+}
+
+.card.flush > .toolbar,
+.card.flush > .paging,
+.card.flush > .empty {
+  padding: var(--s-5) var(--card-inset);
+  margin: 0;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--s-5);
+  margin-block-end: var(--stack);
+}
+
+.tile {
+  display: grid;
+  gap: var(--s-2);
+  align-content: start;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow);
+  padding: var(--s-5) var(--card-inset);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--dur-fast) var(--ease), transform var(--dur-press) var(--ease-out);
+}
+
+a.tile:active {
+  transform: scale(0.98);
+}
+
+a.tile:hover {
+  border-color: var(--accent);
+}
+
+.tile .label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--t-caption);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tile .value {
+  font-size: var(--t-heading);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.tile .note {
+  font-size: var(--t-data);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--s-3) var(--s-7);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--text-muted);
+}
+
+.facts dd {
+  margin: 0;
+  min-inline-size: 0;
+}
+
+a.back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  text-decoration: none;
+}
+
+a.back:hover {
+  text-decoration: underline;
+}
+
+.trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-1);
+  color: var(--text-muted);
+}
+
+.trail .icon {
+  --icon: 0.875rem;
+}
+
+.trail a {
+  text-decoration: none;
+}
+
+.trail a:hover {
+  text-decoration: underline;
+}
+
+.trail [aria-current="page"] {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.empty p {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.paging {
+  display: flex;
+  gap: var(--s-3);
+  margin: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--s-3);
+  border-block-end: 1px solid var(--border);
+}
+
+.toolbar .field {
+  margin: 0;
+  flex: 1 1 16rem;
+}
+
+/* ─────────────────────────────────────────────────────────────── tables ── */
+
+/* A table never squeezes its columns below legibility: on a narrow screen it
+   scrolls sideways inside its card, and the page itself never does. */
+.scroll {
+  overflow-x: auto;
+}
+
+.scroll table {
+  min-inline-size: 40rem;
+}
+
+td code {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+table {
+  border-collapse: collapse;
+  inline-size: 100%;
+  font-size: var(--t-data);
+  line-height: 1.43;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  text-align: start;
+  padding: 0 var(--card-inset);
+  block-size: var(--row-height);
+  border-block-end: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+th {
+  font-size: var(--t-caption);
+  letter-spacing: 0.01em;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+tbody tr:hover td {
+  background: var(--accent-wash);
+}
+
+/* A row's name is its title: text colour, no underline until pointed at. */
+a.name {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  line-height: 1.25;
+  gap: var(--s-3);
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+a.name:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+
+a.name .icon {
+  color: var(--text-muted);
+}
+
+a.name:hover .icon {
+  color: var(--accent-text);
+}
+
+tr.asking td,
+tr.asking:hover td {
+  background: var(--surface-sunken);
+  padding-block: var(--s-5);
+}
+
+/* ─────────────────────────────────────────────────────────────── chips ── */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 0 var(--s-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--t-caption);
+  font-weight: 600;
+  background: var(--surface-sunken);
+}
+
+.chip::before {
+  content: "";
+  inline-size: 0.4rem;
+  block-size: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chip.ok {
+  color: var(--ok);
+}
+
+.chip.warn {
+  color: var(--warn);
+}
+
+/* ────────────────────────────────────────────────────────────── controls ── */
+
+.field {
+  display: grid;
+  gap: var(--s-2);
+  margin-block-end: var(--s-5);
+  max-inline-size: 32rem;
+}
+
+label {
+  font-weight: 600;
+  font-size: var(--t-data);
+}
+
+input,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  padding: var(--s-2) var(--s-3);
+  min-block-size: var(--control-height);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+input:hover,
+textarea:hover {
+  border-color: var(--border-strong);
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--bad);
+}
+
+button,
+.button {
+  font: inherit;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-block-size: var(--control-height);
+  padding: 0 var(--s-5);
+  border-radius: var(--button-radius);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    transform var(--dur-press) var(--ease-out);
+}
+
+/* Press feedback on everything pressable. */
+button:active,
+.button:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  button:hover,
+  .button:hover {
+    background: var(--surface-sunken);
+  }
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+button.primary:hover {
+  background: var(--accent-hover);
+}
+
+button.danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: var(--on-bad);
+}
+
+button.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+button.quiet:hover {
+  color: var(--text);
+  background: var(--surface-sunken);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-block-start: var(--s-2);
+}
+
+.message.bad {
+  color: var(--bad);
+  margin-block-start: var(--s-3);
+  max-inline-size: var(--measure);
+}
+
+/* Signing in is the only thing on the page, so it sits in the middle of it. */
+.gate {
+  display: grid;
+  place-items: center;
+  min-block-size: 85dvh;
+}
+
+.gate .card {
+  inline-size: min(100%, 25rem);
+  padding: var(--s-6) var(--s-5);
+  text-align: center;
+}
+
+.gate .field {
+  max-inline-size: none;
+  text-align: start;
+}
+
+.gate .logo {
+  inline-size: 3rem;
+  block-size: 3rem;
+  margin-block-end: var(--s-3);
+}
+
+.gate h1 {
+  margin-block-end: var(--s-2);
+}
+
+.gate button.primary {
+  inline-size: 100%;
+  margin-block-start: var(--s-2);
+}
+
+/* Before signing in there is nothing to navigate: the sign-in card is the page. */
+body.signed-out .side {
+  display: none;
+}
+
+body.signed-out .shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+body.signed-out main {
+  max-inline-size: none;
+}
+
+/* Windows high contrast and other forced palettes keep every boundary visible. */
+@media (forced-colors: active) {
+  .chip,
+  button,
+  .button,
+  .card,
+  .tile {
+    border: 1px solid CanvasText;
+  }
+}

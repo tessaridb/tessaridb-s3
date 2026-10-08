@@ -4,6 +4,7 @@
 #![cfg(test)]
 
 mod console;
+mod console_page;
 mod erasure;
 mod internal;
 mod operations;

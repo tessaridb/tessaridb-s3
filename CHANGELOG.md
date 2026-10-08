@@ -42,6 +42,12 @@ section records which TessariDB version its metadata runs on.
   of an opaque type, and `DELETE …/object?key=` deletes it only under the ETag given (`412` when it changed).
   Every change and every download is appended to a year-long action record in TessariDB with the signed-in key,
   the outcome and the operator's reason — required to delete — and `GET /api/v1/actions` reads it newest first.
+- The operator console's page: the console address now serves a web page — sign-in, an overview of the node and
+  its cluster, buckets (create, delete with a reason), a bucket's keys browsed by prefix a page at a time, an
+  object's details with a recorded download and an ETag-guarded delete, and the action record — in light and dark.
+  It loads nothing from off the node, runs under a strict content security policy, writes every name it shows as
+  text, and does everything through the console API. The page's routes need no session (they carry no data) and
+  are limited per client address.
 - One node at a time heals or reclaims an object: each takes an expiring claim on the object's data in TessariDB
   first, so healers no longer duplicate work and a heal can no longer write a shard back behind a reclaim. Shard
   bytes left with no record of their object (older than the reclamation grace) are swept by the reclaimer.

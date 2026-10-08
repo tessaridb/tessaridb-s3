@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>TessariDB S3 console</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/console.css" />
+    <script src="/console.js" defer></script>
+  </head>
+  <body>
+    <a id="skip" class="skip" href="#view">Skip to content</a>
+    <div class="shell">
+      <aside class="side">
+        <p class="brand"><img class="logo" src="/favicon.svg" alt="" width="28" height="28" /><span>TessariDB S3</span></p>
+        <nav aria-label="Sections">
+          <a href="#/" data-section="status">Overview</a>
+          <a href="#/buckets" data-section="buckets">Buckets</a>
+          <a href="#/actions" data-section="actions">Action record</a>
+        </nav>
+        <div class="side-foot">
+          <button id="theme" type="button" class="quiet">Dark theme</button>
+          <button id="sign-out" type="button" class="quiet">Sign out</button>
+        </div>
+      </aside>
+      <main id="view" tabindex="-1">
+        <noscript><p>The console needs JavaScript; the S3 API itself does not.</p></noscript>
+      </main>
+    </div>
+    <footer class="foot">
+      <p id="status-line" role="status" aria-live="polite"></p>
+      <p class="credit">© boogvar 2026 · Powered by TessariDB</p>
+    </footer>
+  </body>
+</html>

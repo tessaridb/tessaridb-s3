@@ -1,5 +1,5 @@
 //! The operator console's surface (ADR-0006): its own listener, a JSON API under `/api/v1` where every route but
-//! signing in requires a session, and — from the next wave — the page itself. Writes go through the same storage
+//! signing in requires a session, and the page itself, which carries no data and is served without one. Writes go through the same storage
 //! services the S3 handlers call.
 
 mod actions;
@@ -10,6 +10,7 @@ mod guard;
 mod input;
 mod limits;
 mod objects;
+mod page;
 mod session;
 mod status;
 
@@ -129,8 +130,8 @@ async fn not_found() -> ConsoleError {
     ConsoleError::not_found()
 }
 
-/// The console router: signing in is the one route without a session; every other route, an unknown path included,
-/// is behind the session guard.
+/// The console router: signing in and the page's assets are the routes without a session; every other route, an
+/// unknown path included, is behind the session guard.
 pub fn console_router(state: ConsoleState) -> axum::Router {
     let protected = axum::Router::new()
         .route("/api/v1/status", get(status::status))
@@ -151,6 +152,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()
         .route("/api/v1/session", post(session::sign_in))
+        .merge(page::routes())
         .merge(protected)
         .with_state(state)
 }

@@ -16,7 +16,7 @@ use tower::ServiceExt;
 
 use crate::{ACCESS_KEY, NOW, SECRET};
 
-fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState {
+pub(super) fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState {
     let vars = [
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET),
