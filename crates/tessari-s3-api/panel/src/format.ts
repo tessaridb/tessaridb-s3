@@ -33,3 +33,21 @@ export const share = (part: number, whole: number): string => percent.format(who
 
 /** A count for a reader, grouped by the reader's locale. */
 export const amount = (value: number): string => value.toLocaleString();
+
+/** The binary units a quota is entered in. */
+export const QUOTA_UNITS = { MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 } as const;
+
+/** `amount` of `unit` in bytes: null when empty (no limit), undefined when it is not a usable amount. */
+export function bytesOf(amount: string, unit: keyof typeof QUOTA_UNITS): number | null | undefined {
+  const written = amount.trim();
+  if (written === "") {
+    return null;
+  }
+  if (!/^\d+(\.\d+)?$/.test(written)) {
+    return undefined;
+  }
+  const value = Number(written);
+  const bytes = Math.round(value * QUOTA_UNITS[unit]);
+  // A positive amount too small to be one byte was a mistake, not a request to forbid every write.
+  return Number.isSafeInteger(bytes) && (bytes > 0 || value === 0) ? bytes : undefined;
+}

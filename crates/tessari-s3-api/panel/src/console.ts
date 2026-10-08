@@ -114,6 +114,7 @@ async function render(): Promise<void> {
     live: () => mine === generation,
     signIn: showSignIn,
     redraw: () => void render(),
+    may,
   };
   await draw(route, screen);
   if (screen.live()) {

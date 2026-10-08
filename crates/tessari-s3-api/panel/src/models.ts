@@ -22,7 +22,15 @@ export type Usage = {
   readonly objects: number;
   readonly bytes: number;
 };
-export type Bucket = { readonly name: string; readonly created: string; readonly region: string };
+export type Bucket = {
+  readonly name: string;
+  readonly created: string;
+  readonly region: string;
+  /** The most bytes it may hold; null is no limit. */
+  readonly maxBytes: number | null;
+  /** The most objects it may hold; null is no limit. */
+  readonly maxObjects: number | null;
+};
 export type ObjectRow = { readonly key: string; readonly size: number; readonly etag: string; readonly modified: string };
 export type Listing = { readonly objects: readonly ObjectRow[]; readonly prefixes: readonly string[]; readonly next: string | null };
 export type Detail = {
@@ -164,8 +172,8 @@ export function readUsage(v: unknown): Usage | null {
 }
 
 const bucket = (v: unknown): Bucket | null =>
-  record(v) && text(v["name"]) && text(v["created"]) && text(v["region"])
-    ? { name: v["name"], created: v["created"], region: v["region"] }
+  record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"])
+    ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] }
     : null;
 
 export function readBuckets(v: unknown): readonly Bucket[] | null {

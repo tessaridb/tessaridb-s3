@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
+import { readBuckets, readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false }, drive: own });
@@ -73,4 +73,13 @@ test("the cluster view reads members, a layout or none, the backlog and the meta
   assert.deepEqual(readCluster(cluster), cluster);
   assert.deepEqual(readCluster({ ...cluster, node: null, erasure: null, members: null, layout: null })?.layout, null);
   assert.equal(readCluster({ ...cluster, metadata: { addresses: [1] } }), null);
+});
+
+test("a bucket carries its limits, null where it has none", () => {
+  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1" };
+  assert.deepEqual(readBuckets({ buckets: [{ ...row, max_bytes: 1000, max_objects: null }] }), [
+    { ...row, maxBytes: 1000, maxObjects: null },
+  ]);
+  assert.equal(readBuckets({ buckets: [{ ...row, max_bytes: -1, max_objects: null }] }), null);
+  assert.equal(readBuckets({ buckets: [row] }), null, "the limits are always sent");
 });

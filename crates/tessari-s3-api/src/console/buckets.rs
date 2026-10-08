@@ -24,6 +24,8 @@ struct BucketView {
     name: String,
     created: String,
     region: String,
+    max_bytes: Option<u64>,
+    max_objects: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -53,6 +55,8 @@ pub(super) async fn list(
                 name: bucket.name.as_str().to_owned(),
                 created: bucket.created.iso8601_millis(),
                 region: bucket.region,
+                max_bytes: bucket.quota.max_bytes,
+                max_objects: bucket.quota.max_objects,
             })
             .collect(),
     }))

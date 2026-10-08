@@ -4,6 +4,7 @@
 //! in, and every other failure says what happened and what to do next.
 
 import { el, fill } from "./dom.ts";
+import type { Capabilities } from "./models.ts";
 
 export type Failure = { readonly ok: false; readonly status: number; readonly code: string; readonly message: string };
 
@@ -15,6 +16,9 @@ export type Screen = {
   readonly signIn: () => void;
   /** Draws this view again. */
   readonly redraw: () => void;
+  /** What the signed-in key may do, as the server answered; null when it could not be asked. Offers only — the
+   * server decides. */
+  readonly may: Capabilities | null;
 };
 
 /** What to tell the operator about `failure`, beyond the server's own message. */

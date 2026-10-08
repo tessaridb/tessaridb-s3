@@ -15,6 +15,7 @@ mod cluster;
 mod complete;
 mod console;
 mod console_admin;
+mod console_quota;
 mod console_store;
 mod console_users;
 mod copy;

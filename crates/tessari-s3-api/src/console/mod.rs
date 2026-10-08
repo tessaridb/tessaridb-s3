@@ -16,6 +16,7 @@ mod keys;
 mod limits;
 mod objects;
 mod page;
+mod quotas;
 mod session;
 mod spaces;
 mod status;
@@ -185,6 +186,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/cluster", get(cluster::cluster))
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
+        .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))
         .route("/api/v1/buckets/{bucket}/objects", get(objects::list))
         .route(
             "/api/v1/buckets/{bucket}/object",

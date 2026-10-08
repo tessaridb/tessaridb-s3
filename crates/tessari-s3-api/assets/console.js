@@ -71,7 +71,7 @@
     const buckets2 = list(v["buckets"], bucketUsage);
     return buckets2 === null ? null : { taken: v["taken"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"] };
   }
-  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) ? { name: v["name"], created: v["created"], region: v["region"] } : null;
+  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] } : null;
   function readBuckets(v) {
     return record(v) ? list(v["buckets"], bucket) : null;
   }
@@ -297,6 +297,19 @@
   var percent = new Intl.NumberFormat("en", { style: "percent", maximumFractionDigits: 0 });
   var share = (part, whole2) => percent.format(whole2 === 0 ? 0 : part / whole2);
   var amount = (value) => value.toLocaleString();
+  var QUOTA_UNITS = { MiB: 1024 ** 2, GiB: 1024 ** 3, TiB: 1024 ** 4 };
+  function bytesOf(amount2, unit) {
+    const written = amount2.trim();
+    if (written === "") {
+      return null;
+    }
+    if (!/^\d+(\.\d+)?$/.test(written)) {
+      return void 0;
+    }
+    const value = Number(written);
+    const bytes = Math.round(value * QUOTA_UNITS[unit]);
+    return Number.isSafeInteger(bytes) && (bytes > 0 || value === 0) ? bytes : void 0;
+  }
 
   // src/route.ts
   //! The console's views as hash routes, so every view is a URL an operator can
@@ -557,11 +570,101 @@
     return svg;
   }
 
+  // src/bucket-quota.ts
+  //! A bucket's quota: the limits as the row shows them, and the form an operator
+  //! sets them with, inline under the row. Both limits are sent every time, so a
+  //! repeated save changes nothing; an empty field is no limit. The reason is
+  //! required and goes into the action record.
+  var isUnit = (value) => Object.hasOwn(QUOTA_UNITS, value);
+  function limits(bucket2) {
+    const parts = [
+      bucket2.maxBytes === null ? null : size(bucket2.maxBytes),
+      bucket2.maxObjects === null ? null : `${amount(bucket2.maxObjects)} objects`
+    ].filter((part) => part !== null);
+    return parts.length === 0 ? "—" : parts.join(" · ");
+  }
+  function flag2(input, wrong) {
+    if (wrong) {
+      input.setAttribute("aria-invalid", "true");
+    } else {
+      input.removeAttribute("aria-invalid");
+    }
+  }
+  function unitOf(bytes) {
+    const units = ["TiB", "GiB", "MiB"];
+    return units.find((unit) => bytes % QUOTA_UNITS[unit] === 0) ?? "MiB";
+  }
+  function quotaForm(screen, bucket2, close) {
+    const id = `quota-${bucket2.name}`;
+    const unit = el("select", { id: `${id}-unit`, "aria-label": "Unit" }, ...Object.keys(QUOTA_UNITS).map((name) => el("option", { value: name }, name)));
+    const bytes = field(`${id}-bytes`, "Size limit", { inputmode: "decimal", autocomplete: "off" }, "Empty: no size limit. Checked against the last measurement.");
+    const objects2 = field(`${id}-objects`, "Object limit", { inputmode: "numeric", autocomplete: "off" }, "Empty: no object limit.");
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    if (bucket2.maxBytes !== null) {
+      unit.value = unitOf(bucket2.maxBytes);
+      bytes.input.value = String(bucket2.maxBytes / QUOTA_UNITS[unitOf(bucket2.maxBytes)]);
+    }
+    if (bucket2.maxObjects !== null) {
+      objects2.input.value = String(bucket2.maxObjects);
+    }
+    bytes.input.after(unit);
+    const save = el("button", { type: "submit", class: "primary" }, "Set quota");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Quota: "), mono(bucket2.name)),
+      el("p", { class: "muted" }, "Writes that would pass a limit are refused. A bucket can pass it by what is written before the next measurement."),
+      bytes.row,
+      objects2.row,
+      reason.row,
+      el("div", { class: "actions" }, save, cancel),
+      said
+    );
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const maxBytes = isUnit(unit.value) ? bytesOf(bytes.input.value, unit.value) : void 0;
+      const written = objects2.input.value.trim();
+      const maxObjects = written === "" ? null : /^\d+$/.test(written) ? Number(written) : void 0;
+      const objectsWrong = maxObjects === void 0 || maxObjects !== null && !Number.isSafeInteger(maxObjects);
+      flag2(bytes.input, maxBytes === void 0);
+      flag2(objects2.input, objectsWrong);
+      if (maxBytes === void 0 || maxObjects === void 0 || objectsWrong) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Write each limit as a number, or leave it empty for none."));
+        return;
+      }
+      const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket2.name)}/quota`, ignored, {
+        max_bytes: maxBytes,
+        max_objects: maxObjects,
+        reason: reason.input.value.trim()
+      });
+      if (answer.ok) {
+        announce(`Set the quota of ${bucket2.name}.`);
+        screen.redraw();
+        return;
+      }
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(answer));
+    });
+    queueMicrotask(() => bytes.input.focus());
+    return form;
+  }
+
   // src/buckets.ts
   //! Buckets: find one (the list is complete, so filtering it here hides nothing
   //! the server sent), see how many objects and bytes each holds as last measured,
-  //! create one from the form the header's button reveals, and delete an empty one
-  //! with a reason.
+  //! create one from the form the header's button reveals, delete an empty one
+  //! with a reason, and — for operators — set its quota.
   var TITLE2 = "Buckets";
   function createForm(screen, opener) {
     const name = field("new-bucket", "Bucket name", { spellcheck: "false", autocomplete: "off", required: "" }, "3-63 lowercase letters, digits, dots and hyphens.");
@@ -621,17 +724,30 @@
   var numeric = (text2) => el("span", { class: "numeric" }, text2);
   function bucketRow(screen, bucket2, usage) {
     const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
+    const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
     const held = figures(usage, bucket2);
     const line = row(
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
       numeric(held === null ? "—" : amount(held.objects)),
       numeric(held === null ? "—" : size(held.bytes)),
+      numeric(limits(bucket2)),
       moment(bucket2.created),
       mono(bucket2.region),
-      remove
+      el("div", { class: "actions" }, quota, remove)
     );
+    quota?.addEventListener("click", () => {
+      const cell = el("td", { colspan: "7" });
+      const region = el("tr", { class: "asking" }, cell);
+      cell.append(
+        quotaForm(screen, bucket2, () => {
+          region.remove();
+          quota.focus();
+        })
+      );
+      line.after(region);
+    });
     remove.addEventListener("click", () => {
-      const cell = el("td", { colspan: "6" });
+      const cell = el("td", { colspan: "7" });
       const ask = el("tr", { class: "asking" }, cell);
       const close = () => {
         ask.remove();
@@ -691,7 +807,7 @@
       const shown = all2.filter((bucket2) => bucket2.name.includes(wanted));
       fill(
         listed,
-        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
+        all2.length === 0 ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.") : shown.length === 0 ? empty(`No bucket name contains “${wanted}”.`) : table("Buckets", ["Name", "Objects", "Size", "Limit", "Created", "Region", "Actions"], shown.map((bucket2) => bucketRow(screen, bucket2, usage)))
       );
     };
     filter.input.addEventListener("input", draw2);
@@ -1564,7 +1680,8 @@
       main,
       live: () => mine === generation,
       signIn: showSignIn,
-      redraw: () => void render()
+      redraw: () => void render(),
+      may
     };
     await draw(route, screen);
     if (screen.live()) {

@@ -1,7 +1,7 @@
 //! Buckets: find one (the list is complete, so filtering it here hides nothing
 //! the server sent), see how many objects and bytes each holds as last measured,
-//! create one from the form the header's button reveals, and delete an empty one
-//! with a reason.
+//! create one from the form the header's button reveals, delete an empty one
+//! with a reason, and — for operators — set its quota.
 
 import { call, type Answer } from "./api.ts";
 import { confirmation } from "./confirm.ts";
@@ -11,6 +11,7 @@ import { icon } from "./icons.ts";
 import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Usage } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
+import { limits, quotaForm } from "./bucket-quota.ts";
 
 const TITLE = "Buckets";
 
@@ -78,17 +79,31 @@ const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, 
 
 function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTableRowElement {
   const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
+  // Offered to keys that may operate; the server refuses everyone else regardless.
+  const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
   const held = figures(usage, bucket);
   const line = row(
     el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket.name)),
     numeric(held === null ? "—" : amount(held.objects)),
     numeric(held === null ? "—" : size(held.bytes)),
+    numeric(limits(bucket)),
     moment(bucket.created),
     mono(bucket.region),
-    remove,
+    el("div", { class: "actions" }, quota, remove),
   );
+  quota?.addEventListener("click", () => {
+    const cell = el("td", { colspan: "7" });
+    const region = el("tr", { class: "asking" }, cell);
+    cell.append(
+      quotaForm(screen, bucket, () => {
+        region.remove();
+        quota.focus();
+      }),
+    );
+    line.after(region);
+  });
   remove.addEventListener("click", () => {
-    const cell = el("td", { colspan: "6" });
+    const cell = el("td", { colspan: "7" });
     const ask = el("tr", { class: "asking" }, cell);
     const close = (): void => {
       ask.remove();
@@ -155,7 +170,7 @@ export async function buckets(screen: Screen): Promise<void> {
         ? empty("No buckets yet. Create one with “New bucket”, or with any S3 client.")
         : shown.length === 0
           ? empty(`No bucket name contains “${wanted}”.`)
-          : table("Buckets", ["Name", "Objects", "Size", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket, usage))),
+          : table("Buckets", ["Name", "Objects", "Size", "Limit", "Created", "Region", "Actions"], shown.map((bucket) => bucketRow(screen, bucket, usage))),
     );
   };
   filter.input.addEventListener("input", draw);
