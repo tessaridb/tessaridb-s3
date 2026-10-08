@@ -7,6 +7,7 @@ use tessari_s3_infrastructure::tessaridb::MetaPool;
 
 use crate::Result;
 use crate::buckets::{BucketService, TessariBuckets};
+use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
@@ -17,6 +18,7 @@ pub struct Storage {
     buckets: BucketService,
     objects: ObjectService,
     multipart: MultipartService,
+    cluster: ClusterService,
     pool: MetaPool,
 }
 
@@ -30,6 +32,7 @@ impl Storage {
         Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
+            cluster: ClusterService::new(TessariCluster::new(pool.clone())),
             objects,
             pool,
         }
@@ -53,6 +56,12 @@ impl Storage {
     #[must_use]
     pub const fn multipart(&self) -> &MultipartService {
         &self.multipart
+    }
+
+    /// Cluster topology: registered nodes and the layout.
+    #[must_use]
+    pub const fn cluster(&self) -> &ClusterService {
+        &self.cluster
     }
 
     /// Bucket operations.

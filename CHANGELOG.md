@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion
+  settings a node registers itself in the metadata on start-up, and the cluster's first layout — the lowest k + m
+  registered node ids — is created once however many nodes propose it. Object data is still stored per node.
 - Metadata on a TessariDB cluster: `TESSARIDB_S3_META_ADDRESS` takes several nodes, tried in turn (a node that
   does not answer is passed over; the client follows a redirect to the leader), and the namespace states its
   replication (`TESSARIDB_S3_META_REPLICATION`), required when more than one node is listed.

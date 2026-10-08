@@ -29,6 +29,9 @@ pub enum Error {
     /// The part number is not an integer from 1 to 10,000; the S3 answer is `InvalidArgument`.
     #[error("a part number is an integer from 1 to 10000")]
     InvalidPartNumber,
+    /// A cluster node id outside its alphabet (configuration, never a client request).
+    #[error("a node id is 1 to 63 lowercase letters, digits and inner hyphens")]
+    InvalidNodeId,
 }
 
 impl Error {
@@ -40,7 +43,8 @@ impl Error {
             | Self::EmptyObjectKey
             | Self::ObjectKeyTooLong { .. }
             | Self::InvalidUploadId
-            | Self::InvalidPartNumber => ErrorCategory::Validation,
+            | Self::InvalidPartNumber
+            | Self::InvalidNodeId => ErrorCategory::Validation,
         }
     }
 }

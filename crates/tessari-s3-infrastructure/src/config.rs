@@ -9,8 +9,9 @@ use tessari_s3_constants::{
     DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
     DEFAULT_UPLOAD_MAX_AGE_SECS, MIN_SECRET_KEY_LEN,
 };
-use tessari_s3_types::SecretKey;
+use tessari_s3_types::{Code, NodeId, SecretKey};
 
+use crate::cluster_config::cluster_settings;
 use crate::tessaridb::{MetaSettings, Replication, is_safe_name};
 use crate::{Error, Result};
 
@@ -43,6 +44,23 @@ pub struct S3Config {
     /// `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` — how long a multipart upload may stay open before the reaper aborts it
     /// (positive; counted from its initiation, as S3's AbortIncompleteMultipartUpload counts).
     pub upload_max_age_secs: u64,
+    /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
+    pub cluster: Option<ClusterSettings>,
+}
+
+/// What a node of an erasure-coded cluster is told about itself and its peers. All or nothing.
+#[derive(Debug, Clone)]
+pub struct ClusterSettings {
+    /// `TESSARIDB_S3_NODE_ID` — this node's name in the cluster's metadata.
+    pub node: NodeId,
+    /// `TESSARIDB_S3_ERASURE` — the code objects are written with, `k+m`.
+    pub code: Code,
+    /// `TESSARIDB_S3_INTERNAL_LISTEN` — where the internal shard surface listens.
+    pub internal_listen: SocketAddr,
+    /// `TESSARIDB_S3_INTERNAL_ADVERTISE` — `host:port` other nodes reach that surface at.
+    pub internal_advertise: String,
+    /// `TESSARIDB_S3_CLUSTER_SECRET` — the key internal requests are signed with (at least 32 bytes).
+    pub secret: SecretKey,
 }
 
 impl S3Config {
@@ -105,8 +123,10 @@ impl S3Config {
             })?,
         };
         let meta = meta_settings(&get)?;
+        let cluster = cluster_settings(&get)?;
         Ok(Self {
             meta,
+            cluster,
             reclaim_grace_secs: match get("TESSARIDB_S3_RECLAIM_GRACE_SECS") {
                 None => DEFAULT_RECLAIM_GRACE_SECS,
                 Some(text) => text.trim().parse().map_err(|_| Error::InvalidConfig {
@@ -242,4 +262,4 @@ fn parse_positive(text: Option<String>, key: &'static str) -> Result<Option<usiz
 
 #[cfg(test)]
 #[path = "config_tests.rs"]
-mod tests;
+pub(crate) mod tests;

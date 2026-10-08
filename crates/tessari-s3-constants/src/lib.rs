@@ -54,6 +54,10 @@ pub const MIN_SECRET_KEY_LEN: usize = 16;
 /// Connections to the metadata store open at once, when `TESSARIDB_S3_META_MAX_CONNECTIONS` is unset.
 pub const DEFAULT_META_CONNECTIONS: usize = 32;
 
+/// Shortest cluster secret accepted, in bytes: it keys HMAC-SHA256 over every internal request and the placement
+/// hash, so it carries at least the 256 bits of the MAC it keys.
+pub const CLUSTER_SECRET_MIN_LEN: usize = 32;
+
 /// Seconds a connection to one metadata node may take to open before the next listed node is tried: long enough for
 /// a TLS handshake across a data centre, short enough that a node behind a black-holed address does not hold a
 /// request for the operating system's connect timeout.

@@ -95,5 +95,5 @@ impl Code {
 }
 
 #[cfg(test)]
-#[path = "code_tests.rs"]
+#[path = "erasure_code_tests.rs"]
 mod tests;

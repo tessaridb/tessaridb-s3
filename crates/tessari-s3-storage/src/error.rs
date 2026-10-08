@@ -40,6 +40,21 @@ pub enum Error {
     /// The operating system's random source failed, so no unguessable id could be drawn.
     #[error("the random source failed")]
     Randomness,
+    /// The stored layout was written under another erasure code than this node is configured with; the node does
+    /// not reinterpret it.
+    #[error(
+        "the cluster's layout uses {stored_data}+{stored_parity}, this node is configured for {data}+{parity}"
+    )]
+    LayoutMismatch {
+        /// k of the stored layout.
+        stored_data: i64,
+        /// m of the stored layout.
+        stored_parity: i64,
+        /// k configured here.
+        data: u8,
+        /// m configured here.
+        parity: u8,
+    },
     /// A key kept changing under a read that needs two snapshots (a multipart object's record, then its parts);
     /// retryable.
     #[error("the key changed under every read attempt")]
@@ -56,7 +71,8 @@ impl Error {
             | Self::DataIo { .. }
             | Self::Corrupt { .. }
             | Self::NoDataDirectory
-            | Self::Randomness => ErrorCategory::Internal,
+            | Self::Randomness
+            | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
             Self::Contended => ErrorCategory::Conflict,
         }
     }

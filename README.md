@@ -113,6 +113,11 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_RECLAIM_GRACE_SECS` | `86400` | how long a replaced, deleted or abandoned data file is kept before the reclaimer removes it |
 | `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` | `300` | time between reclamation passes |
 | `TESSARIDB_S3_UPLOAD_MAX_AGE_SECS` | `604800` | how long a multipart upload may stay open (from its initiation) before the reaper aborts it; the reaper runs on the reclamation interval |
+| `TESSARIDB_S3_ERASURE` | unset (a node on its own) | the erasure code `k+m` this node's cluster writes objects with (k, m ≥ 1, k + m ≤ 16); setting it makes the node a cluster member and requires the four settings below and `TESSARIDB_S3_DATA_DIR` |
+| `TESSARIDB_S3_NODE_ID` | — | this node's name in the cluster: 1–63 lowercase letters, digits and inner hyphens |
+| `TESSARIDB_S3_INTERNAL_LISTEN` | — | where the internal shard surface listens (keep it on a private network until it speaks TLS) |
+| `TESSARIDB_S3_INTERNAL_ADVERTISE` | — | `host:port` the other nodes reach that surface at; registered in the metadata on start-up |
+| `TESSARIDB_S3_CLUSTER_SECRET` | — | key for internal request signatures, at least 32 bytes, the same on every node |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the

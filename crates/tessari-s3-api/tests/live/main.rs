@@ -7,6 +7,7 @@
 #![cfg(test)]
 
 mod buckets;
+mod cluster;
 mod complete;
 mod copy;
 mod copy_part;

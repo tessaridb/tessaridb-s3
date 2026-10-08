@@ -2,6 +2,7 @@
 
 mod answers;
 pub mod buckets;
+pub mod cluster;
 pub mod data;
 mod error;
 pub mod multipart;

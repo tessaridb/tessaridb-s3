@@ -4,7 +4,7 @@ use super::S3Config;
 use crate::Error;
 use crate::tessaridb::Replication;
 
-fn load(vars: &[(&str, &str)]) -> crate::Result<S3Config> {
+pub(crate) fn load(vars: &[(&str, &str)]) -> crate::Result<S3Config> {
     let map: HashMap<String, String> = vars
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -12,7 +12,7 @@ fn load(vars: &[(&str, &str)]) -> crate::Result<S3Config> {
     S3Config::from_lookup(|key| map.get(key).cloned())
 }
 
-const CREDENTIALS: [(&str, &str); 5] = [
+pub(crate) const CREDENTIALS: [(&str, &str); 5] = [
     ("TESSARIDB_S3_ROOT_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
     (
         "TESSARIDB_S3_ROOT_SECRET_KEY",
@@ -182,7 +182,7 @@ fn an_upload_lives_a_week_unless_configured_and_never_zero_seconds() {
     }
 }
 
-fn with(vars: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+pub(crate) fn with(vars: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
     let mut all = CREDENTIALS.to_vec();
     for (key, value) in vars {
         all.retain(|(k, _)| k != key);

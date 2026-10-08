@@ -16,6 +16,8 @@ use crate::Result;
 /// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
 /// removal queues its file. Each open upload also has a `pending` record whose id orders the uploads as
 /// ListMultipartUploads lists them; whatever deletes the upload drops it in the same transaction (`upload_closed`).
+/// The cluster's topology lives here too: `s3_nodes` (one record per node, refreshed as it registers) and `layouts`
+/// (one record per layout version, created once and never rewritten).
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -53,6 +55,9 @@ DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
 DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
 DEFINE EVENT IF NOT EXISTS upload_closed ON uploads FOR DELETE WHEN $before.position != NONE \
 THEN { LET $listed = $before.position; DELETE pending:$listed; };
+DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUIRED, seen datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS layouts (\
+ version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
 COMMIT;
 ";
 
