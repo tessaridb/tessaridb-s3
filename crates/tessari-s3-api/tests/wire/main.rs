@@ -3,6 +3,7 @@
 
 #![cfg(test)]
 
+mod console;
 mod erasure;
 mod internal;
 mod operations;

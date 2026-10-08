@@ -3,11 +3,13 @@
 
 mod cluster_config;
 mod config;
+mod console_config;
 mod error;
 pub mod peer;
 pub mod tessaridb;
 pub mod tls;
 
 pub use config::{ClusterSettings, S3Config};
+pub use console_config::ConsoleSettings;
 pub use error::{Error, Result};
 pub use tls::InternalTls;

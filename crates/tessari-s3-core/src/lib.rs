@@ -3,6 +3,7 @@
 
 pub mod auth;
 pub mod buckets;
+pub mod console;
 pub mod dispatch;
 pub mod erasure;
 mod error;

@@ -143,6 +143,20 @@ pub const REAP_BATCH: usize = 1000;
 /// Seconds between healing passes on a cluster member, when `TESSARIDB_S3_HEAL_INTERVAL_SECS` is unset.
 pub const DEFAULT_HEAL_INTERVAL_SECS: u64 = 60;
 
+/// Seconds a console session lasts from sign-in; there is no refresh — the operator signs in again.
+pub const CONSOLE_SESSION_SECS: i64 = 3_600;
+
+/// The cookie the console session travels in.
+pub const CONSOLE_SESSION_COOKIE: &str = "tessaridb_s3_console";
+
+/// Sign-in attempts accepted per client address per minute, when `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` is unset:
+/// enough for an operator who mistypes, far too few to guess a secret.
+pub const DEFAULT_CONSOLE_SIGN_INS_PER_MINUTE: usize = 10;
+
+/// Console API requests accepted per signed-in key per minute, when `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` is
+/// unset: a page refreshing every few seconds across several tabs fits well under it.
+pub const DEFAULT_CONSOLE_REQUESTS_PER_MINUTE: usize = 600;
+
 /// Data ids one healing pass looks at.
 pub const HEAL_BATCH: usize = 100;
 

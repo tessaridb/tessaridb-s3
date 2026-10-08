@@ -122,6 +122,10 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_CLUSTER_SECRET` | — | key for internal request signatures, at least 32 bytes, the same on every node |
 | `TESSARIDB_S3_INTERNAL_TLS_CERT` / `_KEY` / `_CA` | unset (plain) | the internal surface over mutual TLS: this node's certificate chain (PEM, valid for the host it advertises), its private key, and the cluster's certificate authority — all three or none. Every connection must then present a certificate that authority issued before a request is read, and every call to another node checks its certificate the same way; TLS 1.2 and 1.3 only |
 | `TESSARIDB_S3_HEAL_INTERVAL_SECS` | `60` | time between healing passes on a cluster member: each rewrites the missing or damaged shards of objects listed for healing |
+| `TESSARIDB_S3_CONSOLE_LISTEN` | unset (no console) | where the operator console listens, on its own address apart from the S3 API. Signing in takes the root access key and secret and gives a one-hour session cookie (HttpOnly, SameSite=Strict); every other console route needs it |
+| `TESSARIDB_S3_CONSOLE_TLS_CERT` / `_KEY` | unset (plain) | the console over TLS: its certificate chain and private key (PEM), both or neither. Without them the root secret crosses the network in the clear when an operator signs in, so keep the console on a private address; the node says so when it starts |
+| `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` | `10` | sign-in attempts accepted per client address per minute; the limit is checked before the credential |
+| `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` | `600` | console requests accepted per signed-in key per minute |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the

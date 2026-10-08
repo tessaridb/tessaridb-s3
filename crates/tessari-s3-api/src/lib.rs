@@ -1,12 +1,15 @@
 //! The S3 HTTP surface: request parsing, operation dispatch, authentication, and the error envelope.
 
+mod console;
 mod error;
 mod internal;
 mod pipeline;
 pub mod routes;
+mod serve;
 mod state;
 mod xml;
 
+pub use console::{ConsoleState, console_router, serve_console};
 pub use error::{Error, Result};
 pub use internal::{InternalState, internal_router, serve_internal};
 pub use state::{ApiState, Clock};

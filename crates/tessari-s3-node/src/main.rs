@@ -5,6 +5,7 @@
 //! internal shard listener — then serving until SIGINT or SIGTERM, after which in-flight
 //! requests and the daemons' current runs get the configured grace period before the process exits.
 
+mod console;
 mod internal;
 
 use std::time::Duration;
@@ -73,6 +74,7 @@ async fn main() -> anyhow::Result<()> {
     );
     daemons.spawn(run(Arc::new(reaper), stop_rx.clone()));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
+    let console = console::surface(&config, &storage, stop_rx.clone()).await?;
     let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
     let mut server_stop = stop_rx;
@@ -80,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
         // A closed sender also means stop: the select below has returned.
         let _closed = server_stop.changed().await;
     });
-    // Both surfaces stop on the same signal; either one failing ends the process.
+    // Every surface stops on the same signal; any one failing ends the process.
     let server = async move {
         let internal = async move {
             match internal {
@@ -88,7 +90,13 @@ async fn main() -> anyhow::Result<()> {
                 None => Ok(()),
             }
         };
-        tokio::try_join!(s3.into_future(), internal).map(|_| ())
+        let console = async move {
+            match console {
+                Some(console) => console.await,
+                None => Ok(()),
+            }
+        };
+        tokio::try_join!(s3.into_future(), internal, console).map(|_| ())
     };
     let mut server = std::pin::pin!(server);
     tokio::select! {

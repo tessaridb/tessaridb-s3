@@ -132,3 +132,51 @@ pub fn client_config(tls: &InternalTls) -> Result<ClientConfig> {
         .with_client_auth_cert(certificates(&tls.certificate_pem, CERT)?, private_key(tls)?)
         .map_err(|_| invalid(KEY, "does not belong to the certificate"))
 }
+
+/// The console's TLS material, read at start: its certificate chain and private key. Browsers verify the chain;
+/// there is no client certificate. The key is never printed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ConsoleTls {
+    /// The console's certificate chain, PEM.
+    pub certificate_pem: Vec<u8>,
+    key_pem: Vec<u8>,
+}
+
+impl ConsoleTls {
+    /// The material as read.
+    #[must_use]
+    pub const fn new(certificate_pem: Vec<u8>, key_pem: Vec<u8>) -> Self {
+        Self {
+            certificate_pem,
+            key_pem,
+        }
+    }
+}
+
+impl std::fmt::Debug for ConsoleTls {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConsoleTls")
+            .field("certificate_pem", &self.certificate_pem.len())
+            .field("key_pem", &"<redacted>")
+            .finish()
+    }
+}
+
+const CONSOLE_CERT: &str = "TESSARIDB_S3_CONSOLE_TLS_CERT";
+const CONSOLE_KEY: &str = "TESSARIDB_S3_CONSOLE_TLS_KEY";
+
+/// The console's side of TLS: its certificate, TLS 1.2 and 1.3 only, no client certificate asked for.
+///
+/// # Errors
+/// [`Error::InvalidConfig`] naming the file whose contents cannot be used.
+pub fn console_server_config(tls: &ConsoleTls) -> Result<Arc<ServerConfig>> {
+    let key = PrivateKeyDer::from_pem_slice(&tls.key_pem)
+        .map_err(|_| invalid(CONSOLE_KEY, "not a PEM private key"))?;
+    let config = ServerConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .map_err(|_| invalid(CONSOLE_CERT, "no protocol version both sides speak"))?
+        .with_no_client_auth()
+        .with_single_cert(certificates(&tls.certificate_pem, CONSOLE_CERT)?, key)
+        .map_err(|_| invalid(CONSOLE_KEY, "does not belong to the certificate"))?;
+    Ok(Arc::new(config))
+}

@@ -30,6 +30,11 @@ section records which TessariDB version its metadata runs on.
   directory on start-up, and a write that stops part way (a client gone, a healing pass stopped) removes its own.
 - A committed object whose data is missing is reported as damaged (`500 InternalError`, logged as corruption)
   rather than as a drive error.
+- The operator console's API (first part): with `TESSARIDB_S3_CONSOLE_LISTEN` set, a node serves a console on
+  its own address — in the clear or over TLS (`TESSARIDB_S3_CONSOLE_TLS_CERT`, `_KEY`). Signing in
+  (`POST /api/v1/session`) takes the root access key and secret and answers a one-hour signed session cookie that
+  any node of the cluster accepts; every other route answers `401` without it. Sign-ins are limited per client
+  address and requests per signed-in key (`429`). `GET /api/v1/status` names the node, its build and its code.
 - One node at a time heals or reclaims an object: each takes an expiring claim on the object's data in TessariDB
   first, so healers no longer duplicate work and a heal can no longer write a shard back behind a reclaim. Shard
   bytes left with no record of their object (older than the reclamation grace) are swept by the reclaimer.
