@@ -19,6 +19,12 @@ impl SpaceName {
         valid.then(|| Self(name.to_owned()))
     }
 
+    /// The space buckets from before spaces existed belong to, and the one the root credential creates in.
+    #[must_use]
+    pub fn default_space() -> Self {
+        Self(tessari_s3_constants::DEFAULT_SPACE.to_owned())
+    }
+
     /// The name as text.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -70,6 +76,26 @@ pub enum Principal {
     Root,
     /// A user of a space.
     User(UserPrincipal),
+}
+
+impl Principal {
+    /// Which buckets a listing may return to this principal; storage applies it in the query, never afterwards.
+    #[must_use]
+    pub fn visible(&self) -> Visible {
+        match self {
+            Self::User(user) if !user.operator => Visible::Space(user.space.clone()),
+            Self::Root | Self::User(_) => Visible::All,
+        }
+    }
+}
+
+/// The part of the store a principal can list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Visible {
+    /// Every space: root and operators.
+    All,
+    /// One space's buckets.
+    Space(SpaceName),
 }
 
 /// A bucket as the evaluator needs it.

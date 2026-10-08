@@ -7,7 +7,9 @@ mod model;
 mod operations;
 
 pub use decide::{Decision, Denied, authorize};
-pub use model::{Access, Action, BucketResource, Principal, Role, SpaceName, UserPrincipal};
+pub use model::{
+    Access, Action, BucketResource, Principal, Role, SpaceName, UserPrincipal, Visible,
+};
 pub use operations::{Need, Required, required};
 
 #[cfg(test)]

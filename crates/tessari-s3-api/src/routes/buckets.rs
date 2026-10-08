@@ -2,6 +2,7 @@
 
 use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode, header};
+use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_storage::buckets::{Bucket, Created, Deleted};
 use tessari_s3_types::ErrorCode;
 
@@ -26,7 +27,15 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
             format!("this server creates buckets in {region} only"),
         ));
     }
-    match call.state.storage().buckets().create(name, region).await? {
+    // Until signed-in users exist the caller is the root credential: its buckets belong to the default space.
+    let space = SpaceName::default_space();
+    match call
+        .state
+        .storage()
+        .buckets()
+        .create(name, region, &space, None)
+        .await?
+    {
         Created::Created(_) => {
             let mut response = empty_response(StatusCode::OK);
             if let Ok(location) = HeaderValue::from_str(&format!("/{}", name.as_str())) {
@@ -108,7 +117,7 @@ pub(crate) async fn list(call: &Call<'_>) -> Result<Response<Body>> {
         None => None,
         Some(token) => Some(decode_token(token)?),
     };
-    let buckets = call.state.storage().buckets().list().await?;
+    let buckets = call.state.storage().buckets().list(&Visible::All).await?;
     let mut page: Vec<&Bucket> = buckets
         .iter()
         .filter(|b| b.name.as_str().starts_with(prefix))

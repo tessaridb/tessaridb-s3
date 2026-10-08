@@ -245,3 +245,17 @@ fn nothing_crosses_from_one_space_into_another() {
         assert_eq!(decide(admin.clone(), &action), DENY_SPACE, "{action:?}");
     }
 }
+
+#[test]
+fn a_listing_sees_one_space_unless_the_caller_operates() {
+    use super::Visible;
+    assert_eq!(Principal::Root.visible(), Visible::All);
+    let member = user("ann", "alpha", Role::SpaceAdmin);
+    assert_eq!(
+        Principal::User(member.clone()).visible(),
+        Visible::Space(space("alpha"))
+    );
+    let mut operator = member;
+    operator.operator = true;
+    assert_eq!(Principal::User(operator).visible(), Visible::All);
+}

@@ -1,5 +1,6 @@
 //! A bucket as the rest of the server sees it.
 
+use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
@@ -16,6 +17,22 @@ pub struct Bucket {
     pub region: String,
     /// Which creation of this name it is.
     pub incarnation: [u8; 16],
+    /// The space that owns it.
+    pub space: SpaceName,
+    /// The user who created it; `None` for the root credential.
+    pub creator: Option<String>,
+}
+
+impl Bucket {
+    /// The bucket as the access evaluator sees it.
+    #[must_use]
+    pub fn resource(&self) -> BucketResource {
+        BucketResource {
+            name: self.name.as_str().to_owned(),
+            space: self.space.clone(),
+            creator: self.creator.clone(),
+        }
+    }
 }
 
 impl TryFrom<BucketEntity> for Bucket {
@@ -26,12 +43,18 @@ impl TryFrom<BucketEntity> for Bucket {
             record: "bucket",
             reason: "name is not a valid bucket name",
         })?;
+        let space = SpaceName::new(&entity.space_name).ok_or(Error::Malformed {
+            record: "bucket",
+            reason: "space_name is not a valid space name",
+        })?;
         let (seconds, nanos) = entity.created;
         Ok(Self {
             name,
             created: Timestamp { seconds, nanos },
             region: entity.region,
             incarnation: entity.incarnation,
+            space,
+            creator: entity.creator,
         })
     }
 }

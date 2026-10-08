@@ -29,6 +29,7 @@ mod reclaim;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod signer;
+mod spaces;
 mod uploads;
 mod usage;
 

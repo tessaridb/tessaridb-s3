@@ -1,5 +1,6 @@
 //! Bucket rules: creating, finding, listing and removing buckets.
 
+use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_types::BucketName;
 
 use super::model::Bucket;
@@ -40,12 +41,18 @@ impl BucketService {
         Self { repository }
     }
 
-    /// Creates `name` in `region`.
+    /// Creates `name` in `region`, owned by `space` and made by `creator` (`None` for the root credential).
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
-    pub async fn create(&self, name: &BucketName, region: &str) -> Result<Created> {
-        match self.repository.insert(name, region).await? {
+    pub async fn create(
+        &self,
+        name: &BucketName,
+        region: &str,
+        space: &SpaceName,
+        creator: Option<&str>,
+    ) -> Result<Created> {
+        match self.repository.insert(name, region, space, creator).await? {
             Inserted::Created(entity) => Ok(Created::Created(Bucket::try_from(entity)?)),
             Inserted::Exists => Ok(Created::AlreadyOwned),
         }
@@ -63,14 +70,14 @@ impl BucketService {
             .transpose()
     }
 
-    /// Every bucket, in byte order of their names.
+    /// The buckets `visible` covers, in byte order of their names.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
-    pub async fn list(&self) -> Result<Vec<Bucket>> {
+    pub async fn list(&self, visible: &Visible) -> Result<Vec<Bucket>> {
         let mut buckets: Vec<Bucket> = self
             .repository
-            .list()
+            .list(visible)
             .await?
             .into_iter()
             .map(Bucket::try_from)

@@ -15,6 +15,10 @@ pub struct BucketEntity {
     pub region: String,
     /// A fresh uuid per creation, so a bucket deleted and created again is not the same bucket.
     pub incarnation: [u8; 16],
+    /// The space that owns the bucket.
+    pub space_name: String,
+    /// The user who created it; absent for the root credential's buckets.
+    pub creator: Option<String>,
 }
 
 impl BucketEntity {
@@ -46,11 +50,22 @@ impl BucketEntity {
             Some(Value::Uuid(bytes)) => *bytes,
             _ => return Err(malformed("incarnation")),
         };
+        let space_name = match fields.get("space_name") {
+            Some(Value::String(space)) => space.clone(),
+            _ => return Err(malformed("space_name")),
+        };
+        let creator = match fields.get("creator") {
+            None | Some(Value::None) => None,
+            Some(Value::String(creator)) => Some(creator.clone()),
+            Some(_) => return Err(malformed("creator")),
+        };
         Ok(Self {
             name,
             created,
             region,
             incarnation,
+            space_name,
+            creator,
         })
     }
 }

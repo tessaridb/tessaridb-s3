@@ -24,12 +24,17 @@ use crate::Result;
 /// the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
+/// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
+/// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
 BEGIN;
 DEFINE TABLE IF NOT EXISTS buckets (\
  name string REQUIRED, created datetime REQUIRED, region string REQUIRED, incarnation uuid REQUIRED);
+DEFINE FIELD IF NOT EXISTS space_name ON buckets TYPE string DEFAULT 'default';
+DEFINE FIELD IF NOT EXISTS creator ON buckets TYPE string;
+DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
@@ -118,5 +123,46 @@ async fn apply_once(pool: &MetaPool) -> Result<()> {
     );
     pool.run_unscoped(&tenancy).await?;
     pool.run(TABLES, Vec::new()).await?;
+    fill_spaces(pool).await
+}
+
+/// Gives every bucket record without a `space_name` the default space. A field's `DEFAULT` fills only what is written
+/// after it is declared, and an index on the field holds no entry for a record lacking it — so the records are found
+/// by reading every bucket (a scan; buckets are few) and each is written by its own identity, conditionally, so a
+/// bucket created or moved meanwhile is left alone.
+async fn fill_spaces(pool: &MetaPool) -> Result<()> {
+    use tessari_s3_infrastructure::tessaridb::{Answer, Value};
+    let answers = pool
+        .run("SELECT name, space_name FROM buckets;", Vec::new())
+        .await?;
+    let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+        return Err(crate::Error::Malformed {
+            record: "bucket",
+            reason: "a listing answered no records",
+        });
+    };
+    for (_, value) in records {
+        let Value::Object(fields) = value else {
+            continue;
+        };
+        if fields.contains_key("space_name") {
+            continue;
+        }
+        let Some(Value::String(name)) = fields.get("name") else {
+            continue;
+        };
+        let parameters = vec![
+            ("name".to_owned(), Value::String(name.clone())),
+            (
+                "space".to_owned(),
+                Value::String(tessari_s3_constants::DEFAULT_SPACE.to_owned()),
+            ),
+        ];
+        pool.run(
+            "UPDATE buckets:$name SET space_name = $space WHERE space_name = NONE;",
+            parameters,
+        )
+        .await?;
+    }
     Ok(())
 }

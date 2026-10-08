@@ -7,6 +7,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
 use tessari_s3_storage::buckets::{Created, Deleted};
@@ -40,7 +41,7 @@ pub(super) fn bucket_name(name: &str) -> Result<BucketName, ConsoleError> {
 }
 
 pub(super) async fn list(State(state): State<ConsoleState>) -> Result<Json<Buckets>, ConsoleError> {
-    let buckets = state.storage().buckets().list().await?;
+    let buckets = state.storage().buckets().list(&Visible::All).await?;
     Ok(Json(Buckets {
         buckets: buckets
             .into_iter()
@@ -79,7 +80,7 @@ pub(super) async fn create(
     let created = state
         .storage()
         .buckets()
-        .create(&name, state.region())
+        .create(&name, state.region(), &SpaceName::default_space(), None)
         .await?;
     let outcome = match created {
         Created::Created(_) => "done",

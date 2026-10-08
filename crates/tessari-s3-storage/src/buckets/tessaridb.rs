@@ -1,5 +1,6 @@
 //! Buckets in TessariDB: one `buckets` record per bucket, id = the bucket name; every value is bound.
 
+use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, RefusalClass, Value};
 use tessari_s3_types::BucketName;
 
@@ -44,11 +45,20 @@ fn single(answers: Vec<Answer>) -> Result<Option<Value>> {
 }
 
 impl BucketRepository for TessariBuckets {
-    async fn insert(&self, name: &BucketName, region: &str) -> Result<Inserted> {
+    async fn insert(
+        &self,
+        name: &BucketName,
+        region: &str,
+        space: &SpaceName,
+        creator: Option<&str>,
+    ) -> Result<Inserted> {
         let mut parameters = name_param(name);
         parameters.push(("region".to_owned(), Value::String(region.to_owned())));
+        parameters.push(("space".to_owned(), Value::String(space.as_str().to_owned())));
+        let creator = creator.map_or(Value::None, |creator| Value::String(creator.to_owned()));
+        parameters.push(("creator".to_owned(), creator));
         let script = "CREATE buckets:$name = { name: $name, created: time::now(), region: $region, \
-                      incarnation: rand::uuid() } RETURN AFTER;";
+                      incarnation: rand::uuid(), space_name: $space, creator: $creator } RETURN AFTER;";
         match self.pool.run(script, parameters).await {
             Ok(answers) => match single(answers)? {
                 Some(value) => Ok(Inserted::Created(BucketEntity::from_value(&value)?)),
@@ -72,8 +82,20 @@ impl BucketRepository for TessariBuckets {
             .transpose()
     }
 
-    async fn list(&self) -> Result<Vec<BucketEntity>> {
-        let answers = self.pool.run("SELECT * FROM buckets;", Vec::new()).await?;
+    async fn list(&self, visible: &Visible) -> Result<Vec<BucketEntity>> {
+        let answers = match visible {
+            Visible::All => self.pool.run("SELECT * FROM buckets;", Vec::new()).await?,
+            Visible::Space(space) => {
+                let parameters =
+                    vec![("space".to_owned(), Value::String(space.as_str().to_owned()))];
+                self.pool
+                    .run(
+                        "SELECT * FROM buckets WHERE space_name = $space USING INDEX by_space;",
+                        parameters,
+                    )
+                    .await?
+            }
+        };
         match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records
                 .iter()

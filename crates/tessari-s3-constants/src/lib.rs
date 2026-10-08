@@ -241,3 +241,6 @@ pub const LIST_PARTS_MAX: usize = 1000;
 
 /// Most uploads (and common prefixes) one ListMultipartUploads page returns.
 pub const LIST_UPLOADS_MAX: usize = 1000;
+
+/// The space every bucket created before spaces existed belongs to, and the one the root credential creates in.
+pub const DEFAULT_SPACE: &str = "default";
