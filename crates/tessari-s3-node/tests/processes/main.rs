@@ -22,7 +22,7 @@ mod s3;
 
 use std::time::{Duration, Instant};
 
-use requests::call;
+use requests::{call, fetch};
 use s3::{Cluster, Meta, count, shard_files};
 
 /// How long the restarted cluster may take to heal: passes run every second.
@@ -115,5 +115,53 @@ async fn six_processes_spread_an_object_and_hold_the_write_quorum() {
             2,
             "the first object's shard and the healed one"
         );
+    }
+}
+
+/// 4 KiB: a small object, which takes the erasure path like any other (ADR-0008).
+fn small(seed: u32) -> Vec<u8> {
+    (0..4096_u32)
+        .map(|at| u8::try_from(at.wrapping_add(seed) % 251).unwrap_or(0))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn small_objects_survive_a_node_killed_partway_through_a_run_of_writes() {
+    let mut cluster = Cluster::start(meta_from_env()).await;
+    let front = 0;
+    assert_eq!(
+        call(&cluster.nodes[front], "PUT", "/small", b"").await.0,
+        200
+    );
+    let mut acknowledged = Vec::new();
+    for seed in 0..40_u32 {
+        if seed == 20 {
+            // A shard holder dies between two writes of the run; the rest are written with one shard missing.
+            cluster.nodes[3].child.kill().await.expect("killed");
+        }
+        let (status, body) = call(
+            &cluster.nodes[front],
+            "PUT",
+            &format!("/small/k{seed}"),
+            &small(seed),
+        )
+        .await;
+        assert!(status == 200 || status == 503, "{status}: {body}");
+        if status == 200 {
+            acknowledged.push(seed);
+        }
+    }
+    assert_eq!(acknowledged.len(), 40, "one node down is within the parity");
+    assert!(
+        count(&cluster.meta, "heals").await >= 20,
+        "every write after the kill is listed for healing"
+    );
+    for seed in acknowledged {
+        let (status, read) = fetch(&cluster.nodes[front], &format!("/small/k{seed}"))
+            .await
+            .expect("the front node answers");
+        assert_eq!(status, 200, "k{seed}");
+        assert!(read == small(seed), "k{seed} reads back whole");
     }
 }

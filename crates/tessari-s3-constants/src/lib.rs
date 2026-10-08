@@ -247,3 +247,6 @@ pub const LIST_UPLOADS_MAX: usize = 1000;
 
 /// The space every bucket created before spaces existed belongs to, and the one the root credential creates in.
 pub const DEFAULT_SPACE: &str = "default";
+
+/// Object records still holding their bytes (a store from before ADR-0008) converted per batch at start.
+pub const INLINE_CONVERT_BATCH: usize = 100;

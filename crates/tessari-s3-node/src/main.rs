@@ -43,6 +43,15 @@ async fn main() -> anyhow::Result<()> {
     // start, rather than answering every request 503.
     storage.prepare().await?;
     tracing::info!(meta = ?config.meta.addresses, namespace = %config.meta.namespace, "metadata schema ready");
+    // A store from before ADR-0008 holds small objects' bytes in their records; they move to data files before the
+    // node serves, and the column goes.
+    let converted = storage.objects().convert_inline().await?;
+    if converted > 0 {
+        tracing::info!(
+            converted,
+            "object bytes moved from the metadata to data files"
+        );
+    }
     if let Some(cluster) = &config.cluster {
         // Registered before serving, so a node is never answering requests the cluster does not know it exists for.
         storage

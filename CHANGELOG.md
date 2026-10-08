@@ -21,7 +21,11 @@ section records which TessariDB version its metadata runs on.
   against the last usage measurement plus the write and refused `InvalidRequest` "bucket quota exceeded". A bucket can
   pass its limit by what is written within one usage interval; an unreadable limit or measurement refuses the write.
 - Real occupancy: the usage pass also counts the bytes each bucket holds on the drives (with the erasure overhead on
-  a cluster) and the bytes held inline in the metadata; the console shows both.
+  a cluster); the console shows them beside the logical size.
+- No object bytes in the metadata: every object, however small, is a data file on the drive (or erasure-coded shards
+  on a cluster); TessariDB holds sizes, ETags, checksums and where the bytes are. `TESSARIDB_S3_DATA_DIR` is now
+  required. A store written by an earlier build has its small objects moved to data files at start, and the column
+  that held them is dropped, after which the metadata store refuses object bytes in a record.
 - The console for users: sign in with any key (root or a user's); menus, screens and routes follow what that key
   may do — the cluster view only for those allowed to see it; spaces, users, keys, grants and quotas for operators and
   space administrators (their own space only).
@@ -36,7 +40,7 @@ section records which TessariDB version its metadata runs on.
   surface on `TESSARIDB_S3_INTERNAL_LISTEN` where other nodes store, read (whole or by block range) and remove its
   shards. Each request is signed with the cluster secret and refused otherwise; a shard is kept only at exactly the
   length declared and is durable before the write is answered.
-- Erasure-coded writes: on a cluster member every object or part above 128 KiB is cut into stripes and written as
+- Erasure-coded writes: on a cluster member every object or part is cut into stripes and written as
   k + m shards, one per node of the layout (the order rotated per object by a hash keyed with the cluster secret).
   A write is acknowledged only once the write quorum of shards is durable (k, or k + 1 when k = m), otherwise it is
   answered `503 ServiceUnavailable` and its shards are reclaimed; a write missing some shards is listed for healing.
@@ -112,15 +116,14 @@ section records which TessariDB version its metadata runs on.
   this server's region), HeadBucket, DeleteBucket (refused while it holds
   objects), ListBuckets (prefix, region filter and pages) and GetBucketLocation.
   The metadata schema is applied on start-up.
-- Objects up to 128 KiB, stored with their metadata in TessariDB: PutObject,
-  GetObject, HeadObject and DeleteObject. The MD5 ETag; Content-MD5 and the
+- PutObject, GetObject, HeadObject and DeleteObject, with the metadata in TessariDB. The MD5 ETag; Content-MD5 and the
   CRC32, CRC32C, CRC64NVME, SHA1 and SHA256 checksums validated and stored, with
   CRC64NVME computed when none is sent; aws-chunked bodies with their signed or
   unsigned trailers; If-None-Match `*` and If-Match as one compare-and-set;
   conditional reads, a single Range and the `response-*` overrides. Headers for
   features not implemented here (tagging, encryption, Object Lock, ACLs other
   than owner-only) are refused rather than ignored.
-- Objects above 128 KiB, up to 5 GiB per PUT (`EntityTooLarge` beyond), in data
+- Objects up to 5 GiB per PUT (`EntityTooLarge` beyond), in data
   files under `TESSARIDB_S3_DATA_DIR`: the body streams to disk one 1 MiB block
   at a time with a BLAKE3 hash per block, is synced and renamed into place before
   the object is committed, and every block is verified when it is read — a
@@ -167,7 +170,7 @@ section records which TessariDB version its metadata runs on.
   within a key, by initiation; paged by `key-marker` and `upload-id-marker`,
   rolled up at a delimiter (a CommonPrefix counts once), `encoding-type=url`.
   An upload that completes or is aborted leaves the listing in the same commit.
-- CopyObject: up to 5 GiB, any source (inline, data file or multipart) becomes a
+- CopyObject: up to 5 GiB, any source (a data file or multipart) becomes a
   single-part object with its own bytes, an MD5 ETag and a checksum recomputed
   over the copy and checked against the source's; `x-amz-metadata-directive`
   COPY or REPLACE, the copy-source conditions (412 when one does not hold), the

@@ -9,6 +9,8 @@ use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
 use crate::answers::{first_record, incarnation_of};
 use crate::{Error, Result};
 
+#[path = "tessaridb_convert.rs"]
+mod convert;
 #[path = "tessaridb_page.rs"]
 mod page;
 #[path = "tessaridb_parts.rs"]
