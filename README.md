@@ -130,6 +130,9 @@ TESSARIDB_S3_TEST_META=127.0.0.1:9080 TESSARIDB_S3_TEST_META_USER=… TESSARIDB_
   cargo test -p tessari-s3-api --test live -- --ignored
 ```
 
+With the same variables, `cargo test -p tessari-s3-node --test processes -- --ignored`
+starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them.
+
 ## Branches
 
 `dev` is where development happens. `main` will carry releases and move only by

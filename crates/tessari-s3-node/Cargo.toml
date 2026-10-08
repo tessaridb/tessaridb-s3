@@ -21,5 +21,13 @@ tokio = { workspace = true, features = ["net", "time", "sync"] }
 tracing.workspace = true
 anyhow.workspace = true
 
+[dev-dependencies]
+tessari-s3-types.workspace = true
+tokio = { workspace = true, features = ["process", "net", "time"] }
+reqwest.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+
 [lints]
 workspace = true
