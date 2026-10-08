@@ -1,6 +1,6 @@
 use tessari_s3_types::{IamKey, SecretKey};
 
-use super::{Binding, Sealed, Sealer};
+use super::{Binding, ScopeBinding, Sealed, Sealer};
 use crate::Error;
 
 const SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -14,6 +14,7 @@ const fn binding() -> Binding<'static> {
         key_id: "TSAAAAAAAAAAAAAAAAAA",
         user: "ann",
         space: "alpha",
+        scope: None,
     }
 }
 
@@ -139,4 +140,49 @@ fn everything_stored_but_the_root_opens_nothing() {
     let mut attacker = sealer("b2");
     attacker.kek_id = sealed.kek_id.clone();
     assert!(refused(&attacker, &sealed, binding()));
+}
+
+const SCOPE: ScopeBinding<'static> = ScopeBinding {
+    bucket: "media",
+    key: "in/a.jpg",
+    expires: 1_800_000_000,
+};
+
+#[test]
+fn a_one_key_secret_opens_only_under_its_own_scope() {
+    let sealer = sealer("a1");
+    let scoped = Binding {
+        scope: Some(SCOPE),
+        ..binding()
+    };
+    let sealed = sealer.seal(&secret(), scoped).expect("sealed");
+    assert_eq!(
+        sealer.open(&sealed, scoped).expect("opens").expose(),
+        SECRET
+    );
+    // A backend writer who strips the scope must not get a full key of the user.
+    assert!(refused(&sealer, &sealed, binding()), "scope stripped");
+    for other in [
+        ScopeBinding {
+            bucket: "photos",
+            ..SCOPE
+        },
+        ScopeBinding {
+            key: "in/b.jpg",
+            ..SCOPE
+        },
+        ScopeBinding {
+            expires: 1_800_000_001,
+            ..SCOPE
+        },
+    ] {
+        let widened = Binding {
+            scope: Some(other),
+            ..binding()
+        };
+        assert!(refused(&sealer, &sealed, widened), "{other:?}");
+    }
+    // Nor does a full key open as a scoped one.
+    let full = sealer.seal(&secret(), binding()).expect("sealed");
+    assert!(refused(&sealer, &full, scoped), "full key read as scoped");
 }

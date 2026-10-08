@@ -1,7 +1,7 @@
 //! Users as the rest of the server sees them, what creating one takes, and what issuing or resolving a key answers.
 
 use tessari_s3_core::authz::{Role, SpaceName, UserName};
-use tessari_s3_types::{SecretKey, Timestamp};
+use tessari_s3_types::{BucketName, ObjectKey, SecretKey, Timestamp};
 
 use super::entity::UserEntity;
 use crate::{Error, Result};
@@ -61,13 +61,26 @@ pub struct IssuedKey {
     pub secret: SecretKey,
 }
 
+/// What a one-key credential may do: upload one key of one bucket, until it expires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyScope {
+    /// The bucket it may write.
+    pub bucket: BucketName,
+    /// The one key it may write.
+    pub key: ObjectKey,
+    /// When it stops working, in whole seconds since the epoch.
+    pub expires: i64,
+}
+
 /// A live key's user and secret, for verifying a request it signed. Not `Clone`, for the same reason.
 #[derive(Debug)]
 pub struct Resolved {
-    /// The user holding the key.
+    /// The user holding the key — for a one-key credential, the user who issued it.
     pub user: User,
     /// The key's secret.
     pub secret: SecretKey,
+    /// A one-key credential's scope; `None` for a user's full key.
+    pub scope: Option<KeyScope>,
 }
 
 impl TryFrom<UserEntity> for User {

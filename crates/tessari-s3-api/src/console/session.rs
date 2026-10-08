@@ -119,6 +119,8 @@ pub(super) struct Capabilities {
     administer: bool,
     /// The cluster view.
     view_cluster: bool,
+    /// Issuing one-key upload credentials: a user's, for the buckets it may write; never root's.
+    issue_upload_keys: bool,
 }
 
 pub(super) async fn capabilities(
@@ -129,12 +131,14 @@ pub(super) async fn capabilities(
     let administer = match &principal {
         Principal::Root => true,
         Principal::User(user) => may(&Action::ManageSpace(user.space.clone())),
+        Principal::Upload(_) => false,
     };
     Json(Capabilities {
         access_key_id: session.key_id,
         operate: may(&Action::Operate),
         administer,
         view_cluster: may(&Action::ViewCluster),
+        issue_upload_keys: matches!(principal, Principal::User(_)),
     })
 }
 

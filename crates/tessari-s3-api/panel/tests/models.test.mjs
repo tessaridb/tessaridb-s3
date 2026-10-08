@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readBuckets, readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
+import { readBuckets, readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false }, drive: own });
@@ -60,9 +60,11 @@ test("an issued key carries its id and its secret, both as text", () => {
 });
 
 test("the session says what the key may do, each as a yes or no", () => {
-  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false };
+  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false, issue_upload_keys: true };
   assert.deepEqual(readCapabilities(may), may);
   assert.equal(readCapabilities({ ...may, operate: "no" }), null);
+  const { issue_upload_keys: _gone, ...older } = may;
+  assert.equal(readCapabilities(older), null, "every capability is always sent");
 });
 
 test("the cluster view reads members, a layout or none, the backlog and the metadata nodes", () => {
@@ -86,4 +88,11 @@ test("a bucket carries its limits, null where it has none", () => {
   ]);
   assert.equal(readBuckets({ buckets: [{ ...row, max_bytes: -1, max_objects: null }] }), null);
   assert.equal(readBuckets({ buckets: [row] }), null, "the limits are always sent");
+});
+
+test("an upload key carries its id, its secret and when it stops", () => {
+  const key = { access_key_id: "TSABCDEFGHIJKLMNOPQR", secret_access_key: "s".repeat(40), expires: "2026-10-08T11:00:00.000Z" };
+  assert.deepEqual(readUploadKey(key), key);
+  const { expires: _gone, ...withoutExpiry } = key;
+  assert.equal(readUploadKey(withoutExpiry), null);
 });

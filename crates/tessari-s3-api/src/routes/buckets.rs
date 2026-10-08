@@ -31,6 +31,8 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
     let (space, creator) = match call.principal {
         Principal::Root => (SpaceName::default_space(), None),
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
+        // Refused before it creates anything; named for the match, never for the bucket.
+        Principal::Upload(upload) => (upload.parent.space.clone(), None),
     };
     let buckets = call.state.storage().buckets();
     match buckets.create(name, region, &space, creator).await? {

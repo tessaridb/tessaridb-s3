@@ -20,6 +20,7 @@ mod quotas;
 mod session;
 mod spaces;
 mod status;
+mod upload_keys;
 mod usage;
 mod users;
 
@@ -109,7 +110,10 @@ impl ConsoleState {
             self.now(),
         )
         .await?;
-        Ok(live.map(|live| (Principal::User(live.principal), live.secret)))
+        // A one-key upload credential signs nothing in here: it is for uploading its key over S3 and nothing else.
+        Ok(live
+            .filter(|live| live.scope.is_none())
+            .map(|live| (Principal::User(live.principal), live.secret)))
     }
 
     fn secret(&self) -> &[u8] {
@@ -187,6 +191,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))
+        .route(
+            "/api/v1/buckets/{bucket}/upload-keys",
+            post(upload_keys::issue),
+        )
         .route("/api/v1/buckets/{bucket}/objects", get(objects::list))
         .route(
             "/api/v1/buckets/{bucket}/object",

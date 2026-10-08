@@ -27,12 +27,23 @@ pub struct Required {
     pub primary: Need,
     /// Whether the copy source must also be readable, checked against the source's own bucket.
     pub source_read: bool,
+    /// Whether it is a step of uploading the one key it addresses — all a one-key credential may do.
+    pub upload: bool,
 }
 
 const fn on(primary: Need) -> Option<Required> {
     Some(Required {
         primary,
         source_read: false,
+        upload: false,
+    })
+}
+
+const fn uploading(primary: Need) -> Option<Required> {
+    Some(Required {
+        primary,
+        source_read: false,
+        upload: true,
     })
 }
 
@@ -40,6 +51,7 @@ const fn copying() -> Option<Required> {
     Some(Required {
         primary: Need::WriteObject,
         source_read: true,
+        upload: false,
     })
 }
 
@@ -54,18 +66,17 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::GetBucketLocation
         | Operation::ListObjects
         | Operation::ListObjectsV2
-        | Operation::ListMultipartUploads
-        | Operation::ListParts => on(Need::ReadBucket),
+        | Operation::ListMultipartUploads => on(Need::ReadBucket),
+        Operation::ListParts => uploading(Need::ReadBucket),
         Operation::GetObject | Operation::HeadObject | Operation::GetObjectTagging => {
             on(Need::ReadObject)
         }
+        Operation::DeleteObject | Operation::DeleteObjects => on(Need::WriteObject),
         Operation::PutObject
-        | Operation::DeleteObject
-        | Operation::DeleteObjects
         | Operation::CreateMultipartUpload
         | Operation::UploadPart
         | Operation::CompleteMultipartUpload
-        | Operation::AbortMultipartUpload => on(Need::WriteObject),
+        | Operation::AbortMultipartUpload => uploading(Need::WriteObject),
         Operation::CopyObject | Operation::UploadPartCopy => copying(),
         _ => None,
     }

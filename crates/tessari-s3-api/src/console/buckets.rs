@@ -89,6 +89,8 @@ pub(super) async fn create(
     let (space, creator) = match &principal {
         Principal::Root => (SpaceName::default_space(), None),
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
+        // Refused before it creates anything; named for the match, never for the bucket.
+        Principal::Upload(upload) => (upload.parent.space.clone(), None),
     };
     allow(&principal, &Action::CreateBucket(space.clone()))?;
     let created = state

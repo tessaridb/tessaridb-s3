@@ -6,7 +6,7 @@ use tessari_s3_core::authz::{Access, UserName, Visible};
 use tessari_s3_types::BucketName;
 
 use super::entity::{AccessKeyEntity, GrantEntity, UserEntity};
-use super::model::NewUser;
+use super::model::{KeyScope, NewUser};
 use super::sealer::Sealed;
 use crate::Result;
 
@@ -33,12 +33,14 @@ pub(crate) trait UserRepository: Send + Sync {
         name: &UserName,
         disabled: bool,
     ) -> impl Future<Output = Result<()>> + Send;
-    /// Writes a new, enabled access key `id` for `user`; `false` when that id is taken.
+    /// Writes a new, enabled access key `id` for `user` — a one-key credential when `scope` is given, which the store
+    /// then drops at its expiry; `false` when that id is taken.
     fn insert_key(
         &self,
         id: &str,
         user: &UserName,
         sealed: &Sealed,
+        scope: Option<&KeyScope>,
     ) -> impl Future<Output = Result<bool>> + Send;
     /// The record of access key `id`, if any.
     fn get_key(&self, id: &str) -> impl Future<Output = Result<Option<AccessKeyEntity>>> + Send;

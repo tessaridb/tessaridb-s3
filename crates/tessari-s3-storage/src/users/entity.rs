@@ -44,6 +44,12 @@ pub struct AccessKeyEntity {
     pub disabled: bool,
     /// Creation time: seconds and nanoseconds since the epoch.
     pub created: (i64, u32),
+    /// A one-key credential's bucket; absent on a full key, as are the two below.
+    pub scope_bucket: Option<String>,
+    /// A one-key credential's key.
+    pub scope_key: Option<String>,
+    /// A one-key credential's expiry: seconds and nanoseconds since the epoch.
+    pub expires: Option<(i64, u32)>,
 }
 
 /// The stored fields of one grant: a user's access to one bucket.
@@ -110,6 +116,20 @@ impl<'a> Fields<'a> {
             _ => Err(self.malformed(field)),
         }
     }
+
+    fn optional_text(&self, field: &'static str) -> Result<Option<String>> {
+        match self.fields.get(field) {
+            None | Some(Value::None) => Ok(None),
+            Some(_) => self.text(field).map(Some),
+        }
+    }
+
+    fn optional_instant(&self, field: &'static str) -> Result<Option<(i64, u32)>> {
+        match self.fields.get(field) {
+            None | Some(Value::None) => Ok(None),
+            Some(_) => self.instant(field).map(Some),
+        }
+    }
 }
 
 impl UserEntity {
@@ -147,6 +167,9 @@ impl AccessKeyEntity {
             algorithm: fields.text("algorithm")?,
             disabled: fields.flag("disabled")?,
             created: fields.instant("created")?,
+            scope_bucket: fields.optional_text("scope_bucket")?,
+            scope_key: fields.optional_text("scope_key")?,
+            expires: fields.optional_instant("expires")?,
         })
     }
 }

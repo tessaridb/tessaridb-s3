@@ -91,6 +91,18 @@ pub struct UserPrincipal {
     pub grants: BTreeMap<String, Access>,
 }
 
+/// A credential a user issued to upload ONE key of one bucket: it carries its issuer, and its authority is the
+/// issuer's, narrowed to that key — never more than either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UploadPrincipal {
+    /// The user who issued it, resolved afresh like any user; disabling them or taking their grant ends the key.
+    pub parent: UserPrincipal,
+    /// The one bucket it may write, by name.
+    pub bucket: String,
+    /// The one key it may write, compared exactly.
+    pub key: String,
+}
+
 /// Who is asking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Principal {
@@ -98,6 +110,8 @@ pub enum Principal {
     Root,
     /// A user of a space.
     User(UserPrincipal),
+    /// A one-key upload credential.
+    Upload(UploadPrincipal),
 }
 
 impl Principal {
@@ -118,6 +132,12 @@ impl Principal {
                     .collect(),
             },
             Self::Root => Visible::All,
+            // A one-key credential lists nothing: no user is called "", and it is granted no bucket.
+            Self::Upload(upload) => Visible::Reachable {
+                space: upload.parent.space.clone(),
+                user: String::new(),
+                granted: Vec::new(),
+            },
         }
     }
 }
@@ -181,6 +201,13 @@ pub enum Action {
     ReadObject(BucketResource),
     /// Write, overwrite, upload parts to or delete an object of a bucket.
     WriteObject(BucketResource),
+    /// Upload one named key of a bucket: a single PUT or the steps of a multipart upload of it.
+    Upload {
+        /// The bucket written.
+        bucket: BucketResource,
+        /// The key written.
+        key: String,
+    },
     /// See the cluster's members, drives, layout and healing.
     ViewCluster,
     /// Administer a space's users and grants.

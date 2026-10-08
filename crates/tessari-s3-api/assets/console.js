@@ -134,8 +134,18 @@
   function readIssued(v) {
     return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"]) ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] } : null;
   }
+  function readUploadKey(v) {
+    const key = readIssued(v);
+    return key !== null && record(v) && text(v["expires"]) ? { ...key, expires: v["expires"] } : null;
+  }
   function readCapabilities(v) {
-    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) ? { access_key_id: v["access_key_id"], operate: v["operate"], administer: v["administer"], view_cluster: v["view_cluster"] } : null;
+    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) ? {
+      access_key_id: v["access_key_id"],
+      operate: v["operate"],
+      administer: v["administer"],
+      view_cluster: v["view_cluster"],
+      issue_upload_keys: v["issue_upload_keys"]
+    } : null;
   }
   var names = (value) => list(value, (entry) => text(entry) ? entry : null);
   function layout(v) {
@@ -660,6 +670,247 @@
     return form;
   }
 
+  // src/user-actions.ts
+  //! A user row's actions, each opening an inline region under the row: issuing
+  //! a key (its secret is shown here once and never again — the server keeps it
+  //! sealed and will not hand it back), disabling or enabling the user, and
+  //! granting or removing access to one bucket. Every one takes a reason.
+  var COLUMNS = "6";
+  function settle(screen, failure) {
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function open(line, region) {
+    const next2 = line.nextElementSibling;
+    if (next2 instanceof HTMLTableRowElement && next2.classList.contains("asking")) {
+      next2.remove();
+    }
+    const ask = el("tr", { class: "asking" }, el("td", { colspan: COLUMNS }, region));
+    line.after(ask);
+    return () => ask.remove();
+  }
+  function shownOnce(key, done) {
+    const copy = el("button", { type: "button" }, "Copy secret");
+    const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
+    const said = el("p", { class: "hint", "aria-live": "polite" });
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(key.secret_access_key);
+        said.textContent = "Copied.";
+      } catch {
+        said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
+      }
+    });
+    finish.addEventListener("click", done);
+    queueMicrotask(() => copy.focus());
+    return el(
+      "div",
+      { class: "once", role: "alert" },
+      el("p", {}, el("strong", {}, "Store this secret now. "), "It is shown once; the server will not show it again."),
+      el("dl", {}, el("dt", {}, "Access key id"), el("dd", {}, mono(key.access_key_id)), el("dt", {}, "Secret access key"), el("dd", {}, mono(key.secret_access_key))),
+      el("div", { class: "actions" }, copy, finish),
+      said
+    );
+  }
+  function issueKey(screen, user2, line, opener) {
+    const region = el("div", {});
+    const close = open(line, region);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        `key-${user2.name}`,
+        mono(user2.name),
+        "A new access key for this user. Its secret is shown once, right here.",
+        "Issue key",
+        async (reason) => {
+          const answer = await call("POST", `/users/${encodeURIComponent(user2.name)}/keys`, readIssued, { reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(`Issued a key for ${user2.name}. Store its secret now.`);
+          fill(region, shownOnce(answer.value, () => {
+            fill(region);
+            back();
+          }));
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function setDisabled(screen, user2, line, opener) {
+    const disable = !user2.disabled;
+    const region = el("div", {});
+    const close = open(line, region);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        `state-${user2.name}`,
+        mono(user2.name),
+        disable ? "Every key of this user stops working within five seconds, on every node." : "The user's keys work again within five seconds.",
+        disable ? "Disable user" : "Enable user",
+        async (reason) => {
+          const answer = await call("PUT", `/users/${encodeURIComponent(user2.name)}/disabled`, ignored, { disabled: disable, reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(`${disable ? "Disabled" : "Enabled"} ${user2.name}.`);
+          screen.redraw();
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function grants(screen, user2, line, opener) {
+    const id = `grant-${user2.name}`;
+    const bucket2 = field(`${id}-bucket`, "Bucket", { spellcheck: "false", autocomplete: "off", required: "" }, `A bucket of space ${user2.space}.`);
+    const read = el("input", { id: `${id}-read`, type: "checkbox", checked: "" });
+    const write = el("input", { id: `${id}-write`, type: "checkbox" });
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const grant = el("button", { type: "submit", class: "primary" }, "Grant");
+    const remove = el("button", { type: "button", class: "danger" }, "Remove grant");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Bucket access: "), mono(user2.name)),
+      bucket2.row,
+      el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write")),
+      reason.row,
+      el("div", { class: "actions" }, grant, remove, cancel),
+      said
+    );
+    const close = open(line, form);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
+    const done = (words) => {
+      announce(words);
+      back();
+    };
+    const show = (failure) => {
+      const shown = settle(screen, failure);
+      if (shown !== null) {
+        fill(said, refusal(shown));
+      }
+    };
+    cancel.addEventListener("click", back);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        back();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
+      if (answer.ok) {
+        done(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+      } else {
+        show(answer);
+      }
+    });
+    remove.addEventListener("click", async () => {
+      const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
+      if (answer.ok) {
+        done(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+      } else {
+        show(answer);
+      }
+    });
+    queueMicrotask(() => bucket2.input.focus());
+  }
+  function rowActions(screen, user2, line) {
+    const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
+    const state2 = el("button", { type: "button", class: "quiet" }, user2.disabled ? "Enable…" : "Disable…");
+    const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
+    key.addEventListener("click", () => issueKey(screen, user2, line, key));
+    state2.addEventListener("click", () => setDisabled(screen, user2, line, state2));
+    access.addEventListener("click", () => grants(screen, user2, line, access));
+    return [key, state2, access];
+  }
+
+  // src/bucket-upload-key.ts
+  //! Issuing a one-key upload credential for a bucket, inline under its row: the
+  //! key it may upload, how long it lasts, and a reason that is recorded. The
+  //! credential uploads that one key until it expires, and only while the issuer
+  //! may still write the bucket. Its secret is shown once, here.
+  var LIFETIMES = { "1 hour": 3600, "1 day": 86400, "7 days": 604800 };
+  var isLifetime = (value) => Object.hasOwn(LIFETIMES, value);
+  function uploadKeyForm(screen, bucket2, close) {
+    const id = `upload-${bucket2.name}`;
+    const key = field(`${id}-key`, "Object key", { autocomplete: "off", required: "" }, "The one key it may upload, exactly as written.");
+    const lasts = el("select", { id: `${id}-lasts`, "aria-label": "Lasts" }, ...Object.keys(LIFETIMES).map((name) => el("option", { value: name }, name)));
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    key.input.after(lasts);
+    const issue = el("button", { type: "submit", class: "primary" }, "Issue upload key");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const region = el("div", {});
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Upload key: "), mono(bucket2.name)),
+      el("p", { class: "muted" }, "It uploads one key — a single PUT or a multipart upload — and nothing else, until it expires or you lose write access here."),
+      key.row,
+      reason.row,
+      el("div", { class: "actions" }, issue, cancel),
+      said
+    );
+    fill(region, form);
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const wanted = key.input.value;
+      if (wanted === "" || !isLifetime(lasts.value)) {
+        key.input.setAttribute("aria-invalid", "true");
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Name the key it may upload."));
+        return;
+      }
+      key.input.removeAttribute("aria-invalid");
+      const answer = await call("POST", `/buckets/${encodeURIComponent(bucket2.name)}/upload-keys`, readUploadKey, {
+        key: wanted,
+        expires_in: LIFETIMES[lasts.value],
+        reason: reason.input.value.trim()
+      });
+      if (answer.ok) {
+        announce(`Issued an upload key for ${bucket2.name}/${wanted}. Store its secret now.`);
+        fill(
+          region,
+          el("p", {}, "Uploads ", mono(`${bucket2.name}/${wanted}`), " until ", moment(answer.value.expires), "."),
+          shownOnce(answer.value, close)
+        );
+        return;
+      }
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(answer));
+    });
+    queueMicrotask(() => key.input.focus());
+    return region;
+  }
+
   // src/buckets.ts
   //! Buckets: find one (the list is complete, so filtering it here hides nothing
   //! the server sent), see how many objects and bytes each holds as last measured,
@@ -725,6 +976,7 @@
   function bucketRow(screen, bucket2, usage) {
     const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
     const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
+    const upload = screen.may?.issue_upload_keys === true ? el("button", { type: "button", class: "quiet" }, "Upload key…") : null;
     const held = figures(usage, bucket2);
     const line = row(
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
@@ -734,7 +986,7 @@
       numeric(limits(bucket2)),
       moment(bucket2.created),
       mono(bucket2.region),
-      el("div", { class: "actions" }, quota, remove)
+      el("div", { class: "actions" }, upload, quota, remove)
     );
     quota?.addEventListener("click", () => {
       const cell = el("td", { colspan: "8" });
@@ -743,6 +995,17 @@
         quotaForm(screen, bucket2, () => {
           region.remove();
           quota.focus();
+        })
+      );
+      line.after(region);
+    });
+    upload?.addEventListener("click", () => {
+      const cell = el("td", { colspan: "8" });
+      const region = el("tr", { class: "asking" }, cell);
+      cell.append(
+        uploadKeyForm(screen, bucket2, () => {
+          region.remove();
+          upload.focus();
         })
       );
       line.after(region);
@@ -1315,180 +1578,6 @@
     });
     darkQuery.addEventListener("change", show);
     show();
-  }
-
-  // src/user-actions.ts
-  //! A user row's actions, each opening an inline region under the row: issuing
-  //! a key (its secret is shown here once and never again — the server keeps it
-  //! sealed and will not hand it back), disabling or enabling the user, and
-  //! granting or removing access to one bucket. Every one takes a reason.
-  var COLUMNS = "6";
-  function settle(screen, failure) {
-    if (failure.status === 401) {
-      screen.signIn();
-      return null;
-    }
-    return failure;
-  }
-  function open(line, region) {
-    const next2 = line.nextElementSibling;
-    if (next2 instanceof HTMLTableRowElement && next2.classList.contains("asking")) {
-      next2.remove();
-    }
-    const ask = el("tr", { class: "asking" }, el("td", { colspan: COLUMNS }, region));
-    line.after(ask);
-    return () => ask.remove();
-  }
-  function shownOnce(key, done) {
-    const copy = el("button", { type: "button" }, "Copy secret");
-    const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
-    const said = el("p", { class: "hint", "aria-live": "polite" });
-    copy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(key.secret_access_key);
-        said.textContent = "Copied.";
-      } catch {
-        said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
-      }
-    });
-    finish.addEventListener("click", done);
-    queueMicrotask(() => copy.focus());
-    return el(
-      "div",
-      { class: "once", role: "alert" },
-      el("p", {}, el("strong", {}, "Store this secret now. "), "It is shown once; the server will not show it again."),
-      el("dl", {}, el("dt", {}, "Access key id"), el("dd", {}, mono(key.access_key_id)), el("dt", {}, "Secret access key"), el("dd", {}, mono(key.secret_access_key))),
-      el("div", { class: "actions" }, copy, finish),
-      said
-    );
-  }
-  function issueKey(screen, user2, line, opener) {
-    const region = el("div", {});
-    const close = open(line, region);
-    const back = () => {
-      close();
-      opener.focus();
-    };
-    fill(
-      region,
-      confirmation(
-        `key-${user2.name}`,
-        mono(user2.name),
-        "A new access key for this user. Its secret is shown once, right here.",
-        "Issue key",
-        async (reason) => {
-          const answer = await call("POST", `/users/${encodeURIComponent(user2.name)}/keys`, readIssued, { reason });
-          if (!answer.ok) {
-            return settle(screen, answer);
-          }
-          announce(`Issued a key for ${user2.name}. Store its secret now.`);
-          fill(region, shownOnce(answer.value, () => {
-            fill(region);
-            back();
-          }));
-          return null;
-        },
-        back
-      )
-    );
-  }
-  function setDisabled(screen, user2, line, opener) {
-    const disable = !user2.disabled;
-    const region = el("div", {});
-    const close = open(line, region);
-    const back = () => {
-      close();
-      opener.focus();
-    };
-    fill(
-      region,
-      confirmation(
-        `state-${user2.name}`,
-        mono(user2.name),
-        disable ? "Every key of this user stops working within five seconds, on every node." : "The user's keys work again within five seconds.",
-        disable ? "Disable user" : "Enable user",
-        async (reason) => {
-          const answer = await call("PUT", `/users/${encodeURIComponent(user2.name)}/disabled`, ignored, { disabled: disable, reason });
-          if (!answer.ok) {
-            return settle(screen, answer);
-          }
-          announce(`${disable ? "Disabled" : "Enabled"} ${user2.name}.`);
-          screen.redraw();
-          return null;
-        },
-        back
-      )
-    );
-  }
-  function grants(screen, user2, line, opener) {
-    const id = `grant-${user2.name}`;
-    const bucket2 = field(`${id}-bucket`, "Bucket", { spellcheck: "false", autocomplete: "off", required: "" }, `A bucket of space ${user2.space}.`);
-    const read = el("input", { id: `${id}-read`, type: "checkbox", checked: "" });
-    const write = el("input", { id: `${id}-write`, type: "checkbox" });
-    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-    const grant = el("button", { type: "submit", class: "primary" }, "Grant");
-    const remove = el("button", { type: "button", class: "danger" }, "Remove grant");
-    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
-    const said = el("div", { "aria-live": "polite" });
-    const form = el(
-      "form",
-      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
-      el("p", { id: `${id}-title` }, el("strong", {}, "Bucket access: "), mono(user2.name)),
-      bucket2.row,
-      el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write")),
-      reason.row,
-      el("div", { class: "actions" }, grant, remove, cancel),
-      said
-    );
-    const close = open(line, form);
-    const back = () => {
-      close();
-      opener.focus();
-    };
-    const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done = (words) => {
-      announce(words);
-      back();
-    };
-    const show = (failure) => {
-      const shown = settle(screen, failure);
-      if (shown !== null) {
-        fill(said, refusal(shown));
-      }
-    };
-    cancel.addEventListener("click", back);
-    form.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        back();
-      }
-    });
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
-      if (answer.ok) {
-        done(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
-      } else {
-        show(answer);
-      }
-    });
-    remove.addEventListener("click", async () => {
-      const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
-      if (answer.ok) {
-        done(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
-      } else {
-        show(answer);
-      }
-    });
-    queueMicrotask(() => bucket2.input.focus());
-  }
-  function rowActions(screen, user2, line) {
-    const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
-    const state2 = el("button", { type: "button", class: "quiet" }, user2.disabled ? "Enable…" : "Disable…");
-    const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
-    key.addEventListener("click", () => issueKey(screen, user2, line, key));
-    state2.addEventListener("click", () => setDisabled(screen, user2, line, state2));
-    access.addEventListener("click", () => grants(screen, user2, line, access));
-    return [key, state2, access];
   }
 
   // src/users.ts

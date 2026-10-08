@@ -77,12 +77,15 @@ export type User = {
 export type Space = { readonly name: string; readonly created: string };
 /** A key just issued: the only answer that ever carries its secret. */
 export type IssuedKey = { readonly access_key_id: string; readonly secret_access_key: string };
+/** A one-key upload credential just issued: as a key, and when it stops working. */
+export type UploadKey = IssuedKey & { readonly expires: string };
 /** What the signed-in key may do, as the server's evaluator answers it. */
 export type Capabilities = {
   readonly access_key_id: string;
   readonly operate: boolean;
   readonly administer: boolean;
   readonly view_cluster: boolean;
+  readonly issue_upload_keys: boolean;
 };
 export type Layout = { readonly version: number; readonly nodes: readonly string[] };
 export type Cluster = {
@@ -276,9 +279,20 @@ export function readIssued(v: unknown): IssuedKey | null {
     : null;
 }
 
+export function readUploadKey(v: unknown): UploadKey | null {
+  const key = readIssued(v);
+  return key !== null && record(v) && text(v["expires"]) ? { ...key, expires: v["expires"] } : null;
+}
+
 export function readCapabilities(v: unknown): Capabilities | null {
-  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"])
-    ? { access_key_id: v["access_key_id"], operate: v["operate"], administer: v["administer"], view_cluster: v["view_cluster"] }
+  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"])
+    ? {
+        access_key_id: v["access_key_id"],
+        operate: v["operate"],
+        administer: v["administer"],
+        view_cluster: v["view_cluster"],
+        issue_upload_keys: v["issue_upload_keys"],
+      }
     : null;
 }
 

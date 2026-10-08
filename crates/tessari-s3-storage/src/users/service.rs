@@ -5,12 +5,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tessari_s3_core::authz::{Access, UserName, UserPrincipal, Visible};
-use tessari_s3_types::{BucketName, IamKey};
+use tessari_s3_types::{BucketName, IamKey, ObjectKey};
 
 use super::credentials;
-use super::model::{IssuedKey, NewUser, Resolved, User};
+use super::entity::AccessKeyEntity;
+use super::model::{IssuedKey, KeyScope, NewUser, Resolved, User};
 use super::repository::{Inserted, UserRepository};
-use super::sealer::{Binding, Sealed, Sealer};
+use super::sealer::{Binding, ScopeBinding, Sealed, Sealer};
 use super::tessaridb::TessariUsers;
 use crate::spaces::SpaceService;
 use crate::{Error, Result};
@@ -27,6 +28,25 @@ pub enum UserCreated {
     Exists,
     /// The space it was to join does not exist.
     NoSuchSpace,
+}
+
+/// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
+fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
+    let malformed = |reason| Error::Malformed {
+        record: "access key",
+        reason,
+    };
+    match (&key.scope_bucket, &key.scope_key, key.expires) {
+        (None, None, None) => Ok(None),
+        (Some(bucket), Some(object), Some((expires, _))) => Ok(Some(KeyScope {
+            bucket: BucketName::new(bucket).map_err(|_| malformed("scope_bucket"))?,
+            key: ObjectKey::new(object).map_err(|_| malformed("scope_key"))?,
+            expires,
+        })),
+        _ => Err(malformed(
+            "a scope needs scope_bucket, scope_key and expires together",
+        )),
+    }
 }
 
 /// User, access-key and grant operations.
@@ -121,6 +141,24 @@ impl UserService {
     /// # Errors
     /// [`Error::NoIamKey`] without a root key; [`Error::Randomness`]; the metadata store's refusal or outage.
     pub async fn issue_key(&self, user: &UserName) -> Result<Option<IssuedKey>> {
+        self.issue(user, None).await
+    }
+
+    /// A new one-key credential issued by `user`: it uploads `scope.key` of `scope.bucket` until `scope.expires`,
+    /// and only while `user` may still write there; `None` when there is no such user. Whether `user` may write the
+    /// bucket now is the caller's to decide before issuing.
+    ///
+    /// # Errors
+    /// As [`UserService::issue_key`].
+    pub async fn issue_upload_key(
+        &self,
+        user: &UserName,
+        scope: &KeyScope,
+    ) -> Result<Option<IssuedKey>> {
+        self.issue(user, Some(scope)).await
+    }
+
+    async fn issue(&self, user: &UserName, scope: Option<&KeyScope>) -> Result<Option<IssuedKey>> {
         let sealer = self.sealer()?;
         let Some(holder) = self.get(user).await? else {
             return Ok(None);
@@ -132,11 +170,16 @@ impl UserService {
                 key_id: &id,
                 user: holder.name.as_str(),
                 space: holder.space.as_str(),
+                scope: scope.map(|scope| ScopeBinding {
+                    bucket: scope.bucket.as_str(),
+                    key: scope.key.as_str(),
+                    expires: scope.expires,
+                }),
             };
             let sealed = sealer.seal(&secret, binding)?;
             if self
                 .repository
-                .insert_key(&id, &holder.name, &sealed)
+                .insert_key(&id, &holder.name, &sealed, scope)
                 .await?
             {
                 return Ok(Some(IssuedKey {
@@ -174,6 +217,7 @@ impl UserService {
         let Some(user) = self.get(&name).await?.filter(|user| !user.disabled) else {
             return Ok(None);
         };
+        let scope = scope_of(&key)?;
         let sealed = Sealed {
             ciphertext: key.secret,
             nonce: key.nonce,
@@ -184,9 +228,18 @@ impl UserService {
             key_id: id,
             user: user.name.as_str(),
             space: user.space.as_str(),
+            scope: scope.as_ref().map(|scope| ScopeBinding {
+                bucket: scope.bucket.as_str(),
+                key: scope.key.as_str(),
+                expires: scope.expires,
+            }),
         };
         let secret = self.sealer()?.open(&sealed, binding)?;
-        Ok(Some(Resolved { user, secret }))
+        Ok(Some(Resolved {
+            user,
+            secret,
+            scope,
+        }))
     }
 
     /// Disables or enables key `id`; `false` when there is no such key.

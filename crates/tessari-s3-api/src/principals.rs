@@ -12,8 +12,8 @@ use std::future::Future;
 use std::sync::Arc;
 
 use scc::TreeIndex;
-use tessari_s3_core::authz::UserPrincipal;
-use tessari_s3_storage::users::UserService;
+use tessari_s3_core::authz::{Principal, UploadPrincipal, UserPrincipal};
+use tessari_s3_storage::users::{KeyScope, UserService};
 use tessari_s3_types::SecretKey;
 
 /// How long a resolution is believed, in seconds: the published revocation window.
@@ -27,6 +27,8 @@ pub(crate) enum Fetched {
         principal: UserPrincipal,
         /// The key's secret.
         secret: SecretKey,
+        /// A one-key credential's scope; `None` for a full key.
+        scope: Option<KeyScope>,
     },
     /// No such key, or it or its user is disabled.
     Unknown,
@@ -39,6 +41,23 @@ pub(crate) struct Live {
     pub(crate) principal: UserPrincipal,
     /// The key's secret.
     pub(crate) secret: SecretKey,
+    /// A one-key credential's scope; `None` for a full key.
+    pub(crate) scope: Option<KeyScope>,
+}
+
+/// Who signs with a live key at `now` (seconds): its user for a full key; for a one-key credential, its issuer narrowed
+/// to its key, until the moment it expires. The expiry is judged here, on every request, and not when the key was
+/// cached, so a cached credential stops at its expiry rather than up to a window later.
+pub(crate) fn principal_of(live: Live, now: i64) -> Option<Principal> {
+    match live.scope {
+        None => Some(Principal::User(live.principal)),
+        Some(scope) if now < scope.expires => Some(Principal::Upload(UploadPrincipal {
+            parent: live.principal,
+            bucket: scope.bucket.as_str().to_owned(),
+            key: scope.key.as_str().to_owned(),
+        })),
+        Some(_) => None,
+    }
 }
 
 /// One cached resolution of a live key.
@@ -85,11 +104,20 @@ impl Principals {
                 return Ok(Some(entry.live.clone()));
             }
         }
-        let Fetched::Live { principal, secret } = fetch().await? else {
+        let Fetched::Live {
+            principal,
+            secret,
+            scope,
+        } = fetch().await?
+        else {
             self.entries.remove_async(id).await;
             return Ok(None);
         };
-        let live = Live { principal, secret };
+        let live = Live {
+            principal,
+            secret,
+            scope,
+        };
         let entry = Arc::new(Entry {
             resolved_at: now,
             live: live.clone(),
@@ -99,7 +127,8 @@ impl Principals {
     }
 }
 
-/// User key `id` resolved through `cache` at `now`: its user, with grants, and its secret while both are enabled.
+/// User key `id` resolved through `cache` at `now`: its user (for a one-key credential, its issuer), with grants, and
+/// its secret while both are enabled.
 ///
 /// # Errors
 /// The store's failure; nothing cached past its window is served in its place.
@@ -118,6 +147,7 @@ pub(crate) async fn resolve_user_key(
                 Some(principal) => Fetched::Live {
                     principal,
                     secret: resolved.secret,
+                    scope: resolved.scope,
                 },
                 None => Fetched::Unknown,
             })

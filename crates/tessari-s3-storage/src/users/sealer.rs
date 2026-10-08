@@ -25,6 +25,8 @@ const KEK_LABEL: &[u8] = b"tessaridb-s3/access-key-kek/v1\0";
 const KEK_ID_LABEL: &[u8] = b"tessaridb-s3/iam-key-id/v1\0";
 /// Opens the associated data of every sealed secret.
 const AAD_LABEL: &[u8] = b"tessaridb-s3/access-key/v1\0";
+/// Precedes a one-key credential's scope in its associated data; a full key's associated data ends before it.
+const SCOPE_LABEL: &[u8] = b"\0upload\0";
 /// XChaCha20's nonce length.
 const NONCE_LEN: usize = 24;
 
@@ -51,6 +53,20 @@ pub(crate) struct Binding<'a> {
     pub user: &'a str,
     /// The user's space.
     pub space: &'a str,
+    /// What a one-key credential may write, from the record's own fields; `None` for a full key.
+    pub scope: Option<ScopeBinding<'a>>,
+}
+
+/// A one-key credential's scope as bound into its associated data, so a record whose scope was stripped or widened
+/// does not open — rather than opening as a broader key.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScopeBinding<'a> {
+    /// The bucket it may write.
+    pub bucket: &'a str,
+    /// The key it may write.
+    pub key: &'a str,
+    /// When it expires, in seconds since the epoch.
+    pub expires: i64,
 }
 
 /// Seals and opens access-key secrets under one root key.
@@ -96,6 +112,15 @@ impl Sealer {
             aad.push(0);
         }
         aad.extend_from_slice(self.kek_id.as_bytes());
+        // A bucket name holds no NUL and the expiry is digits, so the key — which may hold anything — goes last.
+        if let Some(scope) = binding.scope {
+            aad.extend_from_slice(SCOPE_LABEL);
+            aad.extend_from_slice(scope.bucket.as_bytes());
+            aad.push(0);
+            aad.extend_from_slice(scope.expires.to_string().as_bytes());
+            aad.push(0);
+            aad.extend_from_slice(scope.key.as_bytes());
+        }
         aad
     }
 

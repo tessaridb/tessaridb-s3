@@ -9,7 +9,7 @@ use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
-use crate::principals::{Principals, resolve_user_key};
+use crate::principals::{Principals, principal_of, resolve_user_key};
 use crate::{Error, Result};
 
 /// Who signs with an access key, and the secret the signature is verified with.
@@ -139,9 +139,9 @@ impl ApiState {
             self.now(),
         )
         .await?;
-        live.map(|live| Credential {
-            principal: Principal::User(live.principal),
-            secret: live.secret,
+        live.and_then(|live| {
+            let secret = live.secret.clone();
+            principal_of(live, self.now()).map(|principal| Credential { principal, secret })
         })
         .ok_or_else(|| {
             Error::new(

@@ -6,7 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass, Value};
 use tessari_s3_types::BucketName;
 
 use super::entity::{AccessKeyEntity, GrantEntity, UserEntity};
-use super::model::{NewUser, role_text};
+use super::model::{KeyScope, NewUser, role_text};
 use super::repository::{Inserted, UserRepository};
 use super::sealer::Sealed;
 use crate::answers::{all_records, first_record};
@@ -123,8 +123,14 @@ impl UserRepository for TessariUsers {
         Ok(())
     }
 
-    async fn insert_key(&self, id: &str, user: &UserName, sealed: &Sealed) -> Result<bool> {
-        let parameters = vec![
+    async fn insert_key(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        scope: Option<&KeyScope>,
+    ) -> Result<bool> {
+        let mut parameters = vec![
             text("id", id),
             text("user", user.as_str()),
             ("secret".to_owned(), Value::Bytes(sealed.ciphertext.clone())),
@@ -132,8 +138,28 @@ impl UserRepository for TessariUsers {
             text("kek_id", &sealed.kek_id),
             text("algorithm", &sealed.algorithm),
         ];
-        let script = "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
-                      kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now() };";
+        let script = match scope {
+            None => {
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now() };"
+            }
+            Some(scope) => {
+                parameters.extend([
+                    text("scope_bucket", scope.bucket.as_str()),
+                    text("scope_key", scope.key.as_str()),
+                    (
+                        "expires".to_owned(),
+                        Value::Datetime {
+                            seconds: scope.expires,
+                            nanos: 0,
+                        },
+                    ),
+                ]);
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
+                 scope_bucket: $scope_bucket, scope_key: $scope_key, expires: $expires } EXPIRE $expires;"
+            }
+        };
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
             Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),

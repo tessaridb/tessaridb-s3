@@ -176,6 +176,13 @@ pub const CONSOLE_ACTIONS_PAGE_MAX: usize = 100;
 /// The longest reason, in characters, an operator may give for a console action.
 pub const CONSOLE_REASON_MAX_CHARS: usize = 500;
 
+/// The shortest life, in seconds, of a one-key upload credential: long enough to be used, and an expiry the metadata
+/// store will accept as still in the future.
+pub const UPLOAD_KEY_MIN_SECS: i64 = 60;
+
+/// The longest life, in seconds, of a one-key upload credential: seven days, as for a presigned URL.
+pub const UPLOAD_KEY_MAX_SECS: i64 = 604_800;
+
 /// How far the console counts the heal backlog before it says "more".
 pub const CONSOLE_BACKLOG_COUNT_MAX: usize = 1_000;
 

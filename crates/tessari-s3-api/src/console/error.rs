@@ -37,6 +37,15 @@ impl ConsoleError {
         }
     }
 
+    /// Refused with a reason the caller can act on, unlike [`ConsoleError::forbidden`].
+    pub(crate) const fn refused(code: &'static str, message: &'static str) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code,
+            message,
+        }
+    }
+
     pub(crate) const fn rate_limited() -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,

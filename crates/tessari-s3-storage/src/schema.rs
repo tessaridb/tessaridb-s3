@@ -28,7 +28,8 @@ use crate::Result;
 /// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
 /// `spaces`, `users` (one space each), `access_keys` (the secret sealed, never plain) and `grants` (a user's access to
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
-/// grants.
+/// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
+/// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -89,6 +90,10 @@ DEFINE TABLE IF NOT EXISTS access_keys (\
  user_name string REQUIRED, secret bytes REQUIRED, nonce bytes REQUIRED, kek_id string REQUIRED,\
  algorithm string REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
+DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
+ALTER TABLE access_keys SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS grants (\
  user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;

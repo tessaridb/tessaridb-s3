@@ -32,7 +32,7 @@ function open(line: HTMLTableRowElement, region: HTMLElement): () => void {
 }
 
 /** The one view of a new key's secret: copy it now, then dismiss it. */
-function shownOnce(key: IssuedKey, done: () => void): HTMLElement {
+export function shownOnce(key: IssuedKey, done: () => void): HTMLElement {
   const copy = el("button", { type: "button" }, "Copy secret");
   const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
   const said = el("p", { class: "hint", "aria-live": "polite" });

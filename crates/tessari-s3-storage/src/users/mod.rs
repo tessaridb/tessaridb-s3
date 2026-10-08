@@ -8,6 +8,6 @@ mod sealer;
 mod service;
 mod tessaridb;
 
-pub use model::{IssuedKey, NewUser, Resolved, User};
+pub use model::{IssuedKey, KeyScope, NewUser, Resolved, User};
 pub use service::{UserCreated, UserService};
 pub use tessaridb::TessariUsers;

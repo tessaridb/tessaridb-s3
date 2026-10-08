@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tessari_s3_core::authz::{Role, SpaceName, UserPrincipal};
-use tessari_s3_types::SecretKey;
+use tessari_s3_core::authz::{Principal, Role, SpaceName, UserPrincipal};
+use tessari_s3_storage::users::KeyScope;
+use tessari_s3_types::{BucketName, ObjectKey, SecretKey};
 
-use super::{Fetched, Principals, WINDOW_SECS};
+use super::{Fetched, Live, Principals, WINDOW_SECS, principal_of};
 
 fn ann() -> UserPrincipal {
     UserPrincipal {
@@ -40,6 +41,7 @@ fn live() -> Fetched {
     Fetched::Live {
         principal: ann(),
         secret: SecretKey::new("s".repeat(40)),
+        scope: None,
     }
 }
 
@@ -102,4 +104,39 @@ async fn a_failed_lookup_serves_nothing_stale() {
         })
         .await;
     assert!(matches!(failed, Err("store down")));
+}
+
+fn scoped(expires: i64) -> Live {
+    Live {
+        principal: ann(),
+        secret: SecretKey::new("s".repeat(40)),
+        scope: Some(KeyScope {
+            bucket: BucketName::new("media").expect("a bucket name"),
+            key: ObjectKey::new("in/a.jpg").expect("a key"),
+            expires,
+        }),
+    }
+}
+
+#[test]
+fn a_one_key_credential_is_its_issuer_narrowed_to_its_key_until_it_expires() {
+    let Some(Principal::Upload(upload)) = principal_of(scoped(200), 199) else {
+        panic!("a scoped key before its expiry is an upload principal");
+    };
+    assert_eq!(
+        (upload.parent, upload.bucket.as_str(), upload.key.as_str()),
+        (ann(), "media", "in/a.jpg")
+    );
+    assert_eq!(principal_of(scoped(200), 200), None, "at its expiry");
+    assert_eq!(principal_of(scoped(200), 201), None, "after it");
+}
+
+#[test]
+fn a_full_key_is_its_user_whatever_the_time() {
+    let full = Live {
+        principal: ann(),
+        secret: SecretKey::new("s".repeat(40)),
+        scope: None,
+    };
+    assert_eq!(principal_of(full, i64::MAX), Some(Principal::User(ann())));
 }

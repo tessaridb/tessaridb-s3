@@ -8,8 +8,8 @@ mod operations;
 
 pub use decide::{Decision, Denied, authorize};
 pub use model::{
-    Access, Action, BucketResource, Principal, Role, SpaceName, UserName, UserPrincipal,
-    UserResource, Visible,
+    Access, Action, BucketResource, Principal, Role, SpaceName, UploadPrincipal, UserName,
+    UserPrincipal, UserResource, Visible,
 };
 pub use operations::{Need, Required, required};
 
@@ -17,3 +17,5 @@ pub use operations::{Need, Required, required};
 mod decide_tests;
 #[cfg(test)]
 mod operations_tests;
+#[cfg(test)]
+mod upload_tests;

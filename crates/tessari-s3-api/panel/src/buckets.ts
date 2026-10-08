@@ -12,6 +12,7 @@ import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Us
 import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
 import { limits, quotaForm } from "./bucket-quota.ts";
+import { uploadKeyForm } from "./bucket-upload-key.ts";
 
 const TITLE = "Buckets";
 
@@ -81,6 +82,8 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
   const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
   // Offered to keys that may operate; the server refuses everyone else regardless.
   const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
+  // Offered to users; the server issues one only to a user who may write this bucket.
+  const upload = screen.may?.issue_upload_keys === true ? el("button", { type: "button", class: "quiet" }, "Upload key…") : null;
   const held = figures(usage, bucket);
   const line = row(
     el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket.name)),
@@ -90,7 +93,7 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
     numeric(limits(bucket)),
     moment(bucket.created),
     mono(bucket.region),
-    el("div", { class: "actions" }, quota, remove),
+    el("div", { class: "actions" }, upload, quota, remove),
   );
   quota?.addEventListener("click", () => {
     const cell = el("td", { colspan: "8" });
@@ -99,6 +102,17 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
       quotaForm(screen, bucket, () => {
         region.remove();
         quota.focus();
+      }),
+    );
+    line.after(region);
+  });
+  upload?.addEventListener("click", () => {
+    const cell = el("td", { colspan: "8" });
+    const region = el("tr", { class: "asking" }, cell);
+    cell.append(
+      uploadKeyForm(screen, bucket, () => {
+        region.remove();
+        upload.focus();
       }),
     );
     line.after(region);

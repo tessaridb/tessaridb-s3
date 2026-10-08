@@ -38,6 +38,7 @@ mod reclaim;
 )]
 mod signer;
 mod spaces;
+mod upload_keys;
 mod uploads;
 mod usage;
 mod users;

@@ -12,6 +12,26 @@ fn every_implemented_operation_has_a_row() {
 }
 
 #[test]
+fn exactly_the_operations_of_uploading_one_key_are_uploads() {
+    let uploads: Vec<Operation> = implemented()
+        .iter()
+        .copied()
+        .filter(|operation| required(*operation).is_some_and(|needs| needs.upload))
+        .collect();
+    assert_eq!(
+        uploads,
+        vec![
+            Operation::AbortMultipartUpload,
+            Operation::CompleteMultipartUpload,
+            Operation::CreateMultipartUpload,
+            Operation::ListParts,
+            Operation::PutObject,
+            Operation::UploadPart,
+        ]
+    );
+}
+
+#[test]
 fn copies_also_need_the_source_readable() {
     for operation in [Operation::CopyObject, Operation::UploadPartCopy] {
         let needs = required(operation).expect("copy operations are implemented");

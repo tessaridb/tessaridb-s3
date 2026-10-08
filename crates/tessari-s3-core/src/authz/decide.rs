@@ -1,6 +1,8 @@
 //! The decision: deny by default, explicit denies first, then the one rule that may allow.
 
-use super::model::{Access, Action, BucketResource, Principal, Role, UserPrincipal, UserResource};
+use super::model::{
+    Access, Action, BucketResource, Principal, Role, UploadPrincipal, UserPrincipal, UserResource,
+};
 
 /// Why a request was refused — for the decision log and for tests; a caller is told only that it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +15,8 @@ pub enum Denied {
     NoGrant,
     /// The caller is the user it would manage.
     SelfManagement,
+    /// A one-key credential asked for anything but uploading its key.
+    OutOfScope,
 }
 
 /// The evaluator's answer.
@@ -30,6 +34,7 @@ pub fn authorize(principal: &Principal, action: &Action) -> Decision {
     let user = match principal {
         Principal::Root => return Decision::Allow,
         Principal::User(user) => user,
+        Principal::Upload(upload) => return within_scope(upload, action),
     };
     // Nobody manages their own user — not even an operator: a self-grant is refused by the system, never by policy.
     if let Action::ManageUser(target) = action
@@ -66,7 +71,23 @@ pub fn authorize(principal: &Principal, action: &Action) -> Decision {
         Action::ReadBucket(bucket) | Action::ReadObject(bucket) => {
             on_bucket(user, bucket, |access| access.read)
         }
-        Action::WriteObject(bucket) => on_bucket(user, bucket, |access| access.write),
+        Action::WriteObject(bucket) | Action::Upload { bucket, .. } => {
+            on_bucket(user, bucket, |access| access.write)
+        }
+    }
+}
+
+/// A one-key credential: uploading exactly its key of exactly its bucket, and then only what its issuer may still do
+/// there — the intersection, judged against the issuer as they are now.
+fn within_scope(upload: &UploadPrincipal, action: &Action) -> Decision {
+    match action {
+        Action::Upload { bucket, key } if bucket.name == upload.bucket && *key == upload.key => {
+            authorize(
+                &Principal::User(upload.parent.clone()),
+                &Action::WriteObject(bucket.clone()),
+            )
+        }
+        _ => Decision::Deny(Denied::OutOfScope),
     }
 }
 

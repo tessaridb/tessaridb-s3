@@ -1,7 +1,8 @@
 //! Authorization: every implemented operation, for every principal, is judged by the one evaluator before its
 //! handler runs. The root credential may do everything without a lookup; a user's request loads the bucket it
 //! addresses (and a copy's source bucket) and is decided against it. Grants are per bucket, so the bucket's decision
-//! for `DeleteObjects` is the decision for every key the batch names.
+//! for `DeleteObjects` is the decision for every key the batch names. A one-key upload credential's step of uploading
+//! is judged with the key it addresses, and every other request it signs is judged as asked and refused.
 
 use axum::http::HeaderMap;
 use tessari_s3_core::authz::Need;
@@ -28,13 +29,23 @@ pub async fn authorize_operation(
     addressed: &Addressed,
     headers: &HeaderMap,
 ) -> Result<()> {
-    let Principal::User(user) = principal else {
-        return Ok(());
+    let space = match principal {
+        Principal::Root => return Ok(()),
+        Principal::User(user) => &user.space,
+        Principal::Upload(upload) => &upload.parent.space,
     };
     let needs = required(operation).ok_or_else(denied)?;
+    // A one-key credential asks to upload the key it addresses; anything else it asks is judged as asked, and refused.
+    if let (Principal::Upload(_), true, Some(key)) = (principal, needs.upload, &addressed.key) {
+        let action = Action::Upload {
+            bucket: bucket(state, addressed.bucket.as_ref()).await?,
+            key: key.as_str().to_owned(),
+        };
+        return allowed(principal, &action);
+    }
     let action = match needs.primary {
         Need::ListBuckets => Action::ListBuckets,
-        Need::CreateBucket => Action::CreateBucket(user.space.clone()),
+        Need::CreateBucket => Action::CreateBucket(space.clone()),
         Need::DeleteBucket => Action::DeleteBucket(bucket(state, addressed.bucket.as_ref()).await?),
         Need::ReadBucket => Action::ReadBucket(bucket(state, addressed.bucket.as_ref()).await?),
         Need::ReadObject => Action::ReadObject(bucket(state, addressed.bucket.as_ref()).await?),
