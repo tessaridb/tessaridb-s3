@@ -45,6 +45,20 @@ export type Action = {
   readonly outcome: string;
 };
 export type Actions = { readonly actions: readonly Action[]; readonly next: number | null };
+export type Role = "space_admin" | "member";
+export type User = {
+  readonly name: string;
+  readonly space: string;
+  readonly role: Role;
+  readonly create_buckets: boolean;
+  readonly operator: boolean;
+  readonly cluster_viewer: boolean;
+  readonly disabled: boolean;
+  readonly created: string;
+};
+export type Space = { readonly name: string; readonly created: string };
+/** A key just issued: the only answer that ever carries its secret. */
+export type IssuedKey = { readonly access_key_id: string; readonly secret_access_key: string };
 export type Problem = { readonly code: string; readonly message: string };
 
 type Fields = Readonly<Record<string, unknown>>;
@@ -189,6 +203,41 @@ export function readActions(v: unknown): Actions | null {
   }
   const actions = list(v["actions"], action);
   return actions === null ? null : { actions, next: v["next"] };
+}
+
+const flag = (value: unknown): value is boolean => typeof value === "boolean";
+const role = (value: unknown): value is Role => value === "space_admin" || value === "member";
+
+const user = (v: unknown): User | null =>
+  record(v) && text(v["name"]) && text(v["space"]) && role(v["role"]) && flag(v["create_buckets"]) &&
+  flag(v["operator"]) && flag(v["cluster_viewer"]) && flag(v["disabled"]) && text(v["created"])
+    ? {
+        name: v["name"],
+        space: v["space"],
+        role: v["role"],
+        create_buckets: v["create_buckets"],
+        operator: v["operator"],
+        cluster_viewer: v["cluster_viewer"],
+        disabled: v["disabled"],
+        created: v["created"],
+      }
+    : null;
+
+export function readUsers(v: unknown): readonly User[] | null {
+  return record(v) ? list(v["users"], user) : null;
+}
+
+const space = (v: unknown): Space | null =>
+  record(v) && text(v["name"]) && text(v["created"]) ? { name: v["name"], created: v["created"] } : null;
+
+export function readSpaces(v: unknown): readonly Space[] | null {
+  return record(v) ? list(v["spaces"], space) : null;
+}
+
+export function readIssued(v: unknown): IssuedKey | null {
+  return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"])
+    ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] }
+    : null;
 }
 
 export function readProblem(v: unknown): Problem | null {

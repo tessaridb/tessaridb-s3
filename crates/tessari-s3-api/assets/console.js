@@ -47,8 +47,8 @@
     if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || typeof v["answering"] !== "boolean") {
       return null;
     }
-    const space = drive(v["drive"]);
-    return space === void 0 ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space };
+    const space2 = drive(v["drive"]);
+    return space2 === void 0 ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space2 };
   }
   function readStatus(v) {
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
@@ -57,11 +57,11 @@
     const members = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
     const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" ? { listed: backlog["listed"], more: backlog["more"] } : void 0;
-    const space = drive(v["drive"]);
-    if (v["members"] !== null && members === null || heal === void 0 || space === void 0) {
+    const space2 = drive(v["drive"]);
+    if (v["members"] !== null && members === null || heal === void 0 || space2 === void 0) {
       return null;
     }
-    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space };
+    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space2 };
   }
   var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"] } : null;
   function readUsage(v) {
@@ -111,6 +111,28 @@
     }
     const actions2 = list(v["actions"], action);
     return actions2 === null ? null : { actions: actions2, next: v["next"] };
+  }
+  var flag = (value) => typeof value === "boolean";
+  var role = (value) => value === "space_admin" || value === "member";
+  var user = (v) => record(v) && text(v["name"]) && text(v["space"]) && role(v["role"]) && flag(v["create_buckets"]) && flag(v["operator"]) && flag(v["cluster_viewer"]) && flag(v["disabled"]) && text(v["created"]) ? {
+    name: v["name"],
+    space: v["space"],
+    role: v["role"],
+    create_buckets: v["create_buckets"],
+    operator: v["operator"],
+    cluster_viewer: v["cluster_viewer"],
+    disabled: v["disabled"],
+    created: v["created"]
+  } : null;
+  function readUsers(v) {
+    return record(v) ? list(v["users"], user) : null;
+  }
+  var space = (v) => record(v) && text(v["name"]) && text(v["created"]) ? { name: v["name"], created: v["created"] } : null;
+  function readSpaces(v) {
+    return record(v) ? list(v["spaces"], space) : null;
+  }
+  function readIssued(v) {
+    return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"]) ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] } : null;
   }
   function readProblem(v) {
     return record(v) && text(v["code"]) && text(v["message"]) ? { code: v["code"], message: v["message"] } : null;
@@ -258,6 +280,10 @@
         return "#/";
       case "buckets":
         return "#/buckets";
+      case "users":
+        return "#/users";
+      case "spaces":
+        return "#/spaces";
       case "objects":
         return `#/b/${encodeURIComponent(route.bucket)}${query([
           ["prefix", route.prefix === "" ? null : route.prefix],
@@ -285,6 +311,12 @@
       if (path2 === "/buckets") {
         return { kind: "buckets" };
       }
+      if (path2 === "/users") {
+        return { kind: "users" };
+      }
+      if (path2 === "/spaces") {
+        return { kind: "spaces" };
+      }
       if (path2 === "/actions") {
         return { kind: "actions", before: position(params.get("before")) };
       }
@@ -309,6 +341,8 @@
   //! in, and every other failure says what happened and what to do next.
   function next(failure) {
     switch (failure.code) {
+      case "forbidden":
+        return "Your key does not allow this. Ask an operator or your space's administrator.";
       case "rate_limit":
         return "Wait a minute, then try again.";
       case "unavailable":
@@ -334,8 +368,8 @@
       screen.signIn();
       return;
     }
-    const retry = el("button", { type: "button" }, "Try again");
-    retry.addEventListener("click", screen.redraw);
+    const retry = failure.status === 403 ? null : el("button", { type: "button" }, "Try again");
+    retry?.addEventListener("click", screen.redraw);
     fill(screen.main, head(title), el("div", { class: "card" }, refusal(failure), retry));
   }
   var heading = (title) => el("h1", { tabindex: "-1", class: "view-title" }, title);
@@ -456,6 +490,7 @@
     download: ["M12 4v11", "M7.5 10.5L12 15l4.5-4.5", "M5 20h14"],
     trash: ["M4 7h16", "M9.5 7V4.5h5V7", "M6.5 7l1 13h9l1-13", "M10 11v5.5", "M14 11v5.5"],
     plus: ["M12 5v14", "M5 12h14"],
+    users: [ring(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6", "M16 4.5a3.5 3.5 0 0 1 0 7", "M18 14c2 .6 3 2.8 3 6"],
     chevron: ["M9.5 6l6 6-6 6"],
     node: [box(3, 4, 18, 7, 2), box(3, 13, 18, 7, 2), "M7 7.5h.01", "M7 16.5h.01"],
     members: [ring(6, 7, 2.5), ring(18, 7, 2.5), ring(12, 18, 2.5), "M8.5 7h7", "M7.3 9.2l3.4 6.6", "M16.7 9.2l-3.4 6.6"],
@@ -788,7 +823,7 @@
   }
 
   // src/signin.ts
-  //! Signing in with the node's root access key. The secret goes to the server
+  //! Signing in with an access key — the node's root key or a key issued to a user. The secret goes to the server
   //! once; what the browser keeps is an HttpOnly session cookie it cannot read,
   //! and the fields are cleared as soon as the answer arrives.
   function signIn(main2, done) {
@@ -801,7 +836,7 @@
       { class: "card", novalidate: "" },
       el("img", { class: "logo", src: "/favicon.svg", alt: "", width: "48", height: "48" }),
       heading("Sign in to TessariDB S3"),
-      el("p", { class: "muted" }, "Use the root access key this node was started with. The session lasts one hour."),
+      el("p", { class: "muted" }, "Use your access key: one issued to your user, or the root key this node was started with. The session lasts one hour."),
       key.row,
       secret.row,
       submit,
@@ -827,6 +862,81 @@
     });
     fill(main2, el("div", { class: "gate" }, form));
     key.input.focus();
+  }
+
+  // src/spaces.ts
+  //! Spaces: the tenants buckets and users belong to. Only operators reach this
+  //! view; anyone else is told their key does not allow it. A new space takes a
+  //! reason, which goes into the action record.
+  var TITLE4 = "Spaces";
+  function createForm2(screen, opener) {
+    const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
+    const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const form = el(
+      "form",
+      { id: "new-space-form", class: "card", novalidate: "", hidden: "", "aria-labelledby": "new-space-title" },
+      el("h2", { id: "new-space-title" }, "New space"),
+      name.row,
+      reason.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create space"), cancel),
+      said
+    );
+    const close = () => {
+      form.hidden = true;
+      opener.setAttribute("aria-expanded", "false");
+      opener.focus();
+    };
+    opener.addEventListener("click", () => {
+      form.hidden = false;
+      opener.setAttribute("aria-expanded", "true");
+      name.input.focus();
+    });
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const wanted = name.input.value.trim();
+      const answer = await call("POST", "/spaces", ignored, { name: wanted, reason: reason.input.value.trim() });
+      if (!answer.ok) {
+        if (answer.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(answer));
+        return;
+      }
+      announce(`Created space ${wanted}.`);
+      screen.redraw();
+    });
+    return form;
+  }
+  async function spaces(screen) {
+    loading(screen, TITLE4, "spaces");
+    const answer = await call("GET", "/spaces", readSpaces);
+    if (!answer.ok) {
+      failed(screen, TITLE4, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-space-form" }, icon("plus"), "New space");
+    fill(
+      screen.main,
+      head(TITLE4, `${answer.value.length.toLocaleString()} on this store`, opener),
+      createForm2(screen, opener),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No spaces yet.") : table("Spaces", ["Name", "Created"], answer.value.map((space2) => row(mono(space2.name), moment(space2.created))))
+      )
+    );
   }
 
   // src/meter.ts
@@ -862,7 +972,7 @@
   //! The overview: is this node and its cluster healthy, how much is stored and
   //! how full the drives are, and is anything waiting to be healed. Each tile
   //! links to where the operator acts on it.
-  var TITLE4 = "Overview";
+  var TITLE5 = "Overview";
   function tile(glyph, label, value, note, href) {
     const parts = [el("span", { class: "label" }, icon(glyph), label), el("span", { class: "value" }, value), el("span", { class: "note" }, note)];
     return href === void 0 ? el("div", { class: "tile" }, ...parts) : el("a", { class: "tile", href }, ...parts);
@@ -922,10 +1032,10 @@
     );
   }
   async function status(screen) {
-    loading(screen, TITLE4, "the node's status");
+    loading(screen, TITLE5, "the node's status");
     const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
     if (!answer.ok) {
-      failed(screen, TITLE4, answer);
+      failed(screen, TITLE5, answer);
       return;
     }
     if (!screen.live()) {
@@ -941,7 +1051,7 @@
     );
     fill(
       screen.main,
-      head(TITLE4, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
+      head(TITLE5, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
       el(
         "div",
         { class: "tiles" },
@@ -998,6 +1108,290 @@
     show();
   }
 
+  // src/user-actions.ts
+  //! A user row's actions, each opening an inline region under the row: issuing
+  //! a key (its secret is shown here once and never again — the server keeps it
+  //! sealed and will not hand it back), disabling or enabling the user, and
+  //! granting or removing access to one bucket. Every one takes a reason.
+  var COLUMNS = "6";
+  function settle(screen, failure) {
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function open(line, region) {
+    const next2 = line.nextElementSibling;
+    if (next2 instanceof HTMLTableRowElement && next2.classList.contains("asking")) {
+      next2.remove();
+    }
+    const ask = el("tr", { class: "asking" }, el("td", { colspan: COLUMNS }, region));
+    line.after(ask);
+    return () => ask.remove();
+  }
+  function shownOnce(key, done) {
+    const copy = el("button", { type: "button" }, "Copy secret");
+    const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
+    const said = el("p", { class: "hint", "aria-live": "polite" });
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(key.secret_access_key);
+        said.textContent = "Copied.";
+      } catch {
+        said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
+      }
+    });
+    finish.addEventListener("click", done);
+    queueMicrotask(() => copy.focus());
+    return el(
+      "div",
+      { class: "once", role: "alert" },
+      el("p", {}, el("strong", {}, "Store this secret now. "), "It is shown once; the server will not show it again."),
+      el("dl", {}, el("dt", {}, "Access key id"), el("dd", {}, mono(key.access_key_id)), el("dt", {}, "Secret access key"), el("dd", {}, mono(key.secret_access_key))),
+      el("div", { class: "actions" }, copy, finish),
+      said
+    );
+  }
+  function issueKey(screen, user2, line, opener) {
+    const region = el("div", {});
+    const close = open(line, region);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        `key-${user2.name}`,
+        mono(user2.name),
+        "A new access key for this user. Its secret is shown once, right here.",
+        "Issue key",
+        async (reason) => {
+          const answer = await call("POST", `/users/${encodeURIComponent(user2.name)}/keys`, readIssued, { reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(`Issued a key for ${user2.name}. Store its secret now.`);
+          fill(region, shownOnce(answer.value, () => {
+            fill(region);
+            back();
+          }));
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function setDisabled(screen, user2, line, opener) {
+    const disable = !user2.disabled;
+    const region = el("div", {});
+    const close = open(line, region);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        `state-${user2.name}`,
+        mono(user2.name),
+        disable ? "Every key of this user stops working within five seconds, on every node." : "The user's keys work again within five seconds.",
+        disable ? "Disable user" : "Enable user",
+        async (reason) => {
+          const answer = await call("PUT", `/users/${encodeURIComponent(user2.name)}/disabled`, ignored, { disabled: disable, reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(`${disable ? "Disabled" : "Enabled"} ${user2.name}.`);
+          screen.redraw();
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function grants(screen, user2, line, opener) {
+    const id = `grant-${user2.name}`;
+    const bucket2 = field(`${id}-bucket`, "Bucket", { spellcheck: "false", autocomplete: "off", required: "" }, `A bucket of space ${user2.space}.`);
+    const read = el("input", { id: `${id}-read`, type: "checkbox", checked: "" });
+    const write = el("input", { id: `${id}-write`, type: "checkbox" });
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const grant = el("button", { type: "submit", class: "primary" }, "Grant");
+    const remove = el("button", { type: "button", class: "danger" }, "Remove grant");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Bucket access: "), mono(user2.name)),
+      bucket2.row,
+      el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write")),
+      reason.row,
+      el("div", { class: "actions" }, grant, remove, cancel),
+      said
+    );
+    const close = open(line, form);
+    const back = () => {
+      close();
+      opener.focus();
+    };
+    const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
+    const done = (words) => {
+      announce(words);
+      back();
+    };
+    const show = (failure) => {
+      const shown = settle(screen, failure);
+      if (shown !== null) {
+        fill(said, refusal(shown));
+      }
+    };
+    cancel.addEventListener("click", back);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        back();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
+      if (answer.ok) {
+        done(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+      } else {
+        show(answer);
+      }
+    });
+    remove.addEventListener("click", async () => {
+      const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
+      if (answer.ok) {
+        done(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+      } else {
+        show(answer);
+      }
+    });
+    queueMicrotask(() => bucket2.input.focus());
+  }
+  function rowActions(screen, user2, line) {
+    const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
+    const state2 = el("button", { type: "button", class: "quiet" }, user2.disabled ? "Enable…" : "Disable…");
+    const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
+    key.addEventListener("click", () => issueKey(screen, user2, line, key));
+    state2.addEventListener("click", () => setDisabled(screen, user2, line, state2));
+    access.addEventListener("click", () => grants(screen, user2, line, access));
+    return [key, state2, access];
+  }
+
+  // src/users.ts
+  //! Users: operators see every space's users, a space admin its own space's.
+  //! Creating a user is judged by the server on the user it would be, so a space
+  //! admin who asks for an administrator, an operator or a cluster viewer is told
+  //! the key does not allow it. Each row's actions are in `user-actions.ts`.
+  var TITLE6 = "Users";
+  function check(id, label) {
+    const input = el("input", { id, name: id, type: "checkbox" });
+    return { row: el("label", { class: "check", for: id }, input, label), input };
+  }
+  function createForm3(screen, opener) {
+    const name = field("new-user", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique across the store.");
+    const space2 = field("new-user-space", "Space", { spellcheck: "false", autocomplete: "off", required: "" });
+    const role2 = el("select", { id: "new-user-role" }, el("option", { value: "member" }, "Member"), el("option", { value: "space_admin" }, "Space admin"));
+    const creates = check("new-user-creates", "May create buckets");
+    const operates = check("new-user-operator", "Operator (every space)");
+    const views = check("new-user-viewer", "Sees the cluster");
+    const reason = field("new-user-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const form = el(
+      "form",
+      { id: "new-user-form", class: "card", novalidate: "", hidden: "", "aria-labelledby": "new-user-title" },
+      el("h2", { id: "new-user-title" }, "New user"),
+      name.row,
+      space2.row,
+      el("div", { class: "field" }, el("label", { for: role2.id }, "Role"), role2),
+      el("fieldset", { class: "checks" }, el("legend", {}, "Permissions"), creates.row, operates.row, views.row),
+      reason.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create user"), cancel),
+      said
+    );
+    const close = () => {
+      form.hidden = true;
+      opener.setAttribute("aria-expanded", "false");
+      opener.focus();
+    };
+    opener.addEventListener("click", () => {
+      form.hidden = false;
+      opener.setAttribute("aria-expanded", "true");
+      name.input.focus();
+    });
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const wanted = name.input.value.trim();
+      const answer = await call("POST", "/users", ignored, {
+        name: wanted,
+        space: space2.input.value.trim(),
+        role: role2.value,
+        create_buckets: creates.input.checked,
+        operator: operates.input.checked,
+        cluster_viewer: views.input.checked,
+        reason: reason.input.value.trim()
+      });
+      if (!answer.ok) {
+        if (answer.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(answer));
+        return;
+      }
+      announce(`Created user ${wanted}. Issue a key so it can sign in.`);
+      screen.redraw();
+    });
+    return form;
+  }
+  function standing(user2) {
+    const parts = [user2.role === "space_admin" ? "space admin" : "member"];
+    if (user2.create_buckets) parts.push("creates buckets");
+    if (user2.operator) parts.push("operator");
+    if (user2.cluster_viewer) parts.push("sees the cluster");
+    return parts.join(" · ");
+  }
+  function userRow(screen, user2) {
+    const state2 = el("span", { class: user2.disabled ? "chip bad" : "chip ok" }, user2.disabled ? "Disabled" : "Active");
+    const buttons = el("div", { class: "actions" });
+    const line = row(mono(user2.name), mono(user2.space), standing(user2), state2, moment(user2.created), buttons);
+    buttons.append(...rowActions(screen, user2, line));
+    return line;
+  }
+  async function users(screen) {
+    loading(screen, TITLE6, "users");
+    const answer = await call("GET", "/users", readUsers);
+    if (!answer.ok) {
+      failed(screen, TITLE6, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-user-form" }, icon("plus"), "New user");
+    fill(
+      screen.main,
+      head(TITLE6, `${answer.value.length.toLocaleString()} you administer`, opener),
+      createForm3(screen, opener),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No users yet. Create one with “New user”, then issue it a key.") : table("Users", ["Name", "Space", "Standing", "State", "Created", "Actions"], answer.value.map((user2) => userRow(screen, user2)))
+      )
+    );
+  }
+
   // src/console.ts
   //! The console's entry point: one view at a time, chosen by the URL's hash, so
   //! a reload or a shared link lands on the same view. A view that answers 401
@@ -1015,6 +1409,10 @@
         return objects(screen, route.bucket, route.prefix, route.cursor);
       case "object":
         return object(screen, route.bucket, route.key);
+      case "users":
+        return users(screen);
+      case "spaces":
+        return spaces(screen);
       case "actions":
         return actions(screen, route.before);
     }
@@ -1061,7 +1459,7 @@
     announce("Signed out.");
     showSignIn();
   });
-  var SECTION_ICONS = { status: "overview", buckets: "buckets", actions: "record" };
+  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", actions: "record" };
   for (const link of all("[data-section]")) {
     const name = SECTION_ICONS[link.dataset["section"] ?? ""];
     if (name !== void 0) {

@@ -1,4 +1,4 @@
-//! Signing in with the node's root access key. The secret goes to the server
+//! Signing in with an access key — the node's root key or a key issued to a user. The secret goes to the server
 //! once; what the browser keeps is an HttpOnly session cookie it cannot read,
 //! and the fields are cleared as soon as the answer arrives.
 
@@ -18,7 +18,7 @@ export function signIn(main: HTMLElement, done: () => void): void {
     { class: "card", novalidate: "" },
     el("img", { class: "logo", src: "/favicon.svg", alt: "", width: "48", height: "48" }),
     heading("Sign in to TessariDB S3"),
-    el("p", { class: "muted" }, "Use the root access key this node was started with. The session lasts one hour."),
+    el("p", { class: "muted" }, "Use your access key: one issued to your user, or the root key this node was started with. The session lasts one hour."),
     key.row,
     secret.row,
     submit,

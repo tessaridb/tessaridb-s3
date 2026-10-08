@@ -806,6 +806,7 @@ label {
 }
 
 input,
+select,
 textarea {
   font: inherit;
   color: var(--text);
@@ -818,6 +819,7 @@ textarea {
 }
 
 input:hover,
+select:hover,
 textarea:hover {
   border-color: var(--border-strong);
 }
@@ -900,6 +902,47 @@ button.quiet:hover {
   flex-wrap: wrap;
   gap: var(--s-3);
   margin-block-start: var(--s-2);
+}
+
+/* A group of checkboxes: each box sits before its words, on one line. */
+.checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3) var(--s-5);
+  border: 0;
+  padding: 0;
+  margin: 0 0 var(--s-5);
+}
+
+.checks legend {
+  font-weight: 600;
+  font-size: var(--t-data);
+  margin-block-end: var(--s-2);
+  inline-size: 100%;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-weight: 450;
+}
+
+.check input {
+  min-block-size: auto;
+  accent-color: var(--accent);
+}
+
+/* A secret shown once: set apart so it is not mistaken for ordinary output. */
+.once {
+  border: 1px solid var(--warn);
+  border-radius: var(--control-radius);
+  padding: var(--s-4) var(--s-5);
+}
+
+.once dd {
+  margin: 0 0 var(--s-3);
+  overflow-wrap: anywhere;
 }
 
 .message.bad {

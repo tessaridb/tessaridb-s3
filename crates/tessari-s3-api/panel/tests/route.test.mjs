@@ -11,6 +11,8 @@ test("every route survives format then parse", () => {
   const routes = [
     { kind: "status" },
     { kind: "buckets" },
+    { kind: "users" },
+    { kind: "spaces" },
     { kind: "actions", before: null },
     { kind: "actions", before: 42 },
   ];
@@ -37,4 +39,11 @@ test("an unknown or malformed hash is the overview, never an error", () => {
   }
   assert.deepEqual(parse("#/o/b1b"), { kind: "status" });
   assert.deepEqual(parse("#/actions?before=x"), { kind: "actions", before: null });
+});
+
+test("users and spaces are their own views", () => {
+  assert.equal(format({ kind: "users" }), "#/users");
+  assert.equal(format({ kind: "spaces" }), "#/spaces");
+  assert.deepEqual(parse("#/users"), { kind: "users" });
+  assert.deepEqual(parse("#/spaces"), { kind: "spaces" });
 });

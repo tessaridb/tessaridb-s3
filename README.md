@@ -75,7 +75,7 @@ claims it; the two marked **tested** already are:
 |---|---|
 | Stage | pre-alpha |
 | Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented`; on a cluster (`TESSARIDB_S3_ERASURE`): RS(k, m) shards one per node, write quorum k (k + 1 when k = m), reads from any k verified shards, background healing (one node at a time per object, under a claim in TessariDB; shard bytes no object can reach are swept), the internal surface over mutual TLS when configured — tested with a node killed mid-write and mid-read and the metadata leader killed |
-| Console | a web page on its own listener (sign-in, overview with stored bytes and drive space, buckets with their size, object browser, downloads, ETag-guarded deletes with reasons, the action record; light and dark) over a JSON API |
+| Console | a web page on its own listener (sign-in, overview with stored bytes and drive space, buckets with their size, object browser, downloads, ETag-guarded deletes with reasons, spaces and users with keys shown once and bucket grants, the action record; light and dark) over a JSON API |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
@@ -124,8 +124,9 @@ with a bound record cursor, which earlier releases refuse. The process reads its
 | `TESSARIDB_S3_CLUSTER_SECRET` | — | key for internal request signatures, at least 32 bytes, the same on every node |
 | `TESSARIDB_S3_INTERNAL_TLS_CERT` / `_KEY` / `_CA` | unset (plain) | the internal surface over mutual TLS: this node's certificate chain (PEM, valid for the host it advertises), its private key, and the cluster's certificate authority — all three or none. Every connection must then present a certificate that authority issued before a request is read, and every call to another node checks its certificate the same way; TLS 1.2 and 1.3 only |
 | `TESSARIDB_S3_HEAL_INTERVAL_SECS` | `60` | time between healing passes on a cluster member: each rewrites the missing or damaged shards of objects listed for healing |
-| `TESSARIDB_S3_CONSOLE_LISTEN` | unset (no console) | where the operator console listens, on its own address apart from the S3 API. Signing in takes the root access key and secret and gives a one-hour session cookie (HttpOnly, SameSite=Strict); every other console route needs it |
-| `TESSARIDB_S3_CONSOLE_TLS_CERT` / `_KEY` | unset (plain) | the console over TLS: its certificate chain and private key (PEM), both or neither. Without them the root secret crosses the network in the clear when an operator signs in, so keep the console on a private address; the node says so when it starts |
+| `TESSARIDB_S3_IAM_KEY` | unset (no user keys) | 64 hexadecimal digits: the root from which each space's key for sealing users' access-key secrets is derived. Without it no key can be issued or resolved, so only the root credential signs in. Keep it like the root secret; a node that loses it can open no user's key |
+| `TESSARIDB_S3_CONSOLE_LISTEN` | unset (no console) | where the operator console listens, on its own address apart from the S3 API. Signing in takes an access key and its secret — the root key, or a key issued to a user — and gives a one-hour session cookie (HttpOnly, SameSite=Strict); every other console route needs it |
+| `TESSARIDB_S3_CONSOLE_TLS_CERT` / `_KEY` | unset (plain) | the console over TLS: its certificate chain and private key (PEM), both or neither. Without them a secret crosses the network in the clear when an operator signs in, so keep the console on a private address; the node says so when it starts |
 | `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` | `10` | sign-in attempts accepted per client address per minute; the limit is checked before the credential |
 | `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` | `600` | console requests accepted per signed-in key per minute |
 
@@ -134,7 +135,7 @@ the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
 server after the grace period.
 
 With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console: open that address in a browser
-and sign in with the root access key. The page needs nothing from the network — no font, no script from anywhere
+and sign in with an access key — the root key, or one issued to a user. The page needs nothing from the network — no font, no script from anywhere
 else — and runs only its own script under a strict content security policy. Everything it does goes through the
 JSON API under `/api/v1`, which can be called directly. After signing in (`POST /api/v1/session`) an operator can read the node's
 status — this node's data drive (capacity, free, available) and, on a cluster member, its members, whether each answers,

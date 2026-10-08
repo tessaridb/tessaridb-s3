@@ -20,6 +20,8 @@ export type Screen = {
 /** What to tell the operator about `failure`, beyond the server's own message. */
 function next(failure: Failure): string {
   switch (failure.code) {
+    case "forbidden":
+      return "Your key does not allow this. Ask an operator or your space's administrator.";
     case "rate_limit":
       return "Wait a minute, then try again.";
     case "unavailable":
@@ -49,8 +51,9 @@ export function failed(screen: Screen, title: string, failure: Failure): void {
     screen.signIn();
     return;
   }
-  const retry = el("button", { type: "button" }, "Try again");
-  retry.addEventListener("click", screen.redraw);
+  // A refusal of the key's authority does not change on a retry, so it offers none.
+  const retry = failure.status === 403 ? null : el("button", { type: "button" }, "Try again");
+  retry?.addEventListener("click", screen.redraw);
   fill(screen.main, head(title), el("div", { class: "card" }, refusal(failure), retry));
 }
 

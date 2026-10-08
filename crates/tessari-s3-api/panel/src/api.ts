@@ -22,7 +22,7 @@ export function search(pairs: ReadonlyArray<readonly [string, string | number | 
 
 /** Calls `method route`, sending `body` as JSON when given, and reads the answer with `read`. */
 export async function call<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   route: string,
   read: (value: unknown) => T | null,
   body?: Readonly<Record<string, unknown>>,

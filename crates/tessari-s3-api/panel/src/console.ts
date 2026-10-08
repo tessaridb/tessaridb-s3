@@ -13,8 +13,10 @@ import { parse, type Route } from "./route.ts";
 import type { Screen } from "./screen.ts";
 import { signIn } from "./signin.ts";
 import { icon, type IconName } from "./icons.ts";
+import { spaces } from "./spaces.ts";
 import { status } from "./status.ts";
 import { themes } from "./theme.ts";
+import { users } from "./users.ts";
 
 const main = at("view");
 const signOut = at("sign-out");
@@ -32,6 +34,10 @@ function draw(route: Route, screen: Screen): Promise<void> {
       return objects(screen, route.bucket, route.prefix, route.cursor);
     case "object":
       return object(screen, route.bucket, route.key);
+    case "users":
+      return users(screen);
+    case "spaces":
+      return spaces(screen);
     case "actions":
       return actions(screen, route.before);
   }
@@ -83,7 +89,7 @@ signOut.addEventListener("click", async () => {
   announce("Signed out.");
   showSignIn();
 });
-const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", actions: "record" };
+const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", actions: "record" };
 for (const link of all("[data-section]")) {
   const name = SECTION_ICONS[link.dataset["section"] ?? ""];
   if (name !== undefined) {

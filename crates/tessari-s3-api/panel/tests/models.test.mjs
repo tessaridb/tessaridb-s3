@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readStatus, readUsage } from "../src/models.ts";
+import { readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false }, drive: own });
@@ -31,4 +31,26 @@ test("usage reads buckets with their figures, and a measurement never taken", ()
   assert.deepEqual(readUsage(taken), taken);
   assert.deepEqual(readUsage({ taken: null, buckets: [], objects: 0, bytes: 0 }), { taken: null, buckets: [], objects: 0, bytes: 0 });
   assert.equal(readUsage({ taken: null, buckets: [{ bucket: "media", objects: "2", bytes: 30 }], objects: 0, bytes: 0 }), null);
+});
+
+const ann = { name: "ann", space: "alpha", role: "member", create_buckets: true, operator: false, cluster_viewer: false, disabled: false, created: "2026-10-08T10:00:00.000Z" };
+
+test("users read with their role, their flags and whether they are disabled", () => {
+  assert.deepEqual(readUsers({ users: [ann] }), [ann]);
+  assert.equal(readUsers({ users: [{ ...ann, role: "root" }] }), null, "a role the server does not have");
+  assert.equal(readUsers({ users: [{ ...ann, disabled: "no" }] }), null);
+  const { operator: _gone, ...withoutOperator } = ann;
+  assert.equal(readUsers({ users: [withoutOperator] }), null);
+});
+
+test("spaces read with their creation time", () => {
+  const spaces = { spaces: [{ name: "alpha", created: "2026-10-08T10:00:00.000Z" }] };
+  assert.deepEqual(readSpaces(spaces), spaces.spaces);
+  assert.equal(readSpaces({ spaces: [{ name: "alpha" }] }), null);
+});
+
+test("an issued key carries its id and its secret, both as text", () => {
+  const key = { access_key_id: "TSABCDEFGHIJKLMNOPQR", secret_access_key: "s".repeat(40) };
+  assert.deepEqual(readIssued(key), key);
+  assert.equal(readIssued({ access_key_id: "TSABCDEFGHIJKLMNOPQR" }), null);
 });

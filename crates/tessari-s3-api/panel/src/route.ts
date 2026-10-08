@@ -6,6 +6,8 @@
 export type Route =
   | { readonly kind: "status" }
   | { readonly kind: "buckets" }
+  | { readonly kind: "users" }
+  | { readonly kind: "spaces" }
   | { readonly kind: "objects"; readonly bucket: string; readonly prefix: string; readonly cursor: string | null }
   | { readonly kind: "object"; readonly bucket: string; readonly key: string }
   | { readonly kind: "actions"; readonly before: number | null };
@@ -26,6 +28,10 @@ export function format(route: Route): string {
       return "#/";
     case "buckets":
       return "#/buckets";
+    case "users":
+      return "#/users";
+    case "spaces":
+      return "#/spaces";
     case "objects":
       return `#/b/${encodeURIComponent(route.bucket)}${query([
         ["prefix", route.prefix === "" ? null : route.prefix],
@@ -56,6 +62,12 @@ export function parse(hash: string): Route {
   try {
     if (path === "/buckets") {
       return { kind: "buckets" };
+    }
+    if (path === "/users") {
+      return { kind: "users" };
+    }
+    if (path === "/spaces") {
+      return { kind: "spaces" };
     }
     if (path === "/actions") {
       return { kind: "actions", before: position(params.get("before")) };
