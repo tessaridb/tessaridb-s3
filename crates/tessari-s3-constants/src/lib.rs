@@ -131,6 +131,12 @@ pub const DEFAULT_UPLOAD_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
 /// Uploads one reaper pass aborts at most.
 pub const REAP_BATCH: usize = 1000;
 
+/// Seconds between healing passes on a cluster member, when `TESSARIDB_S3_HEAL_INTERVAL_SECS` is unset.
+pub const DEFAULT_HEAL_INTERVAL_SECS: u64 = 60;
+
+/// Data ids one healing pass looks at.
+pub const HEAL_BATCH: usize = 100;
+
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 

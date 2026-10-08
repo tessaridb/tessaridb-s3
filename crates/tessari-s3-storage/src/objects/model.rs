@@ -110,6 +110,17 @@ pub struct Reclaimed {
     pub kept: usize,
 }
 
+/// What one healing pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Healed {
+    /// Listed data ids that were looked at.
+    pub examined: usize,
+    /// Ids whose every shard is whole again (or whose data is gone), unlisted.
+    pub healed: usize,
+    /// Ids with fewer readable shards than the read quorum, left listed.
+    pub at_risk: usize,
+}
+
 /// What a delete ended in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Removed {

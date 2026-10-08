@@ -25,7 +25,7 @@ pub(crate) struct Peer {
 /// This node's state and storage, the planter pool, its data directory and its five peers.
 pub(crate) struct Member {
     pub(crate) state: ApiState,
-    storage: Storage,
+    pub(crate) storage: Storage,
     pub(crate) planter: MetaPool,
     pub(crate) dir: PathBuf,
     pub(crate) peers: Vec<Peer>,

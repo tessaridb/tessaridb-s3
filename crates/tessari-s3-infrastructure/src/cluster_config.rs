@@ -1,10 +1,10 @@
 //! The cluster half of the configuration: read together or not at all, because a node with some of it would join a
 //! cluster it cannot serve.
 
-use tessari_s3_constants::CLUSTER_SECRET_MIN_LEN;
+use tessari_s3_constants::{CLUSTER_SECRET_MIN_LEN, DEFAULT_HEAL_INTERVAL_SECS};
 use tessari_s3_types::{Code, NodeId, SecretKey};
 
-use crate::config::ClusterSettings;
+use crate::config::{ClusterSettings, parse_positive};
 use crate::{Error, Result};
 
 /// Every variable of the cluster group but the code itself.
@@ -66,12 +66,20 @@ pub(crate) fn cluster_settings(
             "shorter than 32 bytes",
         ));
     }
+    let heal_interval_secs = parse_positive(
+        get("TESSARIDB_S3_HEAL_INTERVAL_SECS"),
+        "TESSARIDB_S3_HEAL_INTERVAL_SECS",
+    )?
+    .map_or(Ok(DEFAULT_HEAL_INTERVAL_SECS), |secs| {
+        u64::try_from(secs).map_err(|_| invalid("TESSARIDB_S3_HEAL_INTERVAL_SECS", "too large"))
+    })?;
     Ok(Some(ClusterSettings {
         node,
         code,
         internal_listen,
         internal_advertise,
         secret: SecretKey::new(secret),
+        heal_interval_secs,
     }))
 }
 

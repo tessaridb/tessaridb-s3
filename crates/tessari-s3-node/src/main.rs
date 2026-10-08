@@ -1,7 +1,7 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
 //! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
-//! configured, and the upload reaper), the API state and router, the listener — and, on a node of a cluster, the
+//! configured, the healer on a cluster member, and the upload reaper), the API state and router, the listener — and, on a node of a cluster, the
 //! internal shard listener — then serving until SIGINT or SIGTERM, after which in-flight
 //! requests and the daemons' current runs get the configured grace period before the process exits.
 
@@ -14,7 +14,7 @@ use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
-use tessari_s3_daemons::{Reclaimer, UploadReaper, run};
+use tessari_s3_daemons::{Healer, Reclaimer, UploadReaper, run};
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -57,6 +57,13 @@ async fn main() -> anyhow::Result<()> {
             Duration::from_secs(config.reclaim_interval_secs),
         );
         daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
+    }
+    if let Some(cluster) = &config.cluster {
+        let healer = Healer::new(
+            storage.objects().clone(),
+            Duration::from_secs(cluster.heal_interval_secs),
+        );
+        daemons.spawn(run(Arc::new(healer), stop_rx.clone()));
     }
     // Uploads can be opened without a data directory, so the reaper always runs.
     let reaper = UploadReaper::new(

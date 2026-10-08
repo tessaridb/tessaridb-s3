@@ -12,7 +12,7 @@ use tessari_s3_types::NodeId;
 use tokio::sync::OnceCell;
 
 use super::read::ErasureReader;
-use super::repository::ShardSetRepository;
+use super::repository::{ShardSet, ShardSetRepository};
 use super::tessaridb::TessariShardSets;
 use super::upload::{Destination, ErasurePlan, ErasureUpload};
 use crate::cluster::ClusterService;
@@ -28,7 +28,7 @@ pub(crate) struct ErasureWrites {
     cluster: ClusterService,
     shards: ShardService,
     peers: RemoteShards,
-    sets: TessariShardSets,
+    pub(super) sets: TessariShardSets,
     stall: Duration,
     /// Layouts never change once created, so the first one read is kept.
     layout: OnceCell<Layout>,
@@ -109,7 +109,11 @@ impl ErasureWrites {
     /// [`Error::NoLayout`], the metadata store's refusal or outage, or a plan that does not fit the code.
     pub(crate) async fn start(&self, id: [u8; 16], size: u64) -> Result<ErasureUpload> {
         let layout = self.layout().await?;
-        self.sets.queue(id, layout.version()).await?;
+        let set = ShardSet {
+            layout: layout.version(),
+            size,
+        };
+        self.sets.queue(id, set).await?;
         let destinations = self.destinations(id, layout).await?;
         let plan = ErasurePlan {
             id,
@@ -127,7 +131,7 @@ impl ErasureWrites {
     /// # Errors
     /// The metadata store's refusal or outage.
     pub(crate) async fn sharded(&self, id: [u8; 16]) -> Result<Option<u32>> {
-        self.sets.layout_of(id).await
+        Ok(self.sets.shard_set(id).await?.map(|set| set.layout))
     }
 
     /// A reader of data `id` holding `size` bytes when it is erasure-coded, `None` when it is a whole file.
@@ -139,18 +143,31 @@ impl ErasureWrites {
         id: [u8; 16],
         size: u64,
     ) -> Result<Option<ErasureReader>> {
-        let Some(version) = self.sets.layout_of(id).await? else {
+        let Some((_, sources)) = self.sources_of(id).await? else {
+            return Ok(None);
+        };
+        ErasureReader::new(Arc::clone(self), id, size, sources).map(Some)
+    }
+
+    /// Data `id`'s shard set and where each of its shards is, when it is erasure-coded.
+    ///
+    /// # Errors
+    /// [`Error::Malformed`] for a layout this node does not hold, [`Error::NoLayout`], or the store's refusal.
+    pub(super) async fn sources_of(
+        &self,
+        id: [u8; 16],
+    ) -> Result<Option<(ShardSet, Vec<Destination>)>> {
+        let Some(set) = self.sets.shard_set(id).await? else {
             return Ok(None);
         };
         let layout = self.layout().await?;
-        if layout.version() != version {
+        if layout.version() != set.layout {
             return Err(Error::Malformed {
                 record: "shard_sets",
                 reason: "a layout this node does not hold",
             });
         }
-        let sources = self.destinations(id, layout).await?;
-        ErasureReader::new(Arc::clone(self), id, size, sources).map(Some)
+        Ok(Some((set, self.destinations(id, layout).await?)))
     }
 
     /// Lists data `id` for healing: it was acknowledged with fewer than every shard durable.

@@ -8,14 +8,14 @@ use crate::erasure::{Member, count, member};
 use crate::{IGNORED, call, call_with};
 
 /// 2.5 MiB that differ from stripe to stripe: three stripes, the last one short.
-fn striped() -> Vec<u8> {
+pub(crate) fn striped() -> Vec<u8> {
     (0..2_621_440_u32)
         .map(|i| u8::try_from(i.wrapping_mul(31).wrapping_add(i >> 20) % 251).expect("small"))
         .collect()
 }
 
 /// The file of shard `index` on whichever node holds it.
-fn shard_file(member: &Member, index: u16) -> PathBuf {
+pub(crate) fn shard_file(member: &Member, index: u16) -> PathBuf {
     let suffix = format!(".s{index}");
     std::iter::once(&member.dir)
         .chain(member.peers.iter().map(|peer| &peer.dir))
@@ -35,7 +35,7 @@ fn find(dir: &Path, suffix: &str) -> Option<PathBuf> {
 }
 
 /// A cluster member holding `striped()` at `/shards/big`.
-async fn written() -> Member {
+pub(crate) async fn written() -> Member {
     let member = member().await;
     assert_eq!(
         call(&member.state, "PUT", "/shards", vec![], b"")
@@ -48,7 +48,7 @@ async fn written() -> Member {
     member
 }
 
-async fn read_back(member: &Member) -> Vec<u8> {
+pub(crate) async fn read_back(member: &Member) -> Vec<u8> {
     let read = call(&member.state, "GET", "/shards/big", vec![], b"").await;
     assert_eq!(read.status, 200, "{}", read.body);
     read.bytes

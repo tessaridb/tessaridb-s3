@@ -61,6 +61,8 @@ pub struct ClusterSettings {
     pub internal_advertise: String,
     /// `TESSARIDB_S3_CLUSTER_SECRET` — the key internal requests are signed with (at least 32 bytes).
     pub secret: SecretKey,
+    /// `TESSARIDB_S3_HEAL_INTERVAL_SECS` — time between healing passes (positive).
+    pub heal_interval_secs: u64,
 }
 
 impl S3Config {
@@ -246,7 +248,7 @@ fn replication(text: Option<String>, nodes: usize) -> Result<Replication> {
 }
 
 /// Parses an optional positive integer.
-fn parse_positive(text: Option<String>, key: &'static str) -> Result<Option<usize>> {
+pub(crate) fn parse_positive(text: Option<String>, key: &'static str) -> Result<Option<usize>> {
     text.map(|text| {
         text.trim()
             .parse::<usize>()

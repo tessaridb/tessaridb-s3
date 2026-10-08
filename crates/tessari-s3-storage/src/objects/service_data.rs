@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::ObjectService;
 use crate::data::DataFiles;
 use crate::objects::ObjectReader;
-use crate::objects::model::Reclaimed;
+use crate::objects::model::{Healed, Reclaimed};
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
 use crate::{Error, Result};
@@ -106,6 +106,17 @@ impl ObjectService {
             done.removed = done.removed.saturating_add(1);
         }
         Ok(done)
+    }
+
+    /// Rewrites the missing or damaged shards of up to `limit` data ids listed for healing.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn heal(&self, limit: usize) -> Result<Healed> {
+        match &self.erasure {
+            Some(writes) => writes.heal_pass(limit).await,
+            None => Ok(Healed::default()),
+        }
     }
 
     /// Opens data `id` holding an object of `size` bytes, its header and length checked.

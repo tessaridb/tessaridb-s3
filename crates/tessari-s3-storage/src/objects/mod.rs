@@ -9,8 +9,8 @@ mod tessaridb;
 mod upload;
 
 pub use model::{
-    Content, Listed, Multipart, NewObject, ObjectSummary, Part, Reclaimed, Removed, StoredObject,
-    WriteCondition, Written,
+    Content, Healed, Listed, Multipart, NewObject, ObjectSummary, Part, Reclaimed, Removed,
+    StoredObject, WriteCondition, Written,
 };
 pub use reader::ObjectReader;
 pub use service::ObjectService;

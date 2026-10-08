@@ -60,7 +60,7 @@ THEN { LET $listed = $before.position; DELETE pending:$listed; };
 DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUIRED, seen datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS layouts (\
  version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
-DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED);
+DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE TABLE IF NOT EXISTS heals (data uuid REQUIRED, queued datetime REQUIRED);
 COMMIT;
 ";

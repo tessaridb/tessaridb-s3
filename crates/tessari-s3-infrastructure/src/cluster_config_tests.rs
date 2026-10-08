@@ -74,3 +74,23 @@ fn a_partial_or_invalid_cluster_setting_is_refused_by_name() {
         );
     }
 }
+
+#[test]
+fn healing_runs_every_minute_unless_told_otherwise() {
+    let cluster = |vars: &[(&'static str, &'static str)]| {
+        load(vars).map(|config| config.cluster.expect("clustered").heal_interval_secs)
+    };
+    assert_eq!(cluster(&with(&CLUSTER)), Ok(60));
+    let mut set = with(&CLUSTER);
+    set.push(("TESSARIDB_S3_HEAL_INTERVAL_SECS", "15"));
+    assert_eq!(cluster(&set), Ok(15));
+    let mut zero = with(&CLUSTER);
+    zero.push(("TESSARIDB_S3_HEAL_INTERVAL_SECS", "0"));
+    assert!(matches!(
+        cluster(&zero),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_HEAL_INTERVAL_SECS",
+            ..
+        })
+    ));
+}

@@ -117,6 +117,69 @@ impl ErasureReader {
             })
     }
 
+    /// The data id this reader reads.
+    pub(super) const fn id(&self) -> [u8; 16] {
+        self.id
+    }
+
+    /// The stripe geometry this reader decodes with.
+    pub(super) const fn stripes(&self) -> &Stripes {
+        &self.stripes
+    }
+
+    /// Bytes each shard holds.
+    pub(super) const fn shard_size(&self) -> u64 {
+        self.shard_size
+    }
+
+    /// Whether shard `shard` is present at its full length with every block verified; any failure is `false`.
+    pub(super) async fn intact(&self, shard: usize) -> bool {
+        let stripes = self.stripes.stripe_count(self.size);
+        let (Ok(index), Some(source)) = (u16::try_from(shard), self.sources.get(shard)) else {
+            return false;
+        };
+        match source {
+            Destination::Local => {
+                let Ok(reader) = self
+                    .writes
+                    .shards()
+                    .open(self.id, index, self.shard_size)
+                    .await
+                else {
+                    return false;
+                };
+                for block in 0..stripes {
+                    if reader.read_block(block).await.is_err() {
+                        return false;
+                    }
+                }
+                true
+            }
+            Destination::Remote(endpoint) => {
+                let budget = self
+                    .writes
+                    .stall()
+                    .saturating_mul(u32::try_from(stripes.saturating_add(1)).unwrap_or(u32::MAX));
+                let shard = ShardRef { id: self.id, index };
+                let Ok(body) = self
+                    .writes
+                    .peers()
+                    .get(endpoint, shard, self.shard_size, None, budget)
+                    .await
+                else {
+                    return false;
+                };
+                // Counted, not kept: the peer verifies each block before sending it and stops at a failed one.
+                let received = body
+                    .try_fold(0_u64, |total, part| async move {
+                        Ok(total.saturating_add(u64::try_from(part.len()).unwrap_or(u64::MAX)))
+                    })
+                    .await;
+                received.is_ok_and(|total| total == self.shard_size)
+            }
+        }
+    }
+
     /// The bytes stripe `index` holds: a whole stripe, or what is left of the object.
     fn stripe_len(&self, index: u64) -> Result<usize> {
         let start = index

@@ -18,6 +18,10 @@ section records which TessariDB version its metadata runs on.
   shards whose blocks verify; a shard that is missing, damaged or on a node that does not answer is replaced by the
   next one, and a read that had to do so lists the object for healing. Fewer than k readable shards answer
   `503 ServiceUnavailable`.
+- Healing: every cluster member runs a healing pass every `TESSARIDB_S3_HEAL_INTERVAL_SECS` (default 60). Each
+  object listed for healing has every shard checked block by block; a missing or damaged shard is rebuilt from the
+  others and written back to its node, byte for byte as it was written, and a shard that verifies is never touched.
+  An object with fewer than k readable shards stays listed and is logged as at risk.
 - Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion
   settings a node registers itself in the metadata on start-up, and the cluster's first layout — the lowest k + m
   registered node ids — is created once however many nodes propose it. Object data is still stored per node.

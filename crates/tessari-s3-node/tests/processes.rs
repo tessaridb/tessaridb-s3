@@ -1,6 +1,7 @@
 //! Six `tessaridb-s3` processes forming one RS(4, 2) cluster over a fresh TessariDB namespace, driven over real HTTP:
 //! an object written through one node's S3 surface lands as one shard on every node; with two nodes killed it is
-//! still acknowledged and listed for healing; with three killed nothing is acknowledged or committed.
+//! still acknowledged and listed for healing; with three killed nothing is acknowledged or committed; brought back,
+//! the killed nodes receive the shards they missed from the healer.
 //!
 //! Needs `TESSARIDB_S3_TEST_META` (a node's wire `host:port`), `TESSARIDB_S3_TEST_META_USER` and
 //! `TESSARIDB_S3_TEST_META_PASSWORD`; without them the test is `ignored`, and
@@ -29,6 +30,8 @@ const SECRET: &str = "process-test-secret-0123456789abcdef";
 const CLUSTER_SECRET: &str = "process-cluster-secret-0123456789abcd";
 /// How long one process may take to open its S3 port: schema, registration and both listeners.
 const READY_WITHIN: Duration = Duration::from_secs(30);
+/// How long the restarted cluster may take to heal: passes run every second.
+const HEALED_WITHIN: Duration = Duration::from_secs(60);
 
 fn need(key: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for this test"))
@@ -40,16 +43,19 @@ fn free_port() -> u16 {
     listener.local_addr().expect("bound").port()
 }
 
-/// One running node: its process, its S3 address and its data directory.
+/// One node: its process, its name, its addresses and its data directory.
 struct Node {
     child: Child,
+    name: String,
     s3: String,
+    internal: String,
     dir: PathBuf,
 }
 
 /// The six nodes, the namespace they share and a pool into it; every process is killed and every directory removed
 /// when it is dropped.
 struct Cluster {
+    namespace: String,
     nodes: Vec<Node>,
     meta: MetaPool,
     logs: PathBuf,
@@ -100,18 +106,35 @@ fn environment(
         ("TESSARIDB_S3_INTERNAL_LISTEN", internal.to_owned()),
         ("TESSARIDB_S3_INTERNAL_ADVERTISE", internal.to_owned()),
         ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET.to_owned()),
+        ("TESSARIDB_S3_HEAL_INTERVAL_SECS", "1".to_owned()),
     ]
     .into_iter()
     .map(|(key, value)| (key.to_owned(), value))
     .collect()
 }
 
-/// Starts node `name` and waits until its S3 port accepts, which the binary opens only once it is registered.
+/// Starts node `name` on fresh ports and a fresh data directory.
 async fn start(namespace: &str, name: &str, logs: &Path) -> Node {
     let s3 = format!("127.0.0.1:{}", free_port());
     let internal = format!("127.0.0.1:{}", free_port());
-    let dir = scratch("data");
-    let log = std::fs::File::create(logs.join(format!("{name}.log"))).expect("log file");
+    launch(namespace, name, logs, s3, internal, scratch("data")).await
+}
+
+/// Starts node `name` at these addresses over `dir` and waits until its S3 port accepts, which the binary opens
+/// only once it is registered.
+async fn launch(
+    namespace: &str,
+    name: &str,
+    logs: &Path,
+    s3: String,
+    internal: String,
+    dir: PathBuf,
+) -> Node {
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logs.join(format!("{name}.log")))
+        .expect("log file");
     let child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
         .env_clear()
         .envs(environment(namespace, name, &s3, &internal, &dir))
@@ -130,7 +153,27 @@ async fn start(namespace: &str, name: &str, logs: &Path) -> Node {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Node { child, s3, dir }
+    Node {
+        child,
+        name: name.to_owned(),
+        s3,
+        internal,
+        dir,
+    }
+}
+
+impl Cluster {
+    /// Starts node `index` again as it was: its name, its addresses and its data directory.
+    async fn restart(&mut self, index: usize) {
+        let old = &self.nodes[index];
+        let (name, s3, internal, dir) = (
+            old.name.clone(),
+            old.s3.clone(),
+            old.internal.clone(),
+            old.dir.clone(),
+        );
+        self.nodes[index] = launch(&self.namespace, &name, &self.logs, s3, internal, dir).await;
+    }
 }
 
 async fn cluster() -> Cluster {
@@ -156,6 +199,7 @@ async fn cluster() -> Cluster {
     })
     .expect("configuration");
     Cluster {
+        namespace,
         nodes,
         meta: MetaPool::new(config.meta).expect("pool"),
         logs,
@@ -298,4 +342,25 @@ async fn six_processes_spread_an_object_and_hold_the_write_quorum() {
         404,
         "nothing committed"
     );
+
+    // The killed nodes come back with their drives; the healer writes the shards the second object is missing.
+    for down in [2, 4, 5] {
+        cluster.restart(down).await;
+    }
+    let started = Instant::now();
+    while count(&cluster.meta, "heals").await > 0 {
+        assert!(
+            started.elapsed() < HEALED_WITHIN,
+            "still listed for healing after {HEALED_WITHIN:?}; see {}",
+            cluster.logs.display()
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    for down in [2, 4] {
+        assert_eq!(
+            shard_files(&cluster.nodes[down].dir),
+            2,
+            "the first object's shard and the healed one"
+        );
+    }
 }
