@@ -7,6 +7,7 @@ import { call } from "./api.ts";
 import { confirmation } from "./confirm.ts";
 import { announce, el, fill, mono, row, table } from "./dom.ts";
 import { moment } from "./format.ts";
+import { iconAction } from "./icon-action.ts";
 import { readKeys, type ListedKey } from "./keys-model.ts";
 import { ignored, type User } from "./models.ts";
 import { open, settle } from "./row-region.ts";
@@ -72,7 +73,7 @@ export function keys(screen: Screen, user: User, line: HTMLTableRowElement, open
       return;
     }
     const rows = answer.value.map((key) => {
-      const button = el("button", { type: "button", class: "danger" }, "Revoke…");
+      const button = iconAction("trash", "Revoke…", `Revoke key ${key.access_key_id}`, "danger");
       button.addEventListener("click", () => revoke(key, button));
       return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach(key), button);
     });

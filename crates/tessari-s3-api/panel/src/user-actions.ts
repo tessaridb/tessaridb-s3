@@ -6,6 +6,7 @@
 
 import { call } from "./api.ts";
 import { confirmation } from "./confirm.ts";
+import { iconAction } from "./icon-action.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
 import { readIssue } from "./keys-model.ts";
 import { ignored, type IssuedKey, type User } from "./models.ts";
@@ -190,10 +191,10 @@ function grants(screen: Screen, user: User, line: HTMLTableRowElement, opener: H
 
 /** The buttons for `user`'s row. */
 export function rowActions(screen: Screen, user: User, line: HTMLTableRowElement): HTMLButtonElement[] {
-  const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
-  const list = el("button", { type: "button", class: "quiet" }, "Keys…");
-  const state = el("button", { type: "button", class: "quiet" }, user.disabled ? "Enable…" : "Disable…");
-  const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
+  const key = iconAction("key", "Issue key…", `Issue a key to ${user.name}`);
+  const list = iconAction("keys", "Keys…", `Keys of ${user.name}`);
+  const state = user.disabled ? iconAction("check", "Enable…", `Enable ${user.name}`) : iconAction("ban", "Disable…", `Disable ${user.name}`);
+  const access = iconAction("shield", "Bucket access…", `Bucket access of ${user.name}`);
   key.addEventListener("click", () => issueKey(screen, user, line, key));
   list.addEventListener("click", () => keys(screen, user, line, list));
   state.addEventListener("click", () => setDisabled(screen, user, line, state));

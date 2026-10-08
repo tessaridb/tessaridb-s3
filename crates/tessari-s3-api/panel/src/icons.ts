@@ -1,7 +1,7 @@
 //! The console's icons: one outline family on a 24px grid — stroke 2, round
 //! caps and joins, `currentColor` so they follow the theme and the state they
-//! sit in. Every icon here sits beside a text label, so each is hidden from
-//! screen readers; an icon never carries meaning on its own.
+//! sit in. Each is hidden from screen readers: it sits beside a text label, or
+//! inside an icon button whose accessible name says the action and its target.
 
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -32,6 +32,13 @@ const SHAPES = {
   pulse: ["M3 12h4l3-7 4 14 3-7h4"],
   back: ["M14.5 6l-6 6 6 6"],
   disk: [box(3, 5, 18, 14, 2.5), "M3 13h18", "M16.5 16h.01"],
+  key: [ring(7.5, 15.5, 4), "M10.5 12.5L20 3", "M16 7l3 3", "M14 9l2 2"],
+  keys: [ring(6.5, 16.5, 3.5), "M9 14l7-7", "M13.5 9.5l2 2", "M14 5h7", "M17 10h4", "M15 15h6"],
+  ban: [ring(12, 12, 9), "M5.6 5.6l12.8 12.8"],
+  check: [ring(12, 12, 9), "M8 12.5l2.5 2.5L16 9.5"],
+  shield: ["M12 3l8 3v6c0 4.4-3.4 8.2-8 9-4.6-.8-8-4.6-8-9V6z", "M9 12l2 2 4-4"],
+  gauge: ["M4 18a8 8 0 1 1 16 0", "M12 18l4-6", "M12 18h.01"],
+  upload: ["M12 20V9", "M7.5 13.5L12 9l4.5 4.5", "M5 4h14"],
 } as const;
 
 export type IconName = keyof typeof SHAPES;

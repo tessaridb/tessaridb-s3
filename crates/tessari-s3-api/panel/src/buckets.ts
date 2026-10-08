@@ -6,6 +6,7 @@
 import { call, type Answer } from "./api.ts";
 import { confirmation } from "./confirm.ts";
 import { announce, el, field, fill, mono, row, table } from "./dom.ts";
+import { iconAction } from "./icon-action.ts";
 import { amount, moment, size } from "./format.ts";
 import { icon } from "./icons.ts";
 import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Usage } from "./models.ts";
@@ -79,11 +80,11 @@ function figures(usage: Answer<Usage>, bucket: Bucket): BucketUsage | null {
 const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, text);
 
 function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTableRowElement {
-  const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
+  const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket.name}`, "danger");
   // Offered to keys that may operate; the server refuses everyone else regardless.
-  const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
+  const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket.name}`) : null;
   // Offered to users; the server issues one only to a user who may write this bucket.
-  const upload = screen.may?.issue_upload_keys === true ? el("button", { type: "button", class: "quiet" }, "Upload key…") : null;
+  const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket.name}`) : null;
   const held = figures(usage, bucket);
   const line = row(
     el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket.name)),

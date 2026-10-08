@@ -7,6 +7,7 @@ import { call } from "./api.ts";
 import { buckets } from "./buckets.ts";
 import { cluster } from "./cluster.ts";
 import { all, announce, at } from "./dom.ts";
+import { installTips } from "./icon-action.ts";
 import { ignored, readCapabilities, type Capabilities } from "./models.ts";
 import { object } from "./object.ts";
 import { objects } from "./objects.ts";
@@ -135,6 +136,7 @@ for (const link of all("[data-section]")) {
   }
 }
 signOut.prepend(icon("sign-out"));
+installTips();
 themes(at("theme"));
 
 // The skip link must move focus, not the hash: the hash is the route.

@@ -535,8 +535,8 @@
   // src/icons.ts
   //! The console's icons: one outline family on a 24px grid — stroke 2, round
   //! caps and joins, `currentColor` so they follow the theme and the state they
-  //! sit in. Every icon here sits beside a text label, so each is hidden from
-  //! screen readers; an icon never carries meaning on its own.
+  //! sit in. Each is hidden from screen readers: it sits beside a text label, or
+  //! inside an icon button whose accessible name says the action and its target.
   var SVG = "http://www.w3.org/2000/svg";
   var box = (x, y, w, h, r) => `M${x + r} ${y}h${w - 2 * r}a${r} ${r} 0 0 1 ${r} ${r}v${h - 2 * r}a${r} ${r} 0 0 1 -${r} ${r}h-${w - 2 * r}a${r} ${r} 0 0 1 -${r} -${r}v-${h - 2 * r}a${r} ${r} 0 0 1 ${r} -${r}z`;
   var ring = (cx, cy, r) => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 -${2 * r} 0`;
@@ -559,7 +559,14 @@
     layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
     pulse: ["M3 12h4l3-7 4 14 3-7h4"],
     back: ["M14.5 6l-6 6 6 6"],
-    disk: [box(3, 5, 18, 14, 2.5), "M3 13h18", "M16.5 16h.01"]
+    disk: [box(3, 5, 18, 14, 2.5), "M3 13h18", "M16.5 16h.01"],
+    key: [ring(7.5, 15.5, 4), "M10.5 12.5L20 3", "M16 7l3 3", "M14 9l2 2"],
+    keys: [ring(6.5, 16.5, 3.5), "M9 14l7-7", "M13.5 9.5l2 2", "M14 5h7", "M17 10h4", "M15 15h6"],
+    ban: [ring(12, 12, 9), "M5.6 5.6l12.8 12.8"],
+    check: [ring(12, 12, 9), "M8 12.5l2.5 2.5L16 9.5"],
+    shield: ["M12 3l8 3v6c0 4.4-3.4 8.2-8 9-4.6-.8-8-4.6-8-9V6z", "M9 12l2 2 4-4"],
+    gauge: ["M4 18a8 8 0 1 1 16 0", "M12 18l4-6", "M12 18h.01"],
+    upload: ["M12 20V9", "M7.5 13.5L12 9l4.5 4.5", "M5 4h14"]
   };
   function icon(name) {
     const svg = document.createElementNS(SVG, "svg");
@@ -578,6 +585,80 @@
       svg.append(path2);
     }
     return svg;
+  }
+
+  // src/icon-action.ts
+  //! A row's action as an icon button with a tooltip. The accessible name says
+  //! the action and the row it acts on ("Revoke key TS…"); the tooltip says the
+  //! action alone, because the row is beside it. The tooltip is one shared
+  //! element placed over the page, so a scrolling table never clips it; it opens
+  //! after a short pause under the pointer — at once when another tip was just
+  //! open, or when the button takes keyboard focus — and Escape closes it.
+  var OPEN_DELAY_MS = 500;
+  var INSTANT_WINDOW_MS = 400;
+  function iconAction(name, tip, label, tone = "quiet") {
+    return el("button", { type: "button", class: `icon-action ${tone}`, "aria-label": label, "data-tip": tip }, icon(name));
+  }
+  function installTips() {
+    const tip = el("div", { class: "tip", role: "tooltip", "aria-hidden": "true" });
+    document.body.append(tip);
+    let anchor = null;
+    let timer;
+    let closedAt = Number.NEGATIVE_INFINITY;
+    const place = (target2) => {
+      const box2 = target2.getBoundingClientRect();
+      const own = tip.getBoundingClientRect();
+      const above = box2.top - own.height - 6;
+      const below = above < 4;
+      const left = Math.min(Math.max(4, box2.left + box2.width / 2 - own.width / 2), window.innerWidth - own.width - 4);
+      tip.style.left = `${left}px`;
+      tip.style.top = `${below ? box2.bottom + 6 : above}px`;
+      tip.dataset["side"] = below ? "below" : "above";
+    };
+    const show = (target2, instant) => {
+      anchor = target2;
+      tip.textContent = target2.dataset["tip"] ?? "";
+      tip.toggleAttribute("data-instant", instant);
+      tip.dataset["open"] = "";
+      place(target2);
+    };
+    const hide = () => {
+      window.clearTimeout(timer);
+      if (anchor !== null) {
+        closedAt = performance.now();
+      }
+      anchor = null;
+      delete tip.dataset["open"];
+    };
+    const target = (event) => event.target instanceof Element ? event.target.closest("[data-tip]") : null;
+    document.addEventListener("pointerover", (event) => {
+      const over = target(event);
+      if (over === null || over === anchor) {
+        return;
+      }
+      hide();
+      const instant = performance.now() - closedAt < INSTANT_WINDOW_MS;
+      timer = window.setTimeout(() => show(over, instant), instant ? 0 : OPEN_DELAY_MS);
+    });
+    document.addEventListener("pointerout", (event) => {
+      if (target(event) !== null) {
+        hide();
+      }
+    });
+    document.addEventListener("focusin", (event) => {
+      const focused = target(event);
+      if (focused !== null && focused.matches(":focus-visible")) {
+        hide();
+        show(focused, true);
+      }
+    });
+    document.addEventListener("focusout", hide);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        hide();
+      }
+    });
+    window.addEventListener("scroll", hide, { capture: true, passive: true });
   }
 
   // src/bucket-quota.ts
@@ -784,7 +865,7 @@
         return;
       }
       const rows = answer.value.map((key) => {
-        const button = el("button", { type: "button", class: "danger" }, "Revoke…");
+        const button = iconAction("trash", "Revoke…", `Revoke key ${key.access_key_id}`, "danger");
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
@@ -965,10 +1046,10 @@
     queueMicrotask(() => bucket2.input.focus());
   }
   function rowActions(screen, user2, line) {
-    const key = el("button", { type: "button", class: "quiet" }, "Issue key…");
-    const list2 = el("button", { type: "button", class: "quiet" }, "Keys…");
-    const state2 = el("button", { type: "button", class: "quiet" }, user2.disabled ? "Enable…" : "Disable…");
-    const access = el("button", { type: "button", class: "quiet" }, "Bucket access…");
+    const key = iconAction("key", "Issue key…", `Issue a key to ${user2.name}`);
+    const list2 = iconAction("keys", "Keys…", `Keys of ${user2.name}`);
+    const state2 = user2.disabled ? iconAction("check", "Enable…", `Enable ${user2.name}`) : iconAction("ban", "Disable…", `Disable ${user2.name}`);
+    const access = iconAction("shield", "Bucket access…", `Bucket access of ${user2.name}`);
     key.addEventListener("click", () => issueKey(screen, user2, line, key));
     list2.addEventListener("click", () => keys(screen, user2, line, list2));
     state2.addEventListener("click", () => setDisabled(screen, user2, line, state2));
@@ -1106,9 +1187,9 @@
   }
   var numeric = (text2) => el("span", { class: "numeric" }, text2);
   function bucketRow(screen, bucket2, usage) {
-    const remove = el("button", { type: "button", class: "quiet" }, icon("trash"), "Delete…");
-    const quota = screen.may?.operate === true ? el("button", { type: "button", class: "quiet" }, "Quota…") : null;
-    const upload = screen.may?.issue_upload_keys === true ? el("button", { type: "button", class: "quiet" }, "Upload key…") : null;
+    const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket2.name}`, "danger");
+    const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket2.name}`) : null;
+    const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
     const held = figures(usage, bucket2);
     const line = row(
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
@@ -1932,6 +2013,7 @@
     }
   }
   signOut.prepend(icon("sign-out"));
+  installTips();
   themes(at("theme"));
   at("skip").addEventListener("click", (event) => {
     event.preventDefault();
