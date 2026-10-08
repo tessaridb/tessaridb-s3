@@ -262,3 +262,7 @@ pub const DEFAULT_SPACE: &str = "default";
 
 /// Object records still holding their bytes (a store from before ADR-0008) converted per batch at start.
 pub const INLINE_CONVERT_BATCH: usize = 100;
+
+/// The size a source must exceed for UploadPartCopy to copy a byte range of it. AWS documents "greater than 5 MB";
+/// read as MiB, the unit of the part minimum it sits beside (inferred — the page does not say which).
+pub const RANGE_COPY_SOURCE_MIN: u64 = 5 * 1024 * 1024;

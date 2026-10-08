@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
-use tessari_s3_constants::SINGLE_PUT_MAX;
+use tessari_s3_constants::{RANGE_COPY_SOURCE_MIN, SINGLE_PUT_MAX};
 use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_core::objects::copy::{CopyRangeError, copy_range};
 use tessari_s3_storage::multipart::{NewPart, PartWritten};
@@ -41,6 +41,12 @@ fn wanted(call: &Call<'_>, size: u64) -> Result<(u64, u64, u64)> {
             format!("Range specified is not valid for source object of size: {size}"),
         ),
     })?;
+    if size <= RANGE_COPY_SOURCE_MIN {
+        return Err(Error::new(
+            ErrorCode::InvalidRequest,
+            "The specified copy source is not supported as a byte-range copy source",
+        ));
+    }
     let length = last
         .checked_sub(first)
         .and_then(|span| span.checked_add(1))

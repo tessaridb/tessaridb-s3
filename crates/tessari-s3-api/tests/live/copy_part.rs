@@ -180,6 +180,31 @@ async fn a_part_copy_is_refused_by_name() {
             refused.body
         );
     }
+    // A range inside a source of 5 MiB or less: AWS copies a range only from a larger source.
+    let small = copy_part(
+        &state,
+        "/cpq/dst",
+        &upload,
+        "1",
+        vec![
+            ("x-amz-copy-source", "cpq/src"),
+            ("x-amz-copy-source-range", "bytes=0-4"),
+        ],
+    )
+    .await;
+    assert_eq!(
+        (small.status, small.code.as_deref()),
+        (400, Some("InvalidRequest")),
+        "{}",
+        small.body
+    );
+    assert!(
+        small
+            .body
+            .contains("The specified copy source is not supported as a byte-range copy source"),
+        "{}",
+        small.body
+    );
     let listed = call(
         &state,
         "GET",
