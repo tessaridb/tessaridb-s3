@@ -13,6 +13,7 @@ mod copy;
 mod copy_part;
 mod delete_many;
 mod erasure;
+mod erasure_reads;
 mod large;
 mod listing;
 mod metadata;

@@ -13,8 +13,11 @@ section records which TessariDB version its metadata runs on.
   k + m shards, one per node of the layout (the order rotated per object by a hash keyed with the cluster secret).
   A write is acknowledged only once the write quorum of shards is durable (k, or k + 1 when k = m), otherwise it is
   answered `503 ServiceUnavailable` and its shards are reclaimed; a write missing some shards is listed for healing.
-  Deleting or replacing an object reclaims its shards from every node. Reading erasure-coded objects is not in this
-  build yet (`501 NotImplemented`).
+  Deleting or replacing an object reclaims its shards from every node.
+- Erasure-coded reads: an object written as shards is read back stripe by stripe, whole or by range, from any k
+  shards whose blocks verify; a shard that is missing, damaged or on a node that does not answer is replaced by the
+  next one, and a read that had to do so lists the object for healing. Fewer than k readable shards answer
+  `503 ServiceUnavailable`.
 - Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion
   settings a node registers itself in the metadata on start-up, and the cluster's first layout — the lowest k + m
   registered node ids — is created once however many nodes propose it. Object data is still stored per node.

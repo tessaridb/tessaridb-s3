@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use super::ObjectService;
-use crate::data::{DataFiles, DataReader};
+use crate::data::DataFiles;
+use crate::objects::ObjectReader;
 use crate::objects::model::Reclaimed;
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
@@ -110,14 +111,14 @@ impl ObjectService {
     /// Opens data `id` holding an object of `size` bytes, its header and length checked.
     ///
     /// # Errors
-    /// [`Error::NoDataDirectory`], [`Error::ErasureReadPending`] for erasure-coded data, [`Error::Corrupt`] or the
-    /// drive's failure.
-    pub async fn open(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
+    /// [`Error::NoDataDirectory`], [`Error::Corrupt`] or the drive's failure; for erasure-coded data the store's
+    /// refusal or a layout this node does not hold, and per block [`Error::Unreadable`].
+    pub async fn open(&self, id: [u8; 16], size: u64) -> Result<ObjectReader> {
         if let Some(writes) = &self.erasure
-            && writes.sharded(id).await?.is_some()
+            && let Some(reader) = writes.open(id, size).await?
         {
-            return Err(Error::ErasureReadPending);
+            return Ok(ObjectReader::Erasure(reader));
         }
-        self.files()?.open(id, size).await
+        Ok(ObjectReader::File(self.files()?.open(id, size).await?))
     }
 }

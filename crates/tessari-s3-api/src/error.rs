@@ -65,17 +65,16 @@ impl From<tessari_s3_storage::Error> for Error {
                     "the metadata store is busy; retry",
                 )
             }
-            Storage::Quorum { .. } | Storage::NoLayout | Storage::Peer(_) => {
+            Storage::Quorum { .. }
+            | Storage::Unreadable { .. }
+            | Storage::NoLayout
+            | Storage::Peer(_) => {
                 tracing::warn!(error = %error, "too few storage nodes reachable");
                 Self::new(
                     ErrorCode::ServiceUnavailable,
                     "too few storage nodes are reachable; retry",
                 )
             }
-            Storage::ErasureReadPending => Self::new(
-                ErrorCode::NotImplemented,
-                "erasure-coded objects cannot be read by this build yet",
-            ),
             _ => {
                 tracing::error!(error = %error, "storage failure");
                 Self::new(

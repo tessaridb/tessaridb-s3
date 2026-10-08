@@ -11,7 +11,7 @@ use tessari_s3_core::objects::copy::{CopySource, CopySourceError};
 use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Uploaded};
 use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
 
-use super::data;
+use super::{body, data};
 use crate::{Error, Result};
 
 pub(super) fn text<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
@@ -113,14 +113,14 @@ pub(crate) async fn bytes(
             let slice = Bytes::copy_from_slice(range);
             futures_util::stream::once(async move { Ok(slice) }).boxed()
         }
-        Content::Data(id) => data::blocks(objects, *id, object.size, start, end).await?,
+        Content::Data(id) => body::blocks(objects, *id, object.size, start, end).await?,
         Content::Parts(multipart) => {
             let parts: Vec<([u8; 16], u64)> = multipart
                 .parts
                 .iter()
                 .map(|part| (part.data, part.size))
                 .collect();
-            data::stream_parts(objects, &parts, start, end).await?
+            body::stream_parts(objects, &parts, start, end).await?
         }
     })
 }

@@ -1,6 +1,7 @@
 //! [`ErasureWrites`]: a cluster member's data plane — where each shard of a data id goes, starting an erasure
 //! upload after its id is queued with its layout, and removing every shard of an id from every node.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tessari_s3_constants::{DATA_BLOCK_SIZE, SHARD_STALL_SECS};
@@ -10,6 +11,7 @@ use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_types::NodeId;
 use tokio::sync::OnceCell;
 
+use super::read::ErasureReader;
 use super::repository::ShardSetRepository;
 use super::tessaridb::TessariShardSets;
 use super::upload::{Destination, ErasurePlan, ErasureUpload};
@@ -54,6 +56,22 @@ impl ErasureWrites {
             stall: Duration::from_secs(SHARD_STALL_SECS),
             layout: OnceCell::new(),
         })
+    }
+
+    pub(super) const fn code(&self) -> Code {
+        self.code
+    }
+
+    pub(super) const fn shards(&self) -> &ShardService {
+        &self.shards
+    }
+
+    pub(super) const fn peers(&self) -> &RemoteShards {
+        &self.peers
+    }
+
+    pub(super) const fn stall(&self) -> Duration {
+        self.stall
     }
 
     async fn layout(&self) -> Result<&Layout> {
@@ -110,6 +128,29 @@ impl ErasureWrites {
     /// The metadata store's refusal or outage.
     pub(crate) async fn sharded(&self, id: [u8; 16]) -> Result<Option<u32>> {
         self.sets.layout_of(id).await
+    }
+
+    /// A reader of data `id` holding `size` bytes when it is erasure-coded, `None` when it is a whole file.
+    ///
+    /// # Errors
+    /// [`Error::Malformed`] for a layout this node does not hold, [`Error::NoLayout`], or the store's refusal.
+    pub(crate) async fn open(
+        self: &Arc<Self>,
+        id: [u8; 16],
+        size: u64,
+    ) -> Result<Option<ErasureReader>> {
+        let Some(version) = self.sets.layout_of(id).await? else {
+            return Ok(None);
+        };
+        let layout = self.layout().await?;
+        if layout.version() != version {
+            return Err(Error::Malformed {
+                record: "shard_sets",
+                reason: "a layout this node does not hold",
+            });
+        }
+        let sources = self.destinations(id, layout).await?;
+        ErasureReader::new(Arc::clone(self), id, size, sources).map(Some)
     }
 
     /// Lists data `id` for healing: it was acknowledged with fewer than every shard durable.

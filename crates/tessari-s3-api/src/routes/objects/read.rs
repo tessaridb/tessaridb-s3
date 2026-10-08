@@ -9,7 +9,7 @@ use tessari_s3_core::objects::range::{RangeRequest, part_bytes, resolve};
 use tessari_s3_storage::objects::{Content, StoredObject};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
-use super::data;
+use super::body;
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
@@ -144,7 +144,7 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             Content::Inline(bytes) => Body::from(inline_part(bytes, slice)?),
             Content::Data(id) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
-                data::send(call.state.storage().objects(), *id, object.size, start, end).await?
+                body::send(call.state.storage().objects(), *id, object.size, start, end).await?
             }
             Content::Parts(multipart) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
@@ -153,7 +153,7 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
                     .iter()
                     .map(|part| (part.data, part.size))
                     .collect();
-                data::send_parts(call.state.storage().objects(), &parts, start, end).await?
+                body::send_parts(call.state.storage().objects(), &parts, start, end).await?
             }
         }
     };

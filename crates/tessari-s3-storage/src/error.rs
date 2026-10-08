@@ -16,9 +16,14 @@ pub enum Error {
     /// The cluster has no layout yet: fewer nodes have registered than the erasure code has shards.
     #[error("the cluster has no layout yet; fewer nodes than shards have registered")]
     NoLayout,
-    /// The data is erasure-coded and this build does not read erasure-coded data yet.
-    #[error("erasure-coded data cannot be read by this build yet")]
-    ErasureReadPending,
+    /// Fewer shards than the read quorum answered with a verified block; nothing of the stripe is returned.
+    #[error("{have} shards readable, the read quorum is {needed}")]
+    Unreadable {
+        /// Shards that answered with a verified block.
+        have: u8,
+        /// The read quorum (k).
+        needed: u8,
+    },
     /// Fewer shards than the write quorum were made durable; the write is not acknowledged.
     #[error("{durable} shards durable, the write quorum is {needed}")]
     Quorum {
@@ -107,8 +112,9 @@ impl Error {
         match self {
             Self::Meta(meta) => meta.category(),
             Self::Peer(peer) => peer.category(),
-            Self::Quorum { .. } | Self::NoLayout => ErrorCategory::Unavailable,
-            Self::ErasureReadPending => ErrorCategory::Internal,
+            Self::Quorum { .. } | Self::Unreadable { .. } | Self::NoLayout => {
+                ErrorCategory::Unavailable
+            }
             Self::PeerRefused { status: 404 } => ErrorCategory::NotFound,
             Self::PeerRefused { status: 409 } => ErrorCategory::Conflict,
             Self::PeerRefused { status: 503 } => ErrorCategory::Unavailable,

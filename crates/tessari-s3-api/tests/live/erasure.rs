@@ -16,19 +16,19 @@ use crate::{ACCESS_KEY, IGNORED, SCHEMA_TURN, SECRET, call, need, scratch_dir, t
 const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
 
 /// A peer node serving shards from its own data directory.
-struct Peer {
+pub(crate) struct Peer {
     address: String,
-    server: tokio::task::JoinHandle<()>,
-    dir: PathBuf,
+    pub(crate) server: tokio::task::JoinHandle<()>,
+    pub(crate) dir: PathBuf,
 }
 
 /// This node's state and storage, the planter pool, its data directory and its five peers.
-struct Member {
-    state: ApiState,
+pub(crate) struct Member {
+    pub(crate) state: ApiState,
     storage: Storage,
-    planter: MetaPool,
-    dir: PathBuf,
-    peers: Vec<Peer>,
+    pub(crate) planter: MetaPool,
+    pub(crate) dir: PathBuf,
+    pub(crate) peers: Vec<Peer>,
 }
 
 impl Drop for Member {
@@ -95,7 +95,7 @@ async fn peer(config: &S3Config) -> Peer {
 }
 
 /// A cluster member `n1` with peers `n2`..`n6` registered, in a fresh namespace.
-async fn member() -> Member {
+pub(crate) async fn member() -> Member {
     let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
     let dir = scratch_dir();
     let config = configuration(&namespace, &dir);
@@ -138,7 +138,7 @@ async fn member() -> Member {
 }
 
 /// Shard files under `dir`, temporary ones included.
-fn shard_files(dir: &Path) -> usize {
+pub(crate) fn shard_files(dir: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -163,7 +163,7 @@ fn spread(member: &Member) -> Vec<usize> {
         .collect()
 }
 
-async fn count(pool: &MetaPool, table: &str) -> usize {
+pub(crate) async fn count(pool: &MetaPool, table: &str) -> usize {
     // The table name is this test's own literal, never a value from outside.
     let script = format!("SELECT * FROM {table};");
     match pool
@@ -206,11 +206,8 @@ async fn an_object_is_written_as_one_shard_per_node_and_reclaimed_from_every_nod
         "every shard durable"
     );
     let read = call(&member.state, "GET", "/shards/big", vec![], b"").await;
-    assert_eq!(
-        read.code.as_deref(),
-        Some("NotImplemented"),
-        "reads come with W5"
-    );
+    assert_eq!(read.status, 200, "{}", read.body);
+    assert_eq!(read.bytes, large(), "read back from the shards");
     let deleted = call(&member.state, "DELETE", "/shards/big", vec![], b"").await;
     assert_eq!(deleted.status, 204);
     let reclaimed = member

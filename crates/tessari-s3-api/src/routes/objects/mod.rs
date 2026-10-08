@@ -1,5 +1,6 @@
 //! Object operations: PutObject, CopyObject, GetObject, HeadObject, GetObjectTagging, DeleteObject and DeleteObjects.
 
+pub(crate) mod body;
 mod copy;
 pub(crate) mod data;
 mod delete_many;
