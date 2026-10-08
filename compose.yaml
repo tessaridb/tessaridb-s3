@@ -1,0 +1,50 @@
+# TessariDB S3 beside the TessariDB node that holds its metadata.
+#
+#   cp .env.example .env    # then set every value in it
+#   docker compose up -d --wait
+#
+# The database is not published: only the S3 server reaches it, over the
+# compose network. S3 (9100) and the console (9101) are published on
+# 127.0.0.1; put a TLS-terminating proxy in front before exposing either,
+# because without TLS a signed-in console key crosses the network in the clear.
+name: tessaridb-s3
+
+services:
+  tessaridb:
+    image: tessaridb/tessaridb:0.33.2-beta
+    restart: unless-stopped
+    environment:
+      # The first start declares this store-wide owner; a store with no user
+      # is open to anybody who reaches it.
+      TESSARIDB_INITIAL_USER: ${TESSARIDB_USER:?set TESSARIDB_USER in .env}
+      TESSARIDB_INITIAL_PASSWORD: ${TESSARIDB_PASSWORD:?set TESSARIDB_PASSWORD in .env}
+    volumes:
+      - tessaridb:/var/lib/tessaridb
+    stop_grace_period: 30s
+
+  s3:
+    image: tessaridb/s3:dev
+    build: .
+    restart: unless-stopped
+    depends_on:
+      tessaridb:
+        condition: service_healthy
+    environment:
+      TESSARIDB_S3_ROOT_ACCESS_KEY: ${S3_ROOT_ACCESS_KEY:?set S3_ROOT_ACCESS_KEY in .env}
+      TESSARIDB_S3_ROOT_SECRET_KEY: ${S3_ROOT_SECRET_KEY:?set S3_ROOT_SECRET_KEY in .env}
+      TESSARIDB_S3_REGION: ${S3_REGION:-us-east-1}
+      TESSARIDB_S3_META_ADDRESS: tessaridb:9080
+      TESSARIDB_S3_META_USER: ${TESSARIDB_USER}
+      TESSARIDB_S3_META_PASSWORD: ${TESSARIDB_PASSWORD}
+      TESSARIDB_S3_IAM_KEY: ${S3_IAM_KEY:-}
+      TESSARIDB_S3_CONSOLE_LISTEN: 0.0.0.0:9101
+    ports:
+      - "127.0.0.1:${S3_PORT:-9100}:9100"
+      - "127.0.0.1:${S3_CONSOLE_PORT:-9101}:9101"
+    volumes:
+      - s3-data:/var/lib/tessaridb-s3
+    stop_grace_period: 40s
+
+volumes:
+  tessaridb:
+  s3-data:

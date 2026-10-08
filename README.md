@@ -172,6 +172,23 @@ tests, which need Docker and the `tessaridb/tessaridb:0.33.2-beta` image: they s
 TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
 traffic, then check that every acknowledged object reads back whole and nothing else is visible.
 
+## In a container
+
+The `Dockerfile` builds an image holding only the `tessaridb-s3` server — no database. Its metadata lives in a
+TessariDB node beside it, and `compose.yaml` runs the two together:
+
+```sh
+cp .env.example .env        # set every value: the TessariDB owner, the S3 root key and secret, the IAM key
+docker compose up -d --wait
+aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
+```
+
+The database (`tessaridb/tessaridb:0.33.2-beta`) declares its owner from `.env` on first start and is reachable only
+from the S3 server over the compose network. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
+a TLS-terminating proxy in front before exposing either. Both keep their data in named volumes, and the server runs
+as a non-root user. The image carries no credential: every required value comes from the environment, and the
+server refuses to start without them. No image is published yet.
+
 ## Branches
 
 `dev` is where development happens. `main` will carry releases and move only by

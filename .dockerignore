@@ -1,0 +1,12 @@
+# Only what the build reads goes into the context.
+.git
+.bgv
+.githooks
+target
+**/node_modules
+.env
+.env.*
+CLAUDE.md
+AGENTS.md
+MEMORY.md
+compose.yaml
