@@ -10,5 +10,5 @@ mod table;
 pub use catalog::{CATALOG, Operation};
 pub use error::DispatchError;
 pub use spec::{Method, OperationSpec, Target};
-pub use support::is_implemented;
+pub use support::{implemented, is_implemented};
 pub use table::{DispatchRequest, dispatch};

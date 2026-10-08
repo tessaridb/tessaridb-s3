@@ -2,6 +2,7 @@
 //! may be, and what each operation does to them.
 
 pub mod auth;
+pub mod authz;
 pub mod buckets;
 pub mod console;
 pub mod dispatch;

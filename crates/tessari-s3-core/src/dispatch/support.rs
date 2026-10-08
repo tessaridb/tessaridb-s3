@@ -27,6 +27,12 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::UploadPartCopy,
 ];
 
+/// The operations with a handler, in catalog order.
+#[must_use]
+pub const fn implemented() -> &'static [Operation] {
+    IMPLEMENTED
+}
+
 /// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.
 #[must_use]
 pub fn is_implemented(operation: Operation) -> bool {
