@@ -96,7 +96,7 @@ async fn an_issued_key_resolves_to_its_user_and_secret() {
     assert_eq!(resolved.user.name, user("ann"));
     assert_eq!(resolved.user.space, space("alpha"));
     assert_eq!(resolved.secret.expose(), issued.secret.expose());
-    assert!(!resolves(&storage, "TSNOSUCHKEY000000000").await);
+    assert!(!resolves(&storage, "TSNOSUCHKEYAAAAAAAAA").await);
     assert!(
         users
             .issue_key(&user("nobody"))

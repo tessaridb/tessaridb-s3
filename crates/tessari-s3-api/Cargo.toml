@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+scc.workspace = true
 tessari-s3-storage.workspace = true
 tessari-s3-core.workspace = true
 tessari-s3-types.workspace = true

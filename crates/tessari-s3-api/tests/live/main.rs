@@ -6,6 +6,9 @@
 
 #![cfg(test)]
 
+mod access;
+mod access_crossing;
+mod access_window;
 mod buckets;
 mod cluster;
 mod complete;
@@ -213,6 +216,29 @@ pub(crate) async fn call_with(
     headers: Vec<(&str, &str)>,
     body: &[u8],
 ) -> Seen {
+    call_as(
+        state,
+        (ACCESS_KEY, SECRET),
+        method,
+        path,
+        query,
+        headers,
+        body,
+    )
+    .await
+}
+
+/// As [`call_with`], signed with `credential` (access key, secret) rather than the root credential.
+pub(crate) async fn call_as(
+    state: &ApiState,
+    credential: (&str, &str),
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Seen {
+    let (access_key, secret) = credential;
     let amz_date = amz_now_for_tests();
     let unsigned = signer::Unsigned {
         method,
@@ -220,8 +246,8 @@ pub(crate) async fn call_with(
         path,
         query,
         headers,
-        access_key: ACCESS_KEY,
-        secret: SECRET,
+        access_key,
+        secret,
         region: "us-east-1",
         amz_date: &amz_date,
     };

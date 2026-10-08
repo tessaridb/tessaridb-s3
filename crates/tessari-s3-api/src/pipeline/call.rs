@@ -2,6 +2,7 @@
 
 use axum::http::HeaderMap;
 use tessari_s3_core::auth::Verified;
+use tessari_s3_core::authz::Principal;
 use tessari_s3_types::{BucketName, ErrorCode};
 
 use super::address::Addressed;
@@ -18,6 +19,8 @@ pub struct Call<'a> {
     pub query: &'a [(String, Option<String>)],
     /// Who signed it, and how its body is protected.
     pub verified: &'a Verified,
+    /// Who is asking; the operation was already authorized for it.
+    pub principal: &'a Principal,
     /// The request's headers.
     pub headers: &'a HeaderMap,
 }

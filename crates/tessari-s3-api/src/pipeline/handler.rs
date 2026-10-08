@@ -1,5 +1,5 @@
-//! The request pipeline: address, dispatch, authenticate, then the operation — or the refusal for an operation
-//! with no handler.
+//! The request pipeline: address, dispatch, authenticate, authorize, then the operation — or the refusal for an
+//! operation with no handler.
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -10,6 +10,7 @@ use tessari_s3_types::ErrorCode;
 
 use super::address::resolve;
 use super::authenticate::authenticate;
+use super::authorize::authorize_operation;
 use super::call::Call;
 use super::query::decode_query;
 use super::response::{error_response, new_request_id, with_request_id};
@@ -86,18 +87,27 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         raw_query,
         headers: &headers,
     };
-    let verified = authenticate(&state, &signed)?;
+    let (verified, principal) = authenticate(&state, &signed).await?;
     if !is_implemented(spec.operation) {
         return Err(Error::new(
             ErrorCode::NotImplemented,
             format!("{} is not implemented", spec.name),
         ));
     }
+    authorize_operation(
+        &state,
+        spec.operation,
+        &principal,
+        &addressed,
+        &parts.headers,
+    )
+    .await?;
     let call = Call {
         state: &state,
         addressed: &addressed,
         query: &query,
         verified: &verified,
+        principal: &principal,
         headers: &parts.headers,
     };
     routes::route(spec.operation, &call, body).await

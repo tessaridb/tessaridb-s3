@@ -149,12 +149,16 @@ impl UserService {
     }
 
     /// The user and secret of key `id` while the key and its user are both enabled; `None` otherwise, alike for a
-    /// key that does not exist, so a caller cannot tell which.
+    /// key that does not exist, so a caller cannot tell which. An id of a shape never issued is answered without a
+    /// lookup.
     ///
     /// # Errors
     /// [`Error::Unsealable`] when the stored secret does not open (another root key, a record moved or changed);
     /// [`Error::NoIamKey`] without a root key; the metadata store's refusal or outage.
     pub async fn resolve(&self, id: &str) -> Result<Option<Resolved>> {
+        if !credentials::is_access_key_id(id) {
+            return Ok(None);
+        }
         let Some(key) = self.repository.get_key(id).await? else {
             return Ok(None);
         };

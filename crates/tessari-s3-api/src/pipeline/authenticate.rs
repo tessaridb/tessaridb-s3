@@ -3,17 +3,22 @@
 use tessari_s3_core::auth::{
     AuthorizationHeader, PresignedQuery, SignedRequest, Verified, verify_header, verify_presigned,
 };
+use tessari_s3_core::authz::Principal;
 use tessari_s3_types::ErrorCode;
 
 use crate::state::ApiState;
 use crate::{Error, Result};
 
-/// Verifies the request's signature. Anonymous requests are refused: no bucket policy can grant public access yet.
+/// Verifies the request's signature with the secret of the key it names, and answers who signed it. Anonymous
+/// requests are refused: no bucket policy can grant public access yet.
 ///
 /// # Errors
 /// `AccessDenied` for an anonymous request, `InvalidArgument` for two authentication forms at once,
-/// `InvalidAccessKeyId` for an unknown key, and the SigV4 refusals.
-pub fn authenticate(state: &ApiState, request: &SignedRequest<'_>) -> Result<Verified> {
+/// `InvalidAccessKeyId` for an unknown or disabled key, and the SigV4 refusals.
+pub async fn authenticate(
+    state: &ApiState,
+    request: &SignedRequest<'_>,
+) -> Result<(Verified, Principal)> {
     let header = request.header("authorization");
     let presigned = PresignedQuery::parse(request.raw_query)?;
     let now = state.now();
@@ -34,24 +39,16 @@ pub fn authenticate(state: &ApiState, request: &SignedRequest<'_>) -> Result<Ver
                 ));
             }
             let parsed = AuthorizationHeader::parse(value)?;
-            let secret = state.secret_for(parsed.access_key())?;
-            Ok(verify_header(
-                request,
-                &parsed,
-                secret,
-                state.region(),
-                now,
-            )?)
+            let credential = state.credential_for(parsed.access_key()).await?;
+            let verified =
+                verify_header(request, &parsed, &credential.secret, state.region(), now)?;
+            Ok((verified, credential.principal))
         }
         (None, Some(query)) => {
-            let secret = state.secret_for(query.access_key())?;
-            Ok(verify_presigned(
-                request,
-                &query,
-                secret,
-                state.region(),
-                now,
-            )?)
+            let credential = state.credential_for(query.access_key()).await?;
+            let verified =
+                verify_presigned(request, &query, &credential.secret, state.region(), now)?;
+            Ok((verified, credential.principal))
         }
     }
 }

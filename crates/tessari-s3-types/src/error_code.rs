@@ -42,6 +42,8 @@ pub enum ErrorCode {
     BucketNotEmpty,
     /// 409: the bucket exists and the caller owns it.
     BucketAlreadyOwnedByYou,
+    /// 409: the name is taken by a bucket the caller does not own.
+    BucketAlreadyExists,
     /// 403: the request is not allowed.
     AccessDenied,
     /// 400: the body does not match its declared digest.
@@ -111,6 +113,7 @@ impl ErrorCode {
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
             Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
+            Self::BucketAlreadyExists => "BucketAlreadyExists",
             Self::BadDigest => "BadDigest",
             Self::IncompleteBody => "IncompleteBody",
             Self::InternalError => "InternalError",
@@ -148,7 +151,7 @@ impl ErrorCode {
             | Self::MissingSecurityHeader
             | Self::UnsupportedSignature => 400,
             Self::InternalError => 500,
-            Self::BucketAlreadyOwnedByYou | Self::BucketNotEmpty => 409,
+            Self::BucketAlreadyOwnedByYou | Self::BucketAlreadyExists | Self::BucketNotEmpty => 409,
             Self::IllegalLocationConstraintException
             | Self::MalformedXml
             | Self::MaxMessageLengthExceeded => 400,
@@ -219,6 +222,7 @@ mod tests {
                 "BucketAlreadyOwnedByYou",
                 409,
             ),
+            (ErrorCode::BucketAlreadyExists, "BucketAlreadyExists", 409),
             (ErrorCode::BadDigest, "BadDigest", 400),
             (ErrorCode::EntityTooLarge, "EntityTooLarge", 400),
             (ErrorCode::IncompleteBody, "IncompleteBody", 400),

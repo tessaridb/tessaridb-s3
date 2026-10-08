@@ -43,7 +43,7 @@ async fn the_stored_secret_is_sealed_and_does_not_open_under_another_key_id() {
     // The same record under another id: every stored byte is genuine, only its place changed.
     let mut copied = vec![(
         "id".to_owned(),
-        Value::String("TSCOPIED000000000000".to_owned()),
+        Value::String("TSCOPIEDAAAAAAAAAAAA".to_owned()),
     )];
     copied.extend(fields);
     planter
@@ -55,7 +55,7 @@ async fn the_stored_secret_is_sealed_and_does_not_open_under_another_key_id() {
         .await
         .expect("copied");
     assert_eq!(
-        storage.users().resolve("TSCOPIED000000000000").await.err(),
+        storage.users().resolve("TSCOPIEDAAAAAAAAAAAA").await.err(),
         Some(Error::Unsealable)
     );
 }

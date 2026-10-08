@@ -30,6 +30,14 @@ pub(crate) fn access_key_id() -> Result<String> {
     Ok(id)
 }
 
+/// Whether `id` has the shape [`access_key_id`] gives every id: `TS` and 18 characters of `A-Z2-7`. Anything
+/// else was never issued here and needs no lookup to be unknown.
+pub(crate) fn is_access_key_id(id: &str) -> bool {
+    id.len() == ID_DRAWN.saturating_add(2)
+        && id.starts_with("TS")
+        && id.bytes().skip(2).all(|byte| ALPHABET.contains(&byte))
+}
+
 /// A new secret: 30 random bytes as 40 base64 characters; the bytes are scrubbed once written out.
 ///
 /// # Errors
@@ -39,3 +47,7 @@ pub(crate) fn secret() -> Result<SecretKey> {
     getrandom::fill(bytes.as_mut_slice()).map_err(|_| Error::Randomness)?;
     Ok(SecretKey::new(STANDARD.encode(bytes.as_slice())))
 }
+
+#[cfg(test)]
+#[path = "credentials_tests.rs"]
+mod tests;

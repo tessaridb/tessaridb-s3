@@ -84,7 +84,7 @@ pub(super) async fn create(
         .await?;
     let outcome = match created {
         Created::Created(_) => "done",
-        Created::AlreadyOwned => "exists",
+        Created::Exists => "exists",
     };
     record(
         &state,
@@ -105,7 +105,7 @@ pub(super) async fn create(
             }),
         )
             .into_response()),
-        Created::AlreadyOwned => Err(ConsoleError::conflict(
+        Created::Exists => Err(ConsoleError::conflict(
             "bucket_exists",
             "a bucket of that name already exists",
         )),

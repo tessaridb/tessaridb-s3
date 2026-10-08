@@ -13,8 +13,8 @@ use crate::Result;
 pub enum Created {
     /// The bucket now exists.
     Created(Bucket),
-    /// It already existed; one owner holds every bucket, so it is the caller's.
-    AlreadyOwned,
+    /// A bucket of that name already exists, in some space: bucket names are global.
+    Exists,
 }
 
 /// What deleting a bucket ended in.
@@ -54,7 +54,7 @@ impl BucketService {
     ) -> Result<Created> {
         match self.repository.insert(name, region, space, creator).await? {
             Inserted::Created(entity) => Ok(Created::Created(Bucket::try_from(entity)?)),
-            Inserted::Exists => Ok(Created::AlreadyOwned),
+            Inserted::Exists => Ok(Created::Exists),
         }
     }
 

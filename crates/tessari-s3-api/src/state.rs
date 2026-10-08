@@ -1,13 +1,24 @@
-//! What every request handler shares: the signing region, the endpoint domains, the root credential and the clock.
+//! What every request handler shares: the signing region, the endpoint domains, the root credential, the cache of
+//! resolved user keys and the clock.
 
 use std::sync::Arc;
 
+use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
+use crate::principals::{Fetched, Principals};
 use crate::{Error, Result};
+
+/// Who signs with an access key, and the secret the signature is verified with.
+pub(crate) struct Credential {
+    /// The root credential or a user.
+    pub(crate) principal: Principal,
+    /// The key's secret.
+    pub(crate) secret: SecretKey,
+}
 
 /// The clock requests are judged by, in seconds since the Unix epoch; a parameter so tests can sign at a fixed time.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -27,6 +38,7 @@ struct Inner {
     max_inflight: usize,
     clock: Clock,
     storage: Storage,
+    principals: Principals,
 }
 
 impl ApiState {
@@ -54,6 +66,7 @@ impl ApiState {
                 max_inflight,
                 clock,
                 storage,
+                principals: Principals::new(),
             }),
         }
     }
@@ -106,18 +119,45 @@ impl ApiState {
         &self.inner.storage
     }
 
-    /// The secret for `access_key`.
+    /// Who signs with `access_key` and the secret to verify the signature with: the root credential from
+    /// configuration, a user's key from the store through the principal cache.
     ///
     /// # Errors
-    /// `InvalidAccessKeyId` when no credential has that key.
-    pub fn secret_for(&self, access_key: &str) -> Result<&SecretKey> {
+    /// `InvalidAccessKeyId` when no credential has that key or it or its user is disabled; the store's failure,
+    /// which serves nothing cached in its place.
+    pub(crate) async fn credential_for(&self, access_key: &str) -> Result<Credential> {
         if access_key == self.inner.root_access_key {
-            Ok(&self.inner.root_secret_key)
-        } else {
-            Err(Error::new(
+            return Ok(Credential {
+                principal: Principal::Root,
+                secret: self.inner.root_secret_key.clone(),
+            });
+        }
+        let users = self.inner.storage.users();
+        let live = self
+            .inner
+            .principals
+            .resolve(access_key, self.now(), || async {
+                let Some(resolved) = users.resolve(access_key).await? else {
+                    return Ok::<_, Error>(Fetched::Unknown);
+                };
+                Ok(match users.principal(&resolved.user.name).await? {
+                    Some(principal) => Fetched::Live {
+                        principal,
+                        secret: resolved.secret,
+                    },
+                    None => Fetched::Unknown,
+                })
+            })
+            .await?;
+        live.map(|live| Credential {
+            principal: Principal::User(live.principal),
+            secret: live.secret,
+        })
+        .ok_or_else(|| {
+            Error::new(
                 ErrorCode::InvalidAccessKeyId,
                 "the access key does not exist",
-            ))
-        }
+            )
+        })
     }
 }

@@ -3,6 +3,7 @@
 
 pub(crate) mod address;
 mod authenticate;
+mod authorize;
 pub(crate) mod body;
 pub(crate) mod call;
 mod handler;

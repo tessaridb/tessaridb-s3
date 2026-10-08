@@ -4,6 +4,7 @@ mod console;
 mod error;
 mod internal;
 mod pipeline;
+mod principals;
 pub mod routes;
 mod serve;
 mod state;
