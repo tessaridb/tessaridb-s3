@@ -6,6 +6,7 @@ pub mod buckets;
 pub mod dispatch;
 pub mod erasure;
 mod error;
+pub mod internal;
 pub mod multipart;
 pub mod objects;
 

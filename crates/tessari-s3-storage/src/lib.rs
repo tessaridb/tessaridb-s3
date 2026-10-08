@@ -8,6 +8,7 @@ mod error;
 pub mod multipart;
 pub mod objects;
 mod schema;
+pub mod shards;
 mod storage;
 
 pub use error::{Error, Result};

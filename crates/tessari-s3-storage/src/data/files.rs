@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::format::{
-    HASH_LEN, HEADER_LEN, block_hash, block_span, decode_header, encode_header, file_len,
+    HASH_LEN, HEADER_LEN, Piece, block_hash, block_span, decode_header, encode_header, file_len,
 };
 use super::writer::DataWriter;
 use crate::{Error, Result};
@@ -87,11 +87,40 @@ impl DataFiles {
             .join(name)
     }
 
+    /// The final and temporary paths of `piece` of data `id`. A shard sits beside the whole-object name with its
+    /// index as a suffix, so the two never share a file.
+    pub(super) fn piece_paths(&self, id: [u8; 16], piece: Piece) -> (PathBuf, PathBuf) {
+        let path = self.path(id);
+        match piece {
+            Piece::Whole => {
+                let temp = path.with_extension("tmp");
+                (path, temp)
+            }
+            Piece::Shard(index) => {
+                let mut name = path.into_os_string();
+                name.push(format!(".s{index}"));
+                let shard = PathBuf::from(name);
+                let mut temp = shard.clone().into_os_string();
+                temp.push(".tmp");
+                (shard, PathBuf::from(temp))
+            }
+        }
+    }
+
     /// Starts writing data `id`: its directory exists and its temporary file holds the header.
     pub(crate) async fn create(&self, id: [u8; 16]) -> Result<DataWriter> {
-        let path = self.path(id);
-        let temp = path.with_extension("tmp");
-        let header = encode_header(self.block_size, id);
+        self.create_piece(id, Piece::Whole, self.block_size).await
+    }
+
+    /// Starts writing `piece` of data `id` in blocks of `block_size` bytes.
+    pub(super) async fn create_piece(
+        &self,
+        id: [u8; 16],
+        piece: Piece,
+        block_size: u32,
+    ) -> Result<DataWriter> {
+        let (path, temp) = self.piece_paths(id, piece);
+        let header = encode_header(block_size, id, piece);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let open_temp = temp.clone();
         let (file, created_dirs) = blocking("create", move || {
@@ -106,8 +135,8 @@ impl DataFiles {
             Ok((file, created_dirs))
         })
         .await?;
-        let block_size = usize::try_from(self.block_size)
-            .map_err(|_| failed("create", ErrorKind::InvalidInput))?;
+        let block_size =
+            usize::try_from(block_size).map_err(|_| failed("create", ErrorKind::InvalidInput))?;
         Ok(DataWriter::new(
             file,
             block_size,
@@ -121,7 +150,17 @@ impl DataFiles {
     /// Opens data `id`, which must hold an object of `size` bytes: the header must be ours and name this id, and
     /// the file's length must be exactly what that size lays out.
     pub(crate) async fn open(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
-        let path = self.path(id);
+        self.open_piece(id, Piece::Whole, size).await
+    }
+
+    /// Opens `piece` of data `id`, which must hold `size` bytes.
+    pub(super) async fn open_piece(
+        &self,
+        id: [u8; 16],
+        piece: Piece,
+        size: u64,
+    ) -> Result<DataReader> {
+        let (path, _) = self.piece_paths(id, piece);
         let name = hex(id);
         let corrupt_name = name.clone();
         let corrupt = move |reason| Error::Corrupt {
@@ -133,7 +172,7 @@ impl DataFiles {
             let mut header = [0; HEADER_LEN];
             file.read_exact_at(&mut header, 0)
                 .map_err(|_| corrupt("header"))?;
-            let block_size = decode_header(&header, id).map_err(|_| corrupt("header"))?;
+            let block_size = decode_header(&header, id, piece).map_err(|_| corrupt("header"))?;
             let length = file.metadata().map_err(io("stat"))?.len();
             if file_len(size, block_size) != Some(length) {
                 return Err(corrupt("length"));
@@ -151,9 +190,14 @@ impl DataFiles {
 
     /// Removes data `id` under its final and its temporary name; a missing file is not an error.
     pub(crate) async fn remove(&self, id: [u8; 16]) -> Result<()> {
-        let path = self.path(id);
+        self.remove_piece(id, Piece::Whole).await
+    }
+
+    /// Removes `piece` of data `id` under its final and its temporary name; a missing file is not an error.
+    pub(super) async fn remove_piece(&self, id: [u8; 16], piece: Piece) -> Result<()> {
+        let (path, temp) = self.piece_paths(id, piece);
         blocking("remove", move || {
-            for name in [path.with_extension("tmp"), path] {
+            for name in [temp, path] {
                 match std::fs::remove_file(&name) {
                     Err(error) if error.kind() != ErrorKind::NotFound => {
                         return Err(io("remove")(error));

@@ -110,6 +110,18 @@ impl DataWriter {
         Ok(())
     }
 
+    /// Gives the write up: the temporary file is closed and removed so the same data id can be written again.
+    /// Nothing under the final name is touched.
+    pub(crate) async fn abandon(self) -> Result<()> {
+        let temp = self.temp;
+        drop(self.sink);
+        blocking("abandon", move || match std::fs::remove_file(&temp) {
+            Err(error) if error.kind() != ErrorKind::NotFound => Err(io("remove")(error)),
+            _ => Ok(()),
+        })
+        .await
+    }
+
     /// Writes the last block, syncs the file, renames it into place and syncs the directory — and, when this
     /// write created the shard directories, their parents too. A failed sync is final: the write fails and is not
     /// retried, because a retried sync can succeed over pages the kernel already dropped.

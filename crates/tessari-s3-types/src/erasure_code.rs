@@ -1,8 +1,6 @@
 //! An erasure code RS(k, m): k data shards and m parity shards, any k of which hold the object.
 
-/// The most shards one object is cut into: each shard goes to a distinct node, and a set wider than this buys
-/// nothing a cluster of this size can place.
-const WIDEST: u8 = 16;
+use tessari_s3_constants::ERASURE_MAX_WIDTH as WIDEST;
 
 /// Why a code was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

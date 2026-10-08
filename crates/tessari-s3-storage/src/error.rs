@@ -37,6 +37,21 @@ pub enum Error {
     /// An object needs a data file and no data directory is configured.
     #[error("no data directory is configured (TESSARIDB_S3_DATA_DIR)")]
     NoDataDirectory,
+    /// A shard request the shard store does not take: a block size of zero or past a data block, or an index past
+    /// the widest code.
+    #[error("the shard request is not valid: {reason}")]
+    InvalidShard {
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+    /// A shard's body was not the length its request declared; nothing of it was kept.
+    #[error("a shard declared {declared} bytes and carried {received}")]
+    ShardLength {
+        /// Bytes the request declared.
+        declared: u64,
+        /// Bytes it carried (when it carried too many, those received up to the refusal).
+        received: u64,
+    },
     /// The operating system's random source failed, so no unguessable id could be drawn.
     #[error("the random source failed")]
     Randomness,
@@ -73,6 +88,7 @@ impl Error {
             | Self::NoDataDirectory
             | Self::Randomness
             | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
+            Self::InvalidShard { .. } | Self::ShardLength { .. } => ErrorCategory::Validation,
             Self::Contended => ErrorCategory::Conflict,
         }
     }

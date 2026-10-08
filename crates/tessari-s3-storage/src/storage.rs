@@ -11,6 +11,7 @@ use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
+use crate::shards::ShardService;
 
 /// Every storage service, built over one metadata pool.
 #[derive(Clone)]
@@ -19,6 +20,7 @@ pub struct Storage {
     objects: ObjectService,
     multipart: MultipartService,
     cluster: ClusterService,
+    shards: ShardService,
     pool: MetaPool,
 }
 
@@ -28,12 +30,14 @@ impl Storage {
     #[must_use]
     pub fn new(pool: MetaPool, data_dir: Option<PathBuf>) -> Self {
         let data = data_dir.map(|root| DataFiles::new(root, DATA_BLOCK_SIZE));
+        let shards = ShardService::new(data.clone());
         let objects = ObjectService::new(TessariObjects::new(pool.clone()), data);
         Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
             cluster: ClusterService::new(TessariCluster::new(pool.clone())),
             objects,
+            shards,
             pool,
         }
     }
@@ -62,6 +66,12 @@ impl Storage {
     #[must_use]
     pub const fn cluster(&self) -> &ClusterService {
         &self.cluster
+    }
+
+    /// This node's shards of erasure-coded objects.
+    #[must_use]
+    pub const fn shards(&self) -> &ShardService {
+        &self.shards
     }
 
     /// Bucket operations.

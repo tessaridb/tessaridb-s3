@@ -158,3 +158,45 @@ fn the_path_is_sharded_by_the_id_and_names_nothing_a_client_chose() {
         PathBuf::from("/d/s3data/ab/cd/abcd0000000000000000000000000001")
     );
 }
+
+#[tokio::test]
+async fn a_shard_reads_back_only_as_that_shard_of_that_data() {
+    let root = scratch();
+    let files = DataFiles::new(root.clone(), BLOCK);
+    let bytes = body();
+    let size = u64::try_from(bytes.len()).expect("small");
+    let mut writer = files.create_shard(id(5), 2, 48).await.expect("create");
+    for chunk in bytes.chunks(13) {
+        writer.append(chunk).await.expect("append");
+    }
+    assert_eq!(writer.finish().await.expect("finish").size, size);
+    let reader = files.open_shard(id(5), 2, size).await.expect("open");
+    assert_eq!(reader.block_size(), 48);
+    let mut read = Vec::new();
+    for index in 0..4 {
+        read.extend(reader.read_block(index).await.expect("block"));
+    }
+    assert_eq!(read, bytes);
+    assert!(
+        matches!(files.open(id(5), size).await, Err(Error::DataIo { .. })),
+        "a shard is not the whole object's file"
+    );
+    std::fs::rename(files.shard_path(id(5), 2), files.shard_path(id(5), 1)).expect("renamed");
+    assert!(
+        matches!(
+            files.open_shard(id(5), 1, size).await,
+            Err(Error::Corrupt {
+                reason: "header",
+                ..
+            })
+        ),
+        "the header names shard 2"
+    );
+    files.remove_shard(id(5), 1).await.expect("removed");
+    assert!(!files.shard_path(id(5), 1).exists());
+    files
+        .remove_shard(id(5), 1)
+        .await
+        .expect("removing nothing is not an error");
+    std::fs::remove_dir_all(root).expect("cleanup");
+}

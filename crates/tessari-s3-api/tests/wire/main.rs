@@ -3,6 +3,7 @@
 
 #![cfg(test)]
 
+mod internal;
 mod operations;
 mod refusals;
 mod signer;

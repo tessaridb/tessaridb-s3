@@ -54,6 +54,22 @@ pub const MIN_SECRET_KEY_LEN: usize = 16;
 /// Connections to the metadata store open at once, when `TESSARIDB_S3_META_MAX_CONNECTIONS` is unset.
 pub const DEFAULT_META_CONNECTIONS: usize = 32;
 
+/// Seconds an internal request's date may differ from the receiving node's clock: the window a captured request
+/// can be replayed in, kept short because the nodes of one cluster share a time source.
+pub const INTERNAL_MAX_SKEW_SECS: i64 = 5 * 60;
+
+/// The internal shard routes: `{INTERNAL_SHARDS_PATH}/{data id, 32 lowercase hex}/{shard index}`.
+pub const INTERNAL_SHARDS_PATH: &str = "/internal/v1/shards";
+
+/// The header naming the node that sent an internal request.
+pub const INTERNAL_NODE_HEADER: &str = "x-tessari-node";
+
+/// The header carrying an internal request's date, in seconds since the Unix epoch.
+pub const INTERNAL_DATE_HEADER: &str = "x-tessari-date";
+
+/// The header carrying an internal request's signature, lowercase hex.
+pub const INTERNAL_SIGNATURE_HEADER: &str = "x-tessari-signature";
+
 /// Shortest cluster secret accepted, in bytes: it keys HMAC-SHA256 over every internal request and the placement
 /// hash, so it carries at least the 256 bits of the MAC it keys.
 pub const CLUSTER_SECRET_MIN_LEN: usize = 32;
@@ -81,6 +97,10 @@ pub const CHUNKED_FRAMING_ALLOWANCE: usize = 64 * 1024;
 
 /// Bytes per verified block of a data file (1 MiB, ADR-0002): the unit a write hashes and a read verifies.
 pub const DATA_BLOCK_SIZE: u32 = 1 << 20;
+
+/// The most shards one object is cut into (k+m ≤ 16): each shard goes to a distinct node, and a set wider than this
+/// buys nothing a cluster of this size can place.
+pub const ERASURE_MAX_WIDTH: u8 = 16;
 
 /// Largest object one PutObject may carry (5 GiB, S3's limit; EntityTooLarge beyond it).
 pub const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;

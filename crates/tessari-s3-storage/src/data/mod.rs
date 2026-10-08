@@ -2,6 +2,7 @@
 
 mod files;
 mod format;
+mod shards;
 mod writer;
 
 pub(crate) use files::DataFiles;
