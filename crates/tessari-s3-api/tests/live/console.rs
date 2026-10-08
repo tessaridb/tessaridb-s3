@@ -442,4 +442,37 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
         status["heal_backlog"],
         serde_json::json!({"listed": 1, "more": false})
     );
+
+    // The cluster view answers the same members, the layout objects are placed by, and the same backlog.
+    let cluster = send(
+        &member.console,
+        "GET",
+        "/api/v1/cluster",
+        Some(&token),
+        None,
+    )
+    .await
+    .json();
+    assert_eq!(
+        answering(&cluster),
+        vec![true, true, false, true, true, true],
+        "{cluster}"
+    );
+    let mut placed: Vec<&str> = cluster["layout"]["nodes"]
+        .as_array()
+        .expect("a layout on a member")
+        .iter()
+        .map(|node| node.as_str().expect("node"))
+        .collect();
+    placed.sort_unstable();
+    assert_eq!(
+        placed,
+        vec!["n1", "n2", "n3", "n4", "n5", "n6"],
+        "{cluster}"
+    );
+    assert_eq!(cluster["erasure"].as_str(), Some("4+2"));
+    assert_eq!(
+        cluster["heal_backlog"],
+        serde_json::json!({"listed": 1, "more": false})
+    );
 }
