@@ -5,6 +5,16 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Console bucket explorer: each listed key shows its content type as stored at write (an icon and a label) beside
+  size, age and ETag; selecting a key shows its headers, user metadata, checksums and part count in a side pane, read
+  from its record without opening the object (the arrow keys move the selection, Escape closes it); the list appends
+  the next page by the server's cursor as it is scrolled, or with "Load more"; a name filter lists only the keys in the
+  open folder that start with it, served by the store as a longer prefix; each row's details, download, copy-key and
+  ETag-guarded delete (with a reason) are icon buttons. A caller who may not read a bucket gets the same refusal from
+  every one of these routes, with nothing about the bucket or its keys in it.
+- A burst of requests on a cold server no longer fails: new metadata connections sign in at most 4 at a time, a
+  connection whose sign-in was refused is dropped instead of reused, and a metadata store that is throttling sign-ins
+  answers S3 clients `SlowDown` (503) rather than `InternalError`.
 - GetObject and HeadObject with a `partNumber` past the object's last part answer `InvalidPartNumber` (416), and
   `partNumber=1` on a single-part object answers the whole object.
 - Upload ids sort by when the upload began (128 random bits kept), so ListMultipartUploads pages with
