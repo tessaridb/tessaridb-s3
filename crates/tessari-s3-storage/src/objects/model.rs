@@ -152,6 +152,8 @@ pub struct HealBacklog {
     pub listed: usize,
     /// Whether more are listed than were counted.
     pub more: bool,
+    /// Of those counted, the ids handed out at least [`tessari_s3_constants::HEAL_AT_RISK_ATTEMPTS`] times.
+    pub at_risk: usize,
 }
 
 /// What a listing shows of one object.

@@ -27,6 +27,10 @@ export function healing(heal: Backlog | null): HTMLElement {
     return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
   }
   const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
+  if (heal.at_risk > 0) {
+    const risk = `${heal.at_risk.toLocaleString()} at risk`;
+    return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip bad" }, risk), " Healing keeps failing for these: too few shards can be read."));
+  }
   return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
 }
 

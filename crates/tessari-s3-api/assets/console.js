@@ -56,7 +56,7 @@
     }
     const members = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
-    const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" ? { listed: backlog["listed"], more: backlog["more"] } : void 0;
+    const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"]) ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] } : void 0;
     const space2 = drive(v["drive"]);
     if (v["members"] !== null && members === null || heal === void 0 || space2 === void 0) {
       return null;
@@ -166,7 +166,7 @@
     if (v["members"] !== null && members === null || placed === void 0 || addresses === null) {
       return null;
     }
-    if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"])) {
+    if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
       return null;
     }
     return {
@@ -174,7 +174,7 @@
       erasure: v["erasure"],
       members,
       layout: placed,
-      heal_backlog: { listed: backlog["listed"], more: backlog["more"] },
+      heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
       metadata: { addresses }
     };
   }
@@ -1130,6 +1130,10 @@
       return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
     }
     const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
+    if (heal.at_risk > 0) {
+      const risk = `${heal.at_risk.toLocaleString()} at risk`;
+      return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip bad" }, risk), " Healing keeps failing for these: too few shards can be read."));
+    }
     return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
   }
   function state(member2) {

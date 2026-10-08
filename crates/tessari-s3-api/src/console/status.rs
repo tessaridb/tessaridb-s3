@@ -53,6 +53,8 @@ pub(super) struct BacklogView {
     pub(super) listed: usize,
     /// Whether more are listed than were counted.
     pub(super) more: bool,
+    /// Of those counted, the objects whose healing has failed often enough that it will not succeed by itself.
+    pub(super) at_risk: usize,
 }
 
 #[derive(Serialize)]
@@ -102,6 +104,7 @@ pub(super) async fn status(
         .map(|backlog| BacklogView {
             listed: backlog.listed,
             more: backlog.more,
+            at_risk: backlog.at_risk,
         });
     Ok(Json(Status {
         version: env!("CARGO_PKG_VERSION"),

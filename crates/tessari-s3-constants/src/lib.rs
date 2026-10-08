@@ -198,6 +198,14 @@ pub const HEAL_BATCH: usize = 100;
 /// died holding a claim, and does not come back, keeps the others off that id.
 pub const HEAL_CLAIM_SECS: u64 = 120;
 
+/// Hand-outs after which a data id still listed for healing is reported at risk: a heal that failed this many times
+/// will not succeed by itself.
+pub const HEAL_AT_RISK_ATTEMPTS: i64 = 10;
+
+/// Seconds a data id whose heal did not finish waits before it is handed out again, so it leaves the head of the
+/// queue.
+pub const HEAL_RETRY_SECS: u64 = 15;
+
 /// How long a member's claim on the usage pass lasts. Longer than the default interval between passes, so the member
 /// that measured keeps measuring; when it stops, another member takes the pass once the claim lapses.
 pub const USAGE_CLAIM_SECS: u64 = 180;
@@ -209,12 +217,9 @@ pub const DEFAULT_USAGE_INTERVAL_SECS: u64 = 60;
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 
-/// Records one `CLAIM` may take: the metadata store refuses more (TessariDB `MAX_CLAIM_RECORDS`, 0.33.2-beta).
-pub const QUEUE_CLAIM_MAX: usize = 500;
-
 /// Seconds a queued data id a pass could not finish (another node holds its shards) waits before it is handed out
 /// again, so it leaves the head of the queue.
-pub const RECLAIM_RETRY_SECS: u64 = 60;
+pub const RECLAIM_RETRY_SECS: u64 = 15;
 
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;

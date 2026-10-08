@@ -212,7 +212,7 @@ async fn an_object_is_written_as_one_shard_per_node_and_reclaimed_from_every_nod
     assert_eq!(spread(&member), vec![1; 6], "one shard on every node");
     assert_eq!(count(&member.planter, "shard_sets").await, 1);
     assert_eq!(
-        count(&member.planter, "heals").await,
+        count(&member.planter, "heal_queue").await,
         0,
         "every shard durable"
     );
@@ -261,7 +261,7 @@ async fn nodes_down_within_the_parity_still_acknowledge_and_list_the_object_for_
         "{:?}",
         spread(&member)
     );
-    assert_eq!(count(&member.planter, "heals").await, 1);
+    assert_eq!(count(&member.planter, "heal_queue").await, 1);
 }
 
 #[tokio::test]

@@ -68,7 +68,7 @@ async fn six_processes_spread_an_object_and_hold_the_write_quorum() {
         .collect();
     assert_eq!(spread, vec![1; 6], "one shard on every node");
     assert_eq!(
-        count(&cluster.meta, "heals").await,
+        count(&cluster.meta, "heal_queue").await,
         0,
         "every shard durable"
     );
@@ -79,7 +79,7 @@ async fn six_processes_spread_an_object_and_hold_the_write_quorum() {
     let (status, body) = call(&cluster.nodes[front], "PUT", "/shards/second", &large()).await;
     assert_eq!(status, 200, "two down is within the parity: {body}");
     assert_eq!(
-        count(&cluster.meta, "heals").await,
+        count(&cluster.meta, "heal_queue").await,
         1,
         "the degraded write is listed"
     );
@@ -101,7 +101,7 @@ async fn six_processes_spread_an_object_and_hold_the_write_quorum() {
         cluster.restart(down).await;
     }
     let started = Instant::now();
-    while count(&cluster.meta, "heals").await > 0 {
+    while count(&cluster.meta, "heal_queue").await > 0 {
         assert!(
             started.elapsed() < HEALED_WITHIN,
             "still listed for healing after {HEALED_WITHIN:?}; see {}",
@@ -154,7 +154,7 @@ async fn small_objects_survive_a_node_killed_partway_through_a_run_of_writes() {
     }
     assert_eq!(acknowledged.len(), 40, "one node down is within the parity");
     assert!(
-        count(&cluster.meta, "heals").await >= 20,
+        count(&cluster.meta, "heal_queue").await >= 20,
         "every write after the kill is listed for healing"
     );
     for seed in acknowledged {

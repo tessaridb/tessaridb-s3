@@ -77,7 +77,7 @@ async fn an_erasure_coded_object_reads_back_whole_and_by_range_across_stripes() 
     assert_eq!(ranged.status, 206, "{}", ranged.body);
     assert_eq!(ranged.bytes, striped()[1_048_000..1_050_000].to_vec());
     assert_eq!(
-        count(&member.planter, "heals").await,
+        count(&member.planter, "heal_queue").await,
         0,
         "nothing was missing"
     );
@@ -90,7 +90,11 @@ async fn a_missing_data_shard_is_rebuilt_from_parity_and_listed_for_healing() {
     let member = written().await;
     std::fs::remove_file(shard_file(&member, 1)).expect("shard removed");
     assert_eq!(read_back(&member).await, striped());
-    assert_eq!(count(&member.planter, "heals").await, 1, "heal on read");
+    assert_eq!(
+        count(&member.planter, "heal_queue").await,
+        1,
+        "heal on read"
+    );
 }
 
 #[tokio::test]
@@ -105,7 +109,11 @@ async fn a_damaged_data_shard_is_never_served_and_is_listed_for_healing() {
     *flipped ^= 0xff;
     std::fs::write(&path, bytes).expect("shard damaged");
     assert_eq!(read_back(&member).await, striped());
-    assert_eq!(count(&member.planter, "heals").await, 1, "heal on read");
+    assert_eq!(
+        count(&member.planter, "heal_queue").await,
+        1,
+        "heal on read"
+    );
 }
 
 #[tokio::test]

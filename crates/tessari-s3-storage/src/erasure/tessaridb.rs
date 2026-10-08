@@ -1,7 +1,7 @@
 //! [`ShardSetRepository`] over TessariDB. Every value is bound; the pool sends the namespace and database with each
 //! unit of work.
 
-use tessari_s3_constants::HEAL_CLAIM_SECS;
+use tessari_s3_constants::{HEAL_CLAIM_SECS, HEAL_RETRY_SECS};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 
 use super::repository::{ShardSet, ShardSetRepository};
@@ -76,43 +76,40 @@ impl ShardSetRepository for TessariShardSets {
     }
 
     async fn heal(&self, id: [u8; 16]) -> Result<()> {
+        // A listing of an id already listed keeps its attempt count; `due` now puts it back in line.
         self.pool
             .run(
-                "UPSERT heals:$data SET data = $data, queued = time::now();",
+                "UPSERT heal_queue:$data SET data = $data, due = time::now();",
                 data(id),
             )
             .await?;
         Ok(())
     }
 
-    async fn healing(&self, limit: usize) -> Result<Vec<[u8; 16]>> {
+    async fn take_heal(&self) -> Result<Option<[u8; 16]>> {
+        let answers = self.pool.run("CLAIM FROM heal_queue;", Vec::new()).await?;
+        Ok(heal_records(answers)?.into_iter().next().map(|(id, _)| id))
+    }
+
+    async fn retry_heal(&self, id: [u8; 16]) -> Result<()> {
+        // The retry delay is this server's own constant, formatted to digits only.
+        let script = format!(
+            "BEGIN; UPDATE heal_queue:$data SET due = time::from_unix(time::unix(time::now()) + {HEAL_RETRY_SECS}); \
+             RELEASE heal_queue:$data; COMMIT;"
+        );
+        self.pool.run(&script, data(id)).await?;
+        Ok(())
+    }
+
+    async fn listed(&self, limit: usize) -> Result<Vec<([u8; 16], i64)>> {
         // `LIMIT` takes a literal (0.33.1 refuses a parameter there); the limit is this server's own integer, never a
         // caller's value, and an integer formats to digits only.
-        let script = format!("SELECT data FROM heals LIMIT {limit};");
-        let answers = self.pool.run(&script, Vec::new()).await?;
-        let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
-            return Ok(Vec::new());
-        };
-        records
-            .into_iter()
-            .map(|(_, record)| match record {
-                Value::Object(fields) => match fields.get("data") {
-                    Some(Value::Uuid(id)) => Ok(*id),
-                    _ => Err(Error::Malformed {
-                        record: "heals",
-                        reason: "data",
-                    }),
-                },
-                _ => Err(Error::Malformed {
-                    record: "heals",
-                    reason: "not an object",
-                }),
-            })
-            .collect()
+        let script = format!("SELECT data, attempts FROM heal_queue LIMIT {limit};");
+        heal_records(self.pool.run(&script, Vec::new()).await?)
     }
 
     async fn healed(&self, id: [u8; 16]) -> Result<()> {
-        self.pool.run("DELETE heals:$data;", data(id)).await?;
+        self.pool.run("DELETE heal_queue:$data;", data(id)).await?;
         Ok(())
     }
 
@@ -156,4 +153,31 @@ impl ShardSetRepository for TessariShardSets {
             .await?;
         Ok(())
     }
+}
+
+/// The data ids of an answer over `heal_queue`, each with its hand-out count (none before the first claim).
+fn heal_records(answers: Vec<Answer>) -> Result<Vec<([u8; 16], i64)>> {
+    let malformed = |reason| Error::Malformed {
+        record: "heal_queue",
+        reason,
+    };
+    let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+        return Ok(Vec::new());
+    };
+    records
+        .into_iter()
+        .map(|(_, record)| {
+            let Value::Object(fields) = record else {
+                return Err(malformed("not an object"));
+            };
+            let Some(Value::Uuid(id)) = fields.get("data") else {
+                return Err(malformed("data"));
+            };
+            let attempts = match fields.get("attempts") {
+                Some(Value::Number(Number::Integer(attempts))) => *attempts,
+                _ => 0,
+            };
+            Ok((*id, attempts))
+        })
+        .collect()
 }

@@ -32,7 +32,7 @@ fn patterned(len: usize, seed: usize) -> Vec<u8> {
 
 async fn healed(cluster: &Cluster) {
     let started = Instant::now();
-    while count(&cluster.meta, "heals").await > 0 {
+    while count(&cluster.meta, "heal_queue").await > 0 {
         assert!(
             started.elapsed() < HEALED_WITHIN,
             "still listed for healing after {HEALED_WITHIN:?}; see {}",
@@ -92,7 +92,7 @@ async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     .expect("the front node answers");
     assert_eq!(status, 200, "one shard lost is within the parity");
     assert_eq!(
-        count(&cluster.meta, "heals").await,
+        count(&cluster.meta, "heal_queue").await,
         1,
         "the shard the dead node never finished is listed — the kill landed inside the write"
     );
@@ -144,7 +144,7 @@ async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     let (status, body) = call(&cluster.nodes[front], "PUT", "/faults/during-get", &large).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(
-        count(&cluster.meta, "heals").await,
+        count(&cluster.meta, "heal_queue").await,
         0,
         "every shard durable"
     );
@@ -163,7 +163,7 @@ async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     assert_eq!(read.len(), large.len(), "the whole body arrived");
     assert!(read == large, "the body is the object's bytes");
     assert_eq!(
-        count(&cluster.meta, "heals").await,
+        count(&cluster.meta, "heal_queue").await,
         1,
         "the read met the missing shard after the kill and listed it"
     );

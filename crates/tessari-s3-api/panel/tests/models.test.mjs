@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readBuckets, readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
-const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false }, drive: own });
+const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, drive: own });
 
 test("a member says whether it answered and how full its drive is", () => {
   const read = readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }, { node: "n2", endpoint: "127.0.0.1:2", answering: false, drive: null }]));
@@ -73,12 +73,19 @@ test("the cluster view reads members, a layout or none, the backlog and the meta
     erasure: "2+1",
     members: [{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }],
     layout: { version: 1, nodes: ["n1", "n2", "n3"] },
-    heal_backlog: { listed: 0, more: false },
+    heal_backlog: { listed: 3, more: false, at_risk: 1 },
     metadata: { addresses: ["127.0.0.1:9080"] },
   };
   assert.deepEqual(readCluster(cluster), cluster);
   assert.deepEqual(readCluster({ ...cluster, node: null, erasure: null, members: null, layout: null })?.layout, null);
   assert.equal(readCluster({ ...cluster, metadata: { addresses: [1] } }), null);
+  assert.equal(readCluster({ ...cluster, heal_backlog: { listed: 3, more: false } }), null, "the at-risk count is always sent");
+});
+
+test("the status backlog carries how many objects are at risk", () => {
+  const read = readStatus({ ...status(null), heal_backlog: { listed: 4, more: true, at_risk: 2 } });
+  assert.deepEqual(read?.heal_backlog, { listed: 4, more: true, at_risk: 2 });
+  assert.equal(readStatus({ ...status(null), heal_backlog: { listed: 4, more: true } }), null);
 });
 
 test("a bucket carries its limits, null where it has none", () => {

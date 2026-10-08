@@ -88,12 +88,14 @@ impl ObjectService {
     /// The metadata store's or the drive's failure; the entries this pass held go back to the queue when their
     /// hold lapses.
     pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
-        let due = self.repository.claim(limit).await?;
-        let mut done = Reclaimed {
-            examined: due.len(),
-            ..Reclaimed::default()
-        };
-        for (id, marked) in due {
+        let mut done = Reclaimed::default();
+        // One entry at a time: a pass cut short by a refusal leaves at most the entry in hand held until its hold
+        // lapses, never a batch.
+        while done.examined < limit {
+            let Some((id, marked)) = self.repository.claim_next().await? else {
+                break;
+            };
+            done.examined = done.examined.saturating_add(1);
             let data = uuid::Uuid::from_bytes(id);
             if self.repository.referenced(id).await? {
                 // Not a state this server writes; keep the bytes and say so.

@@ -19,8 +19,13 @@ pub(crate) trait ShardSetRepository: Send + Sync {
     fn forget(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Lists data `id` for healing.
     fn heal(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
-    /// Up to `limit` data ids listed for healing.
-    fn healing(&self, limit: usize) -> impl Future<Output = Result<Vec<[u8; 16]>>> + Send;
+    /// Takes and holds the next data id due for healing; `None` when none is due. A hold this node does not finish
+    /// lapses and the id is handed out again.
+    fn take_heal(&self) -> impl Future<Output = Result<Option<[u8; 16]>>> + Send;
+    /// Hands held data `id` back to the healing list, not to be handed out again for a while.
+    fn retry_heal(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
+    /// Up to `limit` data ids listed for healing, held or not, each with how often it was handed out.
+    fn listed(&self, limit: usize) -> impl Future<Output = Result<Vec<([u8; 16], i64)>>> + Send;
     /// Removes data `id` from the healing list.
     fn healed(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Takes the expiring claim on data `id` for `holder` — free, or already `holder`'s; `false` when another holder

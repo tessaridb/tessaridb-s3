@@ -5,7 +5,7 @@
 
 export type Drive = { readonly capacity: number; readonly free: number; readonly available: number };
 export type Member = { readonly node: string; readonly endpoint: string; readonly answering: boolean; readonly drive: Drive | null };
-export type Backlog = { readonly listed: number; readonly more: boolean };
+export type Backlog = { readonly listed: number; readonly more: boolean; readonly at_risk: number };
 export type Status = {
   readonly version: string;
   readonly node: string | null;
@@ -159,9 +159,11 @@ export function readStatus(v: unknown): Status | null {
   const members = v["members"] === null ? null : list(v["members"], member);
   const backlog = v["heal_backlog"];
   const heal =
-    backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean"
-      ? { listed: backlog["listed"], more: backlog["more"] }
-      : undefined;
+    backlog === null
+      ? null
+      : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"])
+        ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] }
+        : undefined;
   const space = drive(v["drive"]);
   if ((v["members"] !== null && members === null) || heal === undefined || space === undefined) {
     return null;
@@ -315,7 +317,7 @@ export function readCluster(v: unknown): Cluster | null {
   if ((v["members"] !== null && members === null) || placed === undefined || addresses === null) {
     return null;
   }
-  if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"])) {
+  if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
     return null;
   }
   return {
@@ -323,7 +325,7 @@ export function readCluster(v: unknown): Cluster | null {
     erasure: v["erasure"],
     members,
     layout: placed,
-    heal_backlog: { listed: backlog["listed"], more: backlog["more"] },
+    heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
     metadata: { addresses },
   };
 }

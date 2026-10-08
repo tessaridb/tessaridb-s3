@@ -85,6 +85,7 @@ pub(super) async fn cluster(
         heal_backlog: BacklogView {
             listed: backlog.as_ref().map_or(0, |found| found.listed),
             more: backlog.is_some_and(|found| found.more),
+            at_risk: backlog.map_or(0, |found| found.at_risk),
         },
         metadata: MetadataView {
             addresses: state.meta_addresses().to_vec(),

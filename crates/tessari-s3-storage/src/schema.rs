@@ -22,9 +22,9 @@ use crate::Result;
 /// The cluster's topology lives here too: `s3_nodes` (one record per node, refreshed as it registers) and `layouts`
 /// (one record per layout version, created once and never rewritten). On a cluster member every data id is
 /// erasure-coded and `shard_sets` records the layout its shards were placed under, from the transaction that queues
-/// the id until reclamation; `heals` lists the data ids acknowledged with fewer than every shard durable, and the
-/// `heal_claims` space holds the expiring claim of the one node healing or reclaiming an id. What operators do through
-/// the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
+/// the id until reclamation; the `heal_queue` hands out the data ids acknowledged with fewer than every shard durable
+/// (or found damaged by a read), one healer at a time, and the `heal_claims` space holds the expiring claim of the
+/// one node healing or reclaiming an id. What operators do through the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
@@ -50,7 +50,7 @@ DEFINE TABLE IF NOT EXISTS objects (\
  data uuid, upload uuid, parts int);
 DEFINE TABLE IF NOT EXISTS s3_settings (grace int REQUIRED);
 UPSERT s3_settings:'reclaim' SET grace = $grace;
-DEFINE QUEUE IF NOT EXISTS reclaims TIMEOUT 5m SCHEMAFULL NOT BEFORE due;
+DEFINE QUEUE IF NOT EXISTS reclaims TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS data ON reclaims TYPE uuid REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON reclaims TYPE datetime REQUIRED;
 DEFINE FIELD IF NOT EXISTS reclaiming ON reclaims TYPE datetime;
@@ -88,7 +88,9 @@ DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUI
 DEFINE TABLE IF NOT EXISTS layouts (\
  version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
-DEFINE TABLE IF NOT EXISTS heals (data uuid REQUIRED, queued datetime REQUIRED);
+DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
+DEFINE FIELD IF NOT EXISTS data ON heal_queue TYPE uuid REQUIRED;
+DEFINE FIELD IF NOT EXISTS due ON heal_queue TYPE datetime REQUIRED;
 DEFINE SPACE IF NOT EXISTS heal_claims;
 DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 DEFINE TABLE IF NOT EXISTS bucket_usage (taken datetime REQUIRED, buckets array REQUIRED);

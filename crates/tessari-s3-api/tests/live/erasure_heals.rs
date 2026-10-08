@@ -1,10 +1,11 @@
-//! Healing on the RS(4, 2) cluster of the `erasure` module: an object listed in `heals` has every missing or damaged
-//! shard rewritten from the others, byte for byte as it was written, and leaves the list; one with fewer than four
+//! Healing on the RS(4, 2) cluster of the `erasure` module: an object the `heal_queue` hands out has every missing or
+//! damaged shard rewritten from the others, byte for byte as it was written, and leaves the list; one with fewer than four
 //! readable shards stays listed; a listing whose data is already gone is dropped. One node at a time works on a data
 //! id: a claim another node holds keeps this node's healer and reclaimer off it until it is released, and shard bytes
 //! whose shard set is gone are swept.
 
-use tessari_s3_infrastructure::tessaridb::{MetaPool, Value};
+use tessari_s3_constants::{HEAL_AT_RISK_ATTEMPTS, HEAL_RETRY_SECS, RECLAIM_RETRY_SECS};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 use tessari_s3_storage::objects::Content;
 use tessari_s3_types::{BucketName, ObjectKey};
 
@@ -24,7 +25,7 @@ async fn a_lost_shard_is_rewritten_as_it_was() {
     let healed = member.storage.objects().heal(100).await.expect("heal pass");
     assert_eq!((healed.examined, healed.healed, healed.at_risk), (1, 1, 0));
     assert_eq!(std::fs::read(&path).expect("shard back"), original);
-    assert_eq!(count(&member.planter, "heals").await, 0, "unlisted");
+    assert_eq!(count(&member.planter, "heal_queue").await, 0, "unlisted");
 }
 
 #[tokio::test]
@@ -42,7 +43,7 @@ async fn a_damaged_shard_is_rewritten_as_it_was() {
     let healed = member.storage.objects().heal(100).await.expect("heal pass");
     assert_eq!((healed.examined, healed.healed, healed.at_risk), (1, 1, 0));
     assert_eq!(std::fs::read(&path).expect("shard back"), original);
-    assert_eq!(count(&member.planter, "heals").await, 0, "unlisted");
+    assert_eq!(count(&member.planter, "heal_queue").await, 0, "unlisted");
 }
 
 #[tokio::test]
@@ -57,7 +58,11 @@ async fn an_object_below_the_read_quorum_stays_listed_at_risk() {
     assert_eq!(read.status, 503, "{}", read.body);
     let healed = member.storage.objects().heal(100).await.expect("heal pass");
     assert_eq!((healed.examined, healed.healed, healed.at_risk), (1, 0, 1));
-    assert_eq!(count(&member.planter, "heals").await, 1, "still listed");
+    assert_eq!(
+        count(&member.planter, "heal_queue").await,
+        1,
+        "still listed"
+    );
 }
 
 #[tokio::test]
@@ -68,14 +73,14 @@ async fn a_listing_whose_data_is_gone_is_dropped() {
     member
         .planter
         .run(
-            "UPSERT heals:$data SET data = $data, queued = time::now();",
+            "UPSERT heal_queue:$data SET data = $data, due = time::now();",
             vec![("data".to_owned(), Value::Uuid([7; 16]))],
         )
         .await
         .expect("planted");
     let healed = member.storage.objects().heal(100).await.expect("heal pass");
     assert_eq!((healed.examined, healed.healed, healed.at_risk), (1, 1, 0));
-    assert_eq!(count(&member.planter, "heals").await, 0, "dropped");
+    assert_eq!(count(&member.planter, "heal_queue").await, 0, "dropped");
 }
 
 /// The data id `/shards/big` is stored under.
@@ -150,8 +155,26 @@ async fn a_data_id_another_node_holds_is_left_to_it_and_healed_once_released() {
         !path.exists(),
         "the shard was rewritten under another node's claim"
     );
-    assert_eq!(count(&member.planter, "heals").await, 1, "still listed");
+    assert_eq!(
+        count(&member.planter, "heal_queue").await,
+        1,
+        "still listed"
+    );
+    let ahead = heal_due_in(&member.planter, id).await;
+    assert!(
+        (retry(HEAL_RETRY_SECS) - 5..=retry(HEAL_RETRY_SECS)).contains(&ahead),
+        "left {ahead} s, not stepped aside for the holder"
+    );
     claim_elsewhere(&member.planter, id, false).await;
+    // The deferral passes.
+    member
+        .planter
+        .run(
+            "UPDATE heal_queue:$data SET due = time::now();",
+            vec![("data".to_owned(), Value::Uuid(id))],
+        )
+        .await
+        .expect("due moved to now");
     let healed = member.storage.objects().heal(100).await.expect("heal pass");
     assert_eq!((healed.examined, healed.healed, healed.at_risk), (1, 1, 0));
     assert!(path.exists(), "rewritten once the claim was handed back");
@@ -179,11 +202,11 @@ async fn a_data_id_being_healed_elsewhere_is_not_reclaimed_under_it() {
     assert_eq!(count(&member.planter, "reclaims").await, 1, "still queued");
     let ahead = crate::reclaim::due_in(&member.planter, id).await;
     assert!(
-        (50..=60).contains(&ahead),
+        (retry(RECLAIM_RETRY_SECS) - 5..=retry(RECLAIM_RETRY_SECS)).contains(&ahead),
         "deferred {ahead} s, not behind the entries waiting after it"
     );
     claim_elsewhere(&member.planter, id, false).await;
-    // The deferral's minute passes.
+    // The deferral passes.
     member
         .planter
         .run(
@@ -251,4 +274,74 @@ async fn shard_bytes_whose_shard_set_is_gone_are_swept_and_live_ones_kept() {
         "the orphan swept, the live shard kept"
     );
     assert_eq!(reclaimed.orphans, 1);
+}
+
+/// Seconds from now until the healing queue hands data `id` out again.
+async fn heal_due_in(planter: &MetaPool, id: [u8; 16]) -> i64 {
+    let answers = planter
+        .run(
+            "SELECT time::unix(due) - time::unix(time::now()) AS ahead FROM ONLY heal_queue:$data;",
+            vec![("data".to_owned(), Value::Uuid(id))],
+        )
+        .await
+        .expect("a heal_queue read");
+    match answers.into_iter().next() {
+        Some(Answer::Records { records, .. }) => match records.first().map(|(_, record)| record) {
+            Some(Value::Object(fields)) => match fields.get("ahead") {
+                Some(Value::Number(Number::Integer(ahead))) => *ahead,
+                other => panic!("no due instant: {other:?}"),
+            },
+            other => panic!("no queue record for the data id: {other:?}"),
+        },
+        other => panic!("not a record answer: {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_heal_that_keeps_failing_steps_aside_and_is_reported_at_risk() {
+    let _why = IGNORED;
+    let member = written().await;
+    let id = data_id(&member).await;
+    for index in [0, 3, 5] {
+        std::fs::remove_file(shard_file(&member, index)).expect("shard removed");
+    }
+    let read = call(&member.state, "GET", "/shards/big", vec![], b"").await;
+    assert_eq!(read.status, 503, "{}", read.body);
+    let objects = member.storage.objects();
+    for attempt in 1..=HEAL_AT_RISK_ATTEMPTS {
+        let healed = objects.heal(100).await.expect("heal pass");
+        assert_eq!(
+            (healed.examined, healed.at_risk),
+            (1, 1),
+            "attempt {attempt}"
+        );
+        let ahead = heal_due_in(&member.planter, id).await;
+        assert!(
+            (retry(HEAL_RETRY_SECS) - 5..=retry(HEAL_RETRY_SECS)).contains(&ahead),
+            "attempt {attempt} deferred {ahead} s, not out of the head"
+        );
+        let early = objects.heal(100).await.expect("heal pass");
+        assert_eq!(early.examined, 0, "a deferred heal waits its turn");
+        // The deferral passes.
+        member
+            .planter
+            .run(
+                "UPDATE heal_queue:$data SET due = time::now();",
+                vec![("data".to_owned(), Value::Uuid(id))],
+            )
+            .await
+            .expect("due moved to now");
+    }
+    let backlog = objects
+        .heal_backlog(100)
+        .await
+        .expect("backlog")
+        .expect("a cluster member");
+    assert_eq!((backlog.listed, backlog.at_risk), (1, 1));
+}
+
+/// A retry delay as the signed seconds the store's arithmetic answers.
+fn retry(secs: u64) -> i64 {
+    i64::try_from(secs).expect("a small constant")
 }

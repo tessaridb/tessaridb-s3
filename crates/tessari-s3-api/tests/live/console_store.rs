@@ -115,7 +115,8 @@ async fn the_heal_backlog_is_counted_on_a_member_and_absent_off_one() {
         whole,
         Some(HealBacklog {
             listed: 0,
-            more: false
+            more: false,
+            at_risk: 0,
         })
     );
     std::fs::remove_file(shard_file(&member, 1)).expect("shard removed");
@@ -125,7 +126,8 @@ async fn the_heal_backlog_is_counted_on_a_member_and_absent_off_one() {
         listed,
         Some(HealBacklog {
             listed: 1,
-            more: false
+            more: false,
+            at_risk: 0,
         })
     );
     let bounded = objects.heal_backlog(0).await.expect("bounded");
@@ -133,7 +135,8 @@ async fn the_heal_backlog_is_counted_on_a_member_and_absent_off_one() {
         bounded,
         Some(HealBacklog {
             listed: 0,
-            more: true
+            more: true,
+            at_risk: 0,
         })
     );
 }

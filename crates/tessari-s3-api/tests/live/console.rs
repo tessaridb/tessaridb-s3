@@ -431,7 +431,7 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
     );
     assert_eq!(
         status["heal_backlog"],
-        serde_json::json!({"listed": 0, "more": false})
+        serde_json::json!({"listed": 0, "more": false, "at_risk": 0})
     );
     std::fs::remove_file(shard_file(&member, 1)).expect("shard removed");
     assert_eq!(read_back(&member).await, striped(), "the read lists it");
@@ -440,7 +440,7 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
         .json();
     assert_eq!(
         status["heal_backlog"],
-        serde_json::json!({"listed": 1, "more": false})
+        serde_json::json!({"listed": 1, "more": false, "at_risk": 0})
     );
 
     // The cluster view answers the same members, the layout objects are placed by, and the same backlog.
@@ -473,6 +473,6 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
     assert_eq!(cluster["erasure"].as_str(), Some("4+2"));
     assert_eq!(
         cluster["heal_backlog"],
-        serde_json::json!({"listed": 1, "more": false})
+        serde_json::json!({"listed": 1, "more": false, "at_risk": 0})
     );
 }

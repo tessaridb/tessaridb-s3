@@ -1,6 +1,6 @@
 //! Objects in TessariDB: one `objects` record per key, id `<bucket>/<key>`; every value is bound.
 
-use tessari_s3_constants::{QUEUE_CLAIM_MAX, RECLAIM_RETRY_SECS};
+use tessari_s3_constants::RECLAIM_RETRY_SECS;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
@@ -175,36 +175,28 @@ impl ObjectRepository for TessariObjects {
         Ok(())
     }
 
-    async fn claim(&self, limit: usize) -> Result<Vec<([u8; 16], bool)>> {
-        // `CLAIM` takes a literal count, refused above the store's ceiling; it is this server's own integer, clamped,
-        // never a caller's value, and an integer formats to digits only.
-        let count = limit.min(QUEUE_CLAIM_MAX);
-        let answers = self
-            .pool
-            .run(&format!("CLAIM {count} FROM reclaims;"), Vec::new())
-            .await?;
+    async fn claim_next(&self) -> Result<Option<([u8; 16], bool)>> {
+        let answers = self.pool.run("CLAIM FROM reclaims;", Vec::new()).await?;
         let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
-        records
-            .into_iter()
-            .map(|(_, record)| match record {
-                Value::Object(fields) => match fields.get("data") {
-                    Some(Value::Uuid(id)) => Ok((
-                        *id,
-                        matches!(fields.get("reclaiming"), Some(Value::Datetime { .. })),
-                    )),
-                    _ => Err(Error::Malformed {
-                        record: "reclaims",
-                        reason: "data",
-                    }),
-                },
-                _ => Err(Error::Malformed {
-                    record: "reclaims",
-                    reason: "not an object",
-                }),
-            })
-            .collect()
+        let Some((_, record)) = records.into_iter().next() else {
+            return Ok(None);
+        };
+        let malformed = |reason| Error::Malformed {
+            record: "reclaims",
+            reason,
+        };
+        let Value::Object(fields) = record else {
+            return Err(malformed("not an object"));
+        };
+        match fields.get("data") {
+            Some(Value::Uuid(id)) => Ok(Some((
+                *id,
+                matches!(fields.get("reclaiming"), Some(Value::Datetime { .. })),
+            ))),
+            _ => Err(malformed("data")),
+        }
     }
 
     async fn defer(&self, id: [u8; 16]) -> Result<()> {

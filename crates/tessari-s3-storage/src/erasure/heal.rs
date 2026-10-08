@@ -1,11 +1,11 @@
-//! Healing: a data id listed in `heals` has every shard checked — present at its full length, every block verified —
+//! Healing: a data id the `heal_queue` hands out has every shard checked — present at its full length, every block verified —
 //! and each missing or damaged one is rebuilt from the others stripe by stripe and written where the placement puts
 //! it, through the same commit as any shard. A shard that verifies is never rewritten.
 
 use std::sync::Arc;
 
 use bytes::Bytes;
-use tessari_s3_constants::SHARD_QUEUE_BLOCKS;
+use tessari_s3_constants::{HEAL_AT_RISK_ATTEMPTS, SHARD_QUEUE_BLOCKS};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -27,17 +27,24 @@ enum Outcome {
 }
 
 impl ErasureWrites {
-    /// Heals up to `limit` listed data ids, each under this node's claim on it; an id another node holds is left to
-    /// that node, and an id whose healing fails part way stays listed for the next pass.
+    /// Heals up to `limit` data ids taken from the healing queue, each under this node's claim on it; an id another
+    /// node holds, one below the read quorum and one whose healing fails part way go back to the queue behind the
+    /// ids waiting after them.
     ///
     /// # Errors
-    /// The metadata store's refusal or outage while listing, claiming or unlisting.
+    /// The metadata store's refusal or outage while taking, claiming, unlisting or handing back.
     pub(crate) async fn heal_pass(self: &Arc<Self>, limit: usize) -> Result<Healed> {
         let mut done = Healed::default();
-        for id in self.sets.healing(limit).await? {
+        // One id at a time: a pass cut short by a refusal leaves at most the id in hand held until its hold lapses,
+        // never a batch.
+        while done.examined < limit {
+            let Some(id) = self.sets.take_heal().await? else {
+                break;
+            };
             done.examined = done.examined.saturating_add(1);
             if !self.sets.claim(id, self.holder()).await? {
                 done.held = done.held.saturating_add(1);
+                self.sets.retry_heal(id).await?;
                 continue;
             }
             let outcome = self.heal_one(id).await;
@@ -50,24 +57,34 @@ impl ErasureWrites {
                 Ok(Outcome::AtRisk) => {
                     tracing::error!(data = %crate::data::hex(id), "fewer shards verify than the read quorum");
                     done.at_risk = done.at_risk.saturating_add(1);
+                    self.sets.retry_heal(id).await?;
                 }
                 Err(error) => {
                     tracing::warn!(data = %crate::data::hex(id), error = %error, "healing stopped; the id stays listed");
+                    self.sets.retry_heal(id).await?;
                 }
             }
         }
         Ok(done)
     }
 
-    /// How many data ids are listed for healing, counted up to `limit`.
+    /// How many data ids are listed for healing, counted up to `limit`, and how many of those were handed out at
+    /// least [`HEAL_AT_RISK_ATTEMPTS`] times.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
     pub(crate) async fn backlog(&self, limit: usize) -> Result<HealBacklog> {
-        let listed = self.sets.healing(limit.saturating_add(1)).await?.len();
+        let listed = self.sets.listed(limit.saturating_add(1)).await?;
+        let counted = listed.len().min(limit);
+        let at_risk = listed
+            .iter()
+            .take(counted)
+            .filter(|(_, attempts)| *attempts >= HEAL_AT_RISK_ATTEMPTS)
+            .count();
         Ok(HealBacklog {
-            listed: listed.min(limit),
-            more: listed > limit,
+            listed: counted,
+            more: listed.len() > limit,
+            at_risk,
         })
     }
 
