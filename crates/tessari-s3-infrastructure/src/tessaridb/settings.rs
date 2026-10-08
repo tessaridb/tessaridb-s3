@@ -1,6 +1,7 @@
 //! Where the metadata store is and how to sign in to it.
 
 use std::num::NonZeroU8;
+use std::time::Duration;
 
 use tessari_s3_types::SecretKey;
 
@@ -44,6 +45,9 @@ pub struct MetaSettings {
     pub trust_pem: Option<Vec<u8>>,
     /// Connections open at once.
     pub max_connections: usize,
+    /// How long a unit of work waits for the answer once sent; past it the connection is dropped and the outcome is
+    /// reported unknown (unavailable), never as a failure.
+    pub statement_timeout: Duration,
 }
 
 /// Whether `name` is a tenancy name this server will put into a `USE`: a name is grammar and is never quoted, so it

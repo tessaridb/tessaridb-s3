@@ -28,6 +28,11 @@ section records which TessariDB version its metadata runs on.
   the node warns at start.
 - A write cut short no longer blocks the next one: a node removes the temporary files a crash left in its data
   directory on start-up, and a write that stops part way (a client gone, a healing pass stopped) removes its own.
+- A committed object whose data is missing is reported as damaged (`500 InternalError`, logged as corruption)
+  rather than as a drive error.
+- Every metadata statement is bounded in time (`TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS`, default 30): a metadata
+  node that stops answering mid-statement no longer holds the request until the operating system gives up. The
+  request answers `503`, and a write's data stays queued, since the statement may have committed.
   Before, such a file refused every later write of the same shard, so an object that lost a node mid-write stayed
   listed for healing for good.
 - Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion

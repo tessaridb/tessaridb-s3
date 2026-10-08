@@ -94,6 +94,12 @@ pub const CLUSTER_SECRET_MIN_LEN: usize = 32;
 /// request for the operating system's connect timeout.
 pub const META_DIAL_TIMEOUT_SECS: u64 = 5;
 
+/// Seconds one unit of work may wait for the metadata store's answer once sent, when
+/// `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS` is unset: well past a failover round and a schema apply, and half the
+/// node's own 60 s frame stall, so a node partitioned away mid-statement releases the request well before the
+/// operating system would. A write that times out is unacknowledged, never failed: its data stays queued.
+pub const DEFAULT_META_STATEMENT_TIMEOUT_SECS: u64 = 30;
+
 /// Times the start-up schema is attempted when the store answers `retry` (another node is defining it at once).
 pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 

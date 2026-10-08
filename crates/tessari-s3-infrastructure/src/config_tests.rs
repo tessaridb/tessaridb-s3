@@ -182,6 +182,30 @@ fn an_upload_lives_a_week_unless_configured_and_never_zero_seconds() {
     }
 }
 
+#[test]
+fn a_metadata_statement_waits_thirty_seconds_unless_configured_and_never_zero() {
+    let waits =
+        |vars: &[(&str, &str)]| load(vars).map(|config| config.meta.statement_timeout.as_secs());
+    assert_eq!(waits(&CREDENTIALS).expect("loads"), 30);
+    let mut vars = CREDENTIALS.to_vec();
+    vars.push(("TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS", "5"));
+    assert_eq!(waits(&vars).expect("loads"), 5);
+    for bad in ["0", "-1", "soon"] {
+        let mut refused = CREDENTIALS.to_vec();
+        refused.push(("TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS", bad));
+        assert!(
+            matches!(
+                waits(&refused),
+                Err(Error::InvalidConfig {
+                    key: "TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS",
+                    ..
+                })
+            ),
+            "{bad}"
+        );
+    }
+}
+
 pub(crate) fn with(vars: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
     let mut all = CREDENTIALS.to_vec();
     for (key, value) in vars {

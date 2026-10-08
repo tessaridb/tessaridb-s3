@@ -148,7 +148,19 @@ impl MetaPool {
         let credentials = credentials
             .as_ref()
             .map(|(user, password)| (user.as_str(), password.as_str()));
-        match link.run(script, credentials, parameters).await {
+        let deadline = self.inner.settings.statement_timeout;
+        let Ok(answered) =
+            tokio::time::timeout(deadline, link.run(script, credentials, parameters)).await
+        else {
+            // Sent and not answered: the outcome is unknown and the connection's state with it, so it is dropped.
+            return Err(MetaError::Unavailable {
+                reason: format!(
+                    "the metadata store did not answer within {} s",
+                    deadline.as_secs()
+                ),
+            });
+        };
+        match answered {
             Ok(answers) => {
                 self.put_idle(link)?;
                 Ok(answers)

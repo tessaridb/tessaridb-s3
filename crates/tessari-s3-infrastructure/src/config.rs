@@ -3,11 +3,12 @@
 
 use std::net::SocketAddr;
 use std::num::NonZeroU8;
+use std::time::Duration;
 
 use tessari_s3_constants::{
-    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS, DEFAULT_RECLAIM_GRACE_SECS,
-    DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
-    DEFAULT_UPLOAD_MAX_AGE_SECS, MIN_SECRET_KEY_LEN,
+    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_META_CONNECTIONS,
+    DEFAULT_META_STATEMENT_TIMEOUT_SECS, DEFAULT_RECLAIM_GRACE_SECS, DEFAULT_RECLAIM_INTERVAL_SECS,
+    DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS, DEFAULT_UPLOAD_MAX_AGE_SECS, MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::{Code, NodeId, SecretKey};
 
@@ -172,7 +173,7 @@ impl S3Config {
 }
 
 /// `TESSARIDB_S3_META_ADDRESS` (one or more `host:port`, comma-separated), `_REPLICATION`, `_USER`, `_PASSWORD` (required), `_NAMESPACE` (`s3`), `_DATABASE` (`meta`),
-/// `_CA` (a PEM file; unset speaks in the clear) and `_MAX_CONNECTIONS` (32).
+/// `_CA` (a PEM file; unset speaks in the clear), `_MAX_CONNECTIONS` (32) and `_STATEMENT_TIMEOUT_SECS` (30).
 fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> {
     let required = |key: &'static str| get(key).ok_or(Error::MissingConfig { key });
     let name = |key: &'static str, default: &str| {
@@ -220,7 +221,20 @@ fn meta_settings(get: &impl Fn(&str) -> Option<String>) -> Result<MetaSettings> 
             "TESSARIDB_S3_META_MAX_CONNECTIONS",
         )?
         .unwrap_or(DEFAULT_META_CONNECTIONS),
+        statement_timeout: Duration::from_secs(statement_timeout_secs(get)?),
     })
+}
+
+/// `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS`: a positive number of seconds.
+fn statement_timeout_secs(get: &impl Fn(&str) -> Option<String>) -> Result<u64> {
+    const KEY: &str = "TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS";
+    match parse_positive(get(KEY), KEY)? {
+        Some(secs) => u64::try_from(secs).map_err(|_| Error::InvalidConfig {
+            key: KEY,
+            reason: "too large",
+        }),
+        None => Ok(DEFAULT_META_STATEMENT_TIMEOUT_SECS),
+    }
 }
 
 /// `TESSARIDB_S3_META_REPLICATION`: `none` or a number of copies. Unset means `none` for one metadata node and is
