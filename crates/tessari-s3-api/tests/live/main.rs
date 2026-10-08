@@ -8,6 +8,7 @@
 
 mod access;
 mod access_crossing;
+mod access_probe;
 mod access_window;
 mod buckets;
 mod cluster;

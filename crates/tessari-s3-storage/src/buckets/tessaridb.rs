@@ -95,6 +95,27 @@ impl BucketRepository for TessariBuckets {
                     )
                     .await?
             }
+            Visible::Reachable {
+                space,
+                user,
+                granted,
+            } => {
+                let parameters = vec![
+                    ("space".to_owned(), Value::String(space.as_str().to_owned())),
+                    ("user".to_owned(), Value::String(user.clone())),
+                    (
+                        "granted".to_owned(),
+                        Value::Array(granted.iter().cloned().map(Value::String).collect()),
+                    ),
+                ];
+                self.pool
+                    .run(
+                        "SELECT * FROM buckets WHERE space_name = $space AND (creator = $user OR name IN $granted) \
+                         USING INDEX by_space;",
+                        parameters,
+                    )
+                    .await?
+            }
         };
         match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records

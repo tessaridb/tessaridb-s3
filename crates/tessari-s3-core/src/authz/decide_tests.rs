@@ -261,12 +261,30 @@ fn nothing_crosses_from_one_space_into_another() {
 fn a_listing_sees_one_space_unless_the_caller_operates() {
     use super::Visible;
     assert_eq!(Principal::Root.visible(), Visible::All);
-    let member = user("ann", "alpha", Role::SpaceAdmin);
+    let admin = user("ann", "alpha", Role::SpaceAdmin);
     assert_eq!(
-        Principal::User(member.clone()).visible(),
+        Principal::User(admin.clone()).visible(),
         Visible::Space(space("alpha"))
     );
-    let mut operator = member;
+    let mut member = user("bob", "alpha", Role::Member);
+    member.grants.insert("shared".to_owned(), Access::default());
+    member.grants.insert(
+        "photos".to_owned(),
+        Access {
+            read: false,
+            write: true,
+        },
+    );
+    assert_eq!(
+        Principal::User(member).visible(),
+        Visible::Reachable {
+            space: space("alpha"),
+            user: "bob".to_owned(),
+            granted: vec!["photos".to_owned()],
+        },
+        "a member lists what it created or may read or write — a grant that allows nothing reaches nothing"
+    );
+    let mut operator = admin;
     operator.operator = true;
     assert_eq!(Principal::User(operator).visible(), Visible::All);
 }

@@ -102,7 +102,9 @@ pub(super) async fn list(
     let visible = principal.visible();
     let needed = match &visible {
         Visible::All => Action::Operate,
-        Visible::Space(space) => Action::ManageSpace(space.clone()),
+        Visible::Space(space) | Visible::Reachable { space, .. } => {
+            Action::ManageSpace(space.clone())
+        }
     };
     allow(&principal, &needed)?;
     let users = state.storage().users().list(&visible).await?;

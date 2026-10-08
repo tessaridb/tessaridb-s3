@@ -193,6 +193,19 @@ async fn a_member_reaches_another_users_bucket_only_as_far_as_its_grant() {
     )
     .await;
     assert_eq!(listed.status, 200);
+    for (key, listed, why) in [
+        (
+            &bob,
+            true,
+            "a grant puts the bucket in the member's listing",
+        ),
+        (&cid, false, "no grant, no listing"),
+    ] {
+        let body = call_as(&state, key.pair(), "GET", "/", vec![], vec![], b"")
+            .await
+            .body;
+        assert_eq!(body.contains("<Name>ann-photos</Name>"), listed, "{why}");
+    }
     for (method, path) in [
         ("PUT", "/ann-photos/b.txt"),
         ("DELETE", "/ann-photos/a.txt"),

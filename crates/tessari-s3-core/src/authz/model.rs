@@ -105,8 +105,19 @@ impl Principal {
     #[must_use]
     pub fn visible(&self) -> Visible {
         match self {
-            Self::User(user) if !user.operator => Visible::Space(user.space.clone()),
-            Self::Root | Self::User(_) => Visible::All,
+            Self::User(user) if user.operator => Visible::All,
+            Self::User(user) if user.role == Role::SpaceAdmin => Visible::Space(user.space.clone()),
+            Self::User(user) => Visible::Reachable {
+                space: user.space.clone(),
+                user: user.name.clone(),
+                granted: user
+                    .grants
+                    .iter()
+                    .filter(|(_, access)| access.read || access.write)
+                    .map(|(bucket, _)| bucket.clone())
+                    .collect(),
+            },
+            Self::Root => Visible::All,
         }
     }
 }
@@ -116,8 +127,17 @@ impl Principal {
 pub enum Visible {
     /// Every space: root and operators.
     All,
-    /// One space's buckets.
+    /// One space's buckets: its administrator.
     Space(SpaceName),
+    /// The buckets of one space a member can reach: those it created and those a grant lets it read or write.
+    Reachable {
+        /// The member's space.
+        space: SpaceName,
+        /// The member, matched against each bucket's creator.
+        user: String,
+        /// The buckets its grants reach, by name.
+        granted: Vec<String>,
+    },
 }
 
 /// A bucket as the evaluator needs it.

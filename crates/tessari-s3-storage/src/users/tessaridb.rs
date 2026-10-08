@@ -102,6 +102,15 @@ impl UserRepository for TessariUsers {
                 )
                 .await?
             }
+            // A member administers nobody; what it can see of the users is itself.
+            Visible::Reachable { space, user, .. } => {
+                self.all(
+                    "SELECT * FROM users WHERE space_name = $space AND name = $user USING INDEX by_user_space;",
+                    vec![text("space", space.as_str()), text("user", user)],
+                    "user",
+                )
+                .await?
+            }
         };
         records.iter().map(UserEntity::from_value).collect()
     }
