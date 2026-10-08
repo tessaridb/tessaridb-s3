@@ -114,7 +114,15 @@ pub(crate) async fn fresh_at(
 /// A server state and a console state over ONE storage in a fresh namespace on the test node: what an operator does
 /// through the console is what an S3 client then sees.
 pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) {
-    let config = live_config(test_node(), None, &scratch_dir());
+    let (state, console, _) = fresh_console_with(scratch_dir()).await;
+    (state, console)
+}
+
+/// As [`fresh_console`], with the data directory chosen by the caller, which it gets back.
+pub(crate) async fn fresh_console_with(
+    data_dir: std::path::PathBuf,
+) -> (ApiState, tessari_s3_api::ConsoleState, std::path::PathBuf) {
+    let config = live_config(test_node(), None, &data_dir);
     let storage = prepared(&config).await;
     let console =
         tessari_s3_api::ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
@@ -122,6 +130,7 @@ pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) 
     (
         ApiState::new(&config, ApiState::system_clock(), storage),
         console,
+        data_dir,
     )
 }
 

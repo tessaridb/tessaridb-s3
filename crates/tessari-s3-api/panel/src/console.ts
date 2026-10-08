@@ -52,7 +52,7 @@ function draw(route: Route, screen: Screen): Promise<void> {
     case "buckets":
       return buckets(screen);
     case "objects":
-      return objects(screen, route.bucket, route.prefix, route.cursor);
+      return objects(screen, route.bucket, route.prefix, route.cursor, route.key);
     case "object":
       return object(screen, route.bucket, route.key);
     case "users":

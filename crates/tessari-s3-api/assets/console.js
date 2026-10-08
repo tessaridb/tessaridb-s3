@@ -346,7 +346,8 @@
       case "objects":
         return `#/b/${encodeURIComponent(route.bucket)}${query([
           ["prefix", route.prefix === "" ? null : route.prefix],
-          ["cursor", route.cursor]
+          ["cursor", route.cursor],
+          ["key", route.key]
         ])}`;
       case "object":
         return `#/o/${encodeURIComponent(route.bucket)}${query([["key", route.key]])}`;
@@ -384,7 +385,7 @@
       }
       if (path2.startsWith("/b/")) {
         const bucket2 = decodeURIComponent(path2.slice(3));
-        return bucket2 === "" ? { kind: "buckets" } : { kind: "objects", bucket: bucket2, prefix: params.get("prefix") ?? "", cursor: params.get("cursor") };
+        return bucket2 === "" ? { kind: "buckets" } : { kind: "objects", bucket: bucket2, prefix: params.get("prefix") ?? "", cursor: params.get("cursor"), key: params.get("key") || null };
       }
       if (path2.startsWith("/o/")) {
         const bucket2 = decodeURIComponent(path2.slice(3));
@@ -557,6 +558,7 @@
     download: ["M12 4v11", "M7.5 10.5L12 15l4.5-4.5", "M5 20h14"],
     trash: ["M4 7h16", "M9.5 7V4.5h5V7", "M6.5 7l1 13h9l1-13", "M10 11v5.5", "M14 11v5.5"],
     plus: ["M12 5v14", "M5 12h14"],
+    close: ["M6 6l12 12", "M18 6L6 18"],
     users: [ring(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6", "M16 4.5a3.5 3.5 0 0 1 0 7", "M18 14c2 .6 3 2.8 3 6"],
     chevron: ["M9.5 6l6 6-6 6"],
     node: [box(3, 4, 18, 7, 2), box(3, 13, 18, 7, 2), "M7 7.5h.01", "M7 16.5h.01"],
@@ -1197,7 +1199,7 @@
     const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
     const held = figures(usage, bucket2);
     const line = row(
-      el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null }) }, icon("buckets"), mono(bucket2.name)),
+      el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null }) }, icon("buckets"), mono(bucket2.name)),
       numeric(held === null ? "—" : amount(held.objects)),
       numeric(held === null ? "—" : size(held.bytes)),
       numeric(held === null ? "—" : size(held.raw_bytes)),
@@ -1492,15 +1494,67 @@
     );
   }
 
+  // src/file-kind.ts
+  //! What kind of file a key holds, read from the content type its write stored,
+  //! so a listing can say "image" or "archive" without opening the object.
+  var FILE = { icon: "file", label: "File" };
+  var TEXT = { icon: "text", label: "Text" };
+  var ARCHIVE = { icon: "archive", label: "Archive" };
+  var FAMILIES = {
+    image: { icon: "image", label: "Image" },
+    video: { icon: "video", label: "Video" },
+    audio: { icon: "audio", label: "Audio" },
+    text: TEXT
+  };
+  var READABLE = /* @__PURE__ */ new Set(["application/json", "application/xml", "application/javascript"]);
+  var PACKED = /* @__PURE__ */ new Set(["application/zip", "application/gzip", "application/x-gzip", "application/x-tar", "application/x-7z-compressed"]);
+  function kindOf(contentType) {
+    const essence = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    const [family, subtype = ""] = essence.split("/");
+    const named = family === void 0 ? void 0 : FAMILIES[family];
+    if (named !== void 0) {
+      return named;
+    }
+    if (family !== "application") {
+      return FILE;
+    }
+    if (READABLE.has(essence) || subtype.endsWith("+json") || subtype.endsWith("+xml")) {
+      return TEXT;
+    }
+    return PACKED.has(essence) ? ARCHIVE : FILE;
+  }
+
+  // src/object-facts.ts
+  //! An object's stored facts as the console shows them — on the object's own
+  //! page and in the listing's side pane. Everything here comes from the object's
+  //! record; nothing reads the object's bytes.
+  function pairs(caption, values) {
+    const entries = Object.entries(values);
+    return entries.length === 0 ? el("div", { class: "empty" }, el("p", {}, "None.")) : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
+  }
+  function facts(detail) {
+    const type = detail.headers["content-type"] ?? null;
+    return el(
+      "dl",
+      { class: "facts" },
+      el("dt", {}, "Type"),
+      el("dd", {}, type === null ? "None stored" : el("span", {}, `${kindOf(type).label} · `, mono(type))),
+      el("dt", {}, "Size"),
+      el("dd", {}, `${size(detail.size)} (${detail.size.toLocaleString()} bytes)`),
+      el("dt", {}, "ETag"),
+      el("dd", {}, mono(detail.etag)),
+      el("dt", {}, "Last modified"),
+      el("dd", {}, moment(detail.modified)),
+      el("dt", {}, "Upload"),
+      el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`)
+    );
+  }
+
   // src/object.ts
   //! One object: what the server holds for it, a recorded download, and a delete
   //! that only goes through while the object is still the version shown here —
   //! the ETag on screen is the condition, so a rewrite in between is refused.
   var TITLE5 = "Object";
-  function pairs(caption, values) {
-    const entries = Object.entries(values);
-    return entries.length === 0 ? el("div", { class: "empty" }, el("p", {}, "None.")) : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
-  }
   var parent = (key) => key.slice(0, key.lastIndexOf("/") + 1);
   async function object(screen, bucket2, key) {
     loading(screen, TITLE5, "the object");
@@ -1514,7 +1568,7 @@
       return;
     }
     const detail = answer.value;
-    const back = format({ kind: "objects", bucket: bucket2, prefix: parent(key), cursor: null });
+    const back = format({ kind: "objects", bucket: bucket2, prefix: parent(key), cursor: null, key });
     const reason = field("download-reason", "Reason (optional)", { maxlength: "500" }, "Downloads are recorded with your key id.");
     const download = el("a", { class: "button", download: "" }, icon("download"), "Download");
     const point = () => {
@@ -1559,22 +1613,7 @@
     fill(
       screen.main,
       head(name, el("span", {}, el("a", { class: "back", href: back }, icon("back"), "Back to the listing"), " · ", mono(`${bucket2}/${key}`))),
-      el(
-        "section",
-        { class: "card" },
-        el(
-          "dl",
-          { class: "facts" },
-          el("dt", {}, "Size"),
-          el("dd", {}, `${size(detail.size)} (${detail.size.toLocaleString()} bytes)`),
-          el("dt", {}, "ETag"),
-          el("dd", {}, mono(detail.etag)),
-          el("dt", {}, "Last modified"),
-          el("dd", {}, moment(detail.modified)),
-          el("dt", {}, "Upload"),
-          el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`)
-        )
-      ),
+      el("section", { class: "card" }, facts(detail)),
       el("section", { class: "card" }, el("h2", {}, "Actions"), reason.row, el("div", { class: "actions" }, download, remove), asking),
       el("section", { class: "card flush" }, el("h2", {}, "Headers"), pairs("Stored headers", detail.headers)),
       el("section", { class: "card flush" }, el("h2", {}, "User metadata"), pairs("User metadata", detail.metadata)),
@@ -1582,40 +1621,49 @@
     );
   }
 
-  // src/file-kind.ts
-  //! What kind of file a key holds, read from the content type its write stored,
-  //! so a listing can say "image" or "archive" without opening the object.
-  var FILE = { icon: "file", label: "File" };
-  var TEXT = { icon: "text", label: "Text" };
-  var ARCHIVE = { icon: "archive", label: "Archive" };
-  var FAMILIES = {
-    image: { icon: "image", label: "Image" },
-    video: { icon: "video", label: "Video" },
-    audio: { icon: "audio", label: "Audio" },
-    text: TEXT
-  };
-  var READABLE = /* @__PURE__ */ new Set(["application/json", "application/xml", "application/javascript"]);
-  var PACKED = /* @__PURE__ */ new Set(["application/zip", "application/gzip", "application/x-gzip", "application/x-tar", "application/x-7z-compressed"]);
-  function kindOf(contentType) {
-    const essence = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-    const [family, subtype = ""] = essence.split("/");
-    const named = family === void 0 ? void 0 : FAMILIES[family];
-    if (named !== void 0) {
-      return named;
+  // src/object-pane.ts
+  //! The listing's side pane: one selected object's metadata beside the list, so
+  //! the operator keeps their place while looking. It reads the object's record
+  //! only — the bytes stay on the drives until somebody downloads them.
+  async function describe(screen, pane, bucket2, key, close, current2) {
+    const name = key.slice(key.lastIndexOf("/") + 1) || key;
+    const shut = iconAction("close", "Close", `Close the details of ${name}`);
+    shut.addEventListener("click", close);
+    const top = el("div", {}, el("div", { class: "pane-head" }, el("h2", { id: "pane-title" }, "Details"), shut), el("p", { class: "pane-key" }, mono(key)));
+    fill(pane, top, el("p", { class: "pane-note", role: "status" }, "Loading the details…"));
+    const answer = await call("GET", `/buckets/${encodeURIComponent(bucket2)}/object${search([["key", key]])}`, readDetail);
+    if (!screen.live() || !current2()) {
+      return;
     }
-    if (family !== "application") {
-      return FILE;
+    if (!answer.ok) {
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(pane, top, el("p", { class: "pane-note", role: "alert" }, answer.status === 404 ? "This object is gone; reload the listing." : answer.message));
+      return;
     }
-    if (READABLE.has(essence) || subtype.endsWith("+json") || subtype.endsWith("+xml")) {
-      return TEXT;
-    }
-    return PACKED.has(essence) ? ARCHIVE : FILE;
+    const detail = answer.value;
+    fill(
+      pane,
+      top,
+      facts(detail),
+      el("p", { class: "pane-link" }, el("a", { href: format({ kind: "object", bucket: bucket2, key }) }, "Open the object's page"), " to download or delete it."),
+      el("h3", {}, "Headers"),
+      pairs("Stored headers", detail.headers),
+      el("h3", {}, "User metadata"),
+      pairs("User metadata", detail.metadata),
+      el("h3", {}, "Checksums"),
+      pairs("Stored checksums", detail.checksums)
+    );
   }
 
   // src/objects.ts
   //! A bucket's keys a page at a time, in the server's byte order, rolled up at
   //! `/` like a folder tree. Paging is by the server's cursor alone: there is no
-  //! total to show, because counting a large bucket is a scan.
+  //! total to show, because counting a large bucket is a scan. Selecting a key
+  //! shows its metadata in a side pane beside the list (the selection is in the
+  //! URL); the arrow keys move the selection and Escape closes the pane.
   var PAGE2 = 100;
   function trail(bucket2, prefix) {
     const steps = [
@@ -1623,7 +1671,7 @@
       icon("chevron")
     ];
     const parts = prefix.split("/").filter((piece) => piece !== "");
-    const step = (label, at2, last) => last ? el("span", { "aria-current": "page" }, label) : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: at2, cursor: null }) }, label);
+    const step = (label, at2, last) => last ? el("span", { "aria-current": "page" }, label) : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: at2, cursor: null, key: null }) }, label);
     steps.push(step(bucket2, "", parts.length === 0));
     let walked = "";
     parts.forEach((part, index) => {
@@ -1632,7 +1680,7 @@
     });
     return el("nav", { class: "trail", "aria-label": "Prefix" }, ...steps);
   }
-  async function objects(screen, bucket2, prefix, cursor) {
+  async function objects(screen, bucket2, prefix, cursor, selected) {
     const title = bucket2;
     loading(screen, title, "keys");
     const answer = await call(
@@ -1648,37 +1696,98 @@
       return;
     }
     const page = answer.value;
+    const here = (key) => format({ kind: "objects", bucket: bucket2, prefix, cursor, key });
+    const links = /* @__PURE__ */ new Map();
     const folders = page.prefixes.map(
-      (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "")
+      (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "")
     );
     const files = page.objects.map((object2) => {
       const kind = kindOf(object2.contentType);
+      const link = el("a", { class: "name", href: here(object2.key), "data-key": object2.key }, icon(kind.icon), mono(object2.key.slice(prefix.length)));
+      link.addEventListener("click", (event) => {
+        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+          event.preventDefault();
+          select(object2.key);
+        }
+      });
+      links.set(object2.key, link);
       return row(
-        el("a", { class: "name", href: format({ kind: "object", bucket: bucket2, key: object2.key }) }, icon(kind.icon), mono(object2.key.slice(prefix.length))),
+        link,
         el("span", { title: object2.contentType ?? "No content type was stored" }, kind.label),
         el("span", { title: `${object2.size.toLocaleString()} bytes` }, size(object2.size)),
         moment(object2.modified),
         mono(object2.etag)
       );
     });
-    const nothing = cursor !== null ? empty("No more keys on this page.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null }) }, "Back to the first page")) : prefix === "" ? empty("This bucket is empty.") : empty("Nothing under this prefix.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: "", cursor: null }) }, "Back to the top of the bucket"));
+    const nothing = cursor !== null ? empty("No more keys on this page.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null, key: null }) }, "Back to the first page")) : prefix === "" ? empty("This bucket is empty.") : empty("Nothing under this prefix.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: "", cursor: null, key: null }) }, "Back to the top of the bucket"));
     const paging = cursor === null && page.next === null ? null : el(
       "p",
       { class: "paging" },
-      cursor === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null }) }, "First page"),
+      cursor === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null, key: null }) }, "First page"),
       cursor !== null && page.next !== null ? " · " : null,
-      page.next === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: page.next }) }, "Next page")
+      page.next === null ? null : el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: page.next, key: null }) }, "Next page")
     );
-    fill(
-      screen.main,
-      head(title, trail(bucket2, prefix)),
-      el(
-        "section",
-        { class: "card flush" },
-        folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], [...folders, ...files]),
-        paging
-      )
+    const list2 = el(
+      "section",
+      { class: "card flush" },
+      folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], [...folders, ...files]),
+      paging
     );
+    const pane = el("aside", { class: "pane card", "aria-labelledby": "pane-title", hidden: "" });
+    const split = el("div", { class: "split" }, list2, pane);
+    let shown = null;
+    let turn = 0;
+    const select = (key) => {
+      links.get(shown ?? "")?.closest("tr")?.removeAttribute("aria-current");
+      shown = key;
+      turn += 1;
+      history.replaceState(null, "", here(key));
+      if (key === null) {
+        pane.hidden = true;
+        split.classList.remove("open");
+        fill(pane);
+        return;
+      }
+      links.get(key)?.closest("tr")?.setAttribute("aria-current", "true");
+      pane.hidden = false;
+      split.classList.add("open");
+      if (window.matchMedia("(max-width: 64rem)").matches) {
+        pane.scrollIntoView({ block: "start" });
+      }
+      const mine = turn;
+      void describe(screen, pane, bucket2, key, close, () => mine === turn);
+    };
+    function close() {
+      const was = shown;
+      select(null);
+      links.get(was ?? "")?.focus();
+    }
+    split.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && shown !== null) {
+        event.preventDefault();
+        close();
+        return;
+      }
+      const target = event.target;
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp" || !(target instanceof HTMLAnchorElement) || !target.classList.contains("name")) {
+        return;
+      }
+      const names2 = Array.from(list2.querySelectorAll("a.name"));
+      const next2 = names2[names2.indexOf(target) + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next2 === void 0) {
+        return;
+      }
+      event.preventDefault();
+      next2.focus();
+      const key = next2.dataset["key"];
+      if (key !== void 0) {
+        select(key);
+      }
+    });
+    fill(screen.main, head(title, trail(bucket2, prefix)), split);
+    if (selected !== null) {
+      select(selected);
+    }
   }
 
   // src/signin.ts
@@ -1975,7 +2084,7 @@
       case "buckets":
         return buckets(screen);
       case "objects":
-        return objects(screen, route.bucket, route.prefix, route.cursor);
+        return objects(screen, route.bucket, route.prefix, route.cursor, route.key);
       case "object":
         return object(screen, route.bucket, route.key);
       case "users":

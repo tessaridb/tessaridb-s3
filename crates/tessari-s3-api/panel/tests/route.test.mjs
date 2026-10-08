@@ -18,8 +18,9 @@ test("every route survives format then parse", () => {
     { kind: "actions", before: 42 },
   ];
   for (const text of hostile) {
-    routes.push({ kind: "objects", bucket: "my-bucket", prefix: text, cursor: null });
-    routes.push({ kind: "objects", bucket: "my-bucket", prefix: "", cursor: `key:${text}` });
+    routes.push({ kind: "objects", bucket: "my-bucket", prefix: text, cursor: null, key: null });
+    routes.push({ kind: "objects", bucket: "my-bucket", prefix: "", cursor: `key:${text}`, key: null });
+    if (text !== "") routes.push({ kind: "objects", bucket: "my-bucket", prefix: "a/", cursor: null, key: `a/${text}` });
     if (text !== "") routes.push({ kind: "object", bucket: "my.bucket", key: text });
   }
   for (const route of routes) {
@@ -52,4 +53,10 @@ test("users and spaces are their own views", () => {
 test("the cluster is its own view", () => {
   assert.equal(format({ kind: "cluster" }), "#/cluster");
   assert.deepEqual(parse("#/cluster"), { kind: "cluster" });
+});
+
+test("a listing names the key selected beside it, and an empty selection is none", () => {
+  assert.equal(format({ kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: "p/a b" }), "#/b/b1b?prefix=p%2F&key=p%2Fa%20b");
+  assert.deepEqual(parse("#/b/b1b?prefix=p%2F&key="), { kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null });
+  assert.deepEqual(parse("#/b/b1b"), { kind: "objects", bucket: "b1b", prefix: "", cursor: null, key: null });
 });

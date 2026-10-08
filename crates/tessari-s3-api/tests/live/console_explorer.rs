@@ -1,12 +1,12 @@
 //! The console's bucket explorer, against a real node: a listing row says what each object IS — its content type as
 //! stored at write, beside size, age and ETag — whichever path wrote it, so an operator sees a bucket's contents
-//! without opening any object.
+//! without opening any object — the side pane's details come from the metadata record alone.
 
 use serde_json::Value;
 
 use crate::console::{send, sign_in};
 use crate::multipart::{etag, part, text};
-use crate::{IGNORED, call, call_with, fresh_console};
+use crate::{IGNORED, call, call_with, fresh_console, fresh_console_with, scratch_dir};
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
@@ -88,4 +88,68 @@ async fn a_listing_row_carries_the_content_type_each_write_path_stored() {
     );
     assert_eq!(type_of("doc.txt"), Value::from("text/plain"));
     assert_eq!(type_of("copy.json"), Value::from("application/json"));
+}
+
+/// Every regular file under `dir`.
+fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(at) = pending.pop() {
+        for entry in std::fs::read_dir(&at).expect("readable") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_objects_details_come_from_its_record_with_no_byte_of_it_read() {
+    let _why = IGNORED;
+    let (state, console, data_dir) = fresh_console_with(scratch_dir()).await;
+    let root = sign_in(&console).await;
+    assert_eq!(call(&state, "PUT", "/files", vec![], b"").await.status, 200);
+    let put = call_with(
+        &state,
+        "PUT",
+        "/files/doc.txt",
+        vec![],
+        vec![("content-type", "text/plain"), ("x-amz-meta-owner", "ann")],
+        b"hello",
+    )
+    .await;
+    assert_eq!(put.status, 200, "{}", put.body);
+
+    let written = files_under(&data_dir);
+    assert!(!written.is_empty(), "the object has a data file");
+    for file in &written {
+        std::fs::remove_file(file).expect("data file removed");
+    }
+    let read = call(&state, "GET", "/files/doc.txt", vec![], b"").await;
+    assert_ne!(
+        read.status, 200,
+        "the bytes are gone, so a read of them fails: {}",
+        read.body
+    );
+
+    let detail = send(
+        &console,
+        "GET",
+        "/api/v1/buckets/files/object?key=doc.txt",
+        Some(&root),
+        None,
+    )
+    .await;
+    assert_eq!(detail.status, 200, "{:?}", detail.json());
+    let shown = detail.json();
+    assert_eq!(shown["size"], Value::from(5));
+    assert_eq!(shown["headers"]["content-type"], Value::from("text/plain"));
+    assert_eq!(shown["metadata"]["owner"], Value::from("ann"));
+    assert_eq!(shown["parts"], Value::Null);
+    std::fs::remove_dir_all(&data_dir).expect("scratch removed");
 }

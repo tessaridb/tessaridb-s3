@@ -4,21 +4,14 @@
 
 import { call, path, search } from "./api.ts";
 import { confirmation } from "./confirm.ts";
-import { announce, el, field, fill, mono, row, table } from "./dom.ts";
-import { moment, size } from "./format.ts";
+import { announce, el, field, fill, mono } from "./dom.ts";
 import { icon } from "./icons.ts";
 import { ignored, readDetail } from "./models.ts";
+import { facts, pairs } from "./object-facts.ts";
 import { format } from "./route.ts";
 import { failed, head, loading, type Screen } from "./screen.ts";
 
 const TITLE = "Object";
-
-function pairs(caption: string, values: Readonly<Record<string, string>>): HTMLElement {
-  const entries = Object.entries(values);
-  return entries.length === 0
-    ? el("div", { class: "empty" }, el("p", {}, "None."))
-    : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
-}
 
 /** The prefix a key sits under, so the listing it came from can be shown again. */
 const parent = (key: string): string => key.slice(0, key.lastIndexOf("/") + 1);
@@ -35,7 +28,7 @@ export async function object(screen: Screen, bucket: string, key: string): Promi
     return;
   }
   const detail = answer.value;
-  const back = format({ kind: "objects", bucket, prefix: parent(key), cursor: null });
+  const back = format({ kind: "objects", bucket, prefix: parent(key), cursor: null, key });
 
   const reason = field("download-reason", "Reason (optional)", { maxlength: "500" }, "Downloads are recorded with your key id.");
   const download = el("a", { class: "button", download: "" }, icon("download"), "Download");
@@ -85,22 +78,7 @@ export async function object(screen: Screen, bucket: string, key: string): Promi
   fill(
     screen.main,
     head(name, el("span", {}, el("a", { class: "back", href: back }, icon("back"), "Back to the listing"), " · ", mono(`${bucket}/${key}`))),
-    el(
-      "section",
-      { class: "card" },
-      el(
-        "dl",
-        { class: "facts" },
-        el("dt", {}, "Size"),
-        el("dd", {}, `${size(detail.size)} (${detail.size.toLocaleString()} bytes)`),
-        el("dt", {}, "ETag"),
-        el("dd", {}, mono(detail.etag)),
-        el("dt", {}, "Last modified"),
-        el("dd", {}, moment(detail.modified)),
-        el("dt", {}, "Upload"),
-        el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`),
-      ),
-    ),
+    el("section", { class: "card" }, facts(detail)),
     el("section", { class: "card" }, el("h2", {}, "Actions"), reason.row, el("div", { class: "actions" }, download, remove), asking),
     el("section", { class: "card flush" }, el("h2", {}, "Headers"), pairs("Stored headers", detail.headers)),
     el("section", { class: "card flush" }, el("h2", {}, "User metadata"), pairs("User metadata", detail.metadata)),
