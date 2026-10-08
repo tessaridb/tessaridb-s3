@@ -22,6 +22,10 @@ section records which TessariDB version its metadata runs on.
   object listed for healing has every shard checked block by block; a missing or damaged shard is rebuilt from the
   others and written back to its node, byte for byte as it was written, and a shard that verifies is never touched.
   An object with fewer than k readable shards stays listed and is logged as at risk.
+- A write cut short no longer blocks the next one: a node removes the temporary files a crash left in its data
+  directory on start-up, and a write that stops part way (a client gone, a healing pass stopped) removes its own.
+  Before, such a file refused every later write of the same shard, so an object that lost a node mid-write stayed
+  listed for healing for good.
 - Cluster membership (first part of the erasure-coded data plane): with `TESSARIDB_S3_ERASURE` and its companion
   settings a node registers itself in the metadata on start-up, and the cluster's first layout — the lowest k + m
   registered node ids — is created once however many nodes propose it. Object data is still stored per node.

@@ -63,6 +63,26 @@ pub(super) async fn blocking<T: Send + 'static>(
         .map_err(|_| failed(op, ErrorKind::Other))?
 }
 
+/// Removes the files under `dir` whose name ends `.tmp`, and answers how many; a missing `dir` holds none.
+fn remove_temps(dir: &Path) -> Result<usize> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(io("recover")(error)),
+    };
+    let mut removed = 0_usize;
+    for entry in entries {
+        let path = entry.map_err(io("recover"))?.path();
+        if path.is_dir() {
+            removed = removed.saturating_add(remove_temps(&path)?);
+        } else if path.extension().is_some_and(|extension| extension == "tmp") {
+            std::fs::remove_file(&path).map_err(io("remove"))?;
+            removed = removed.saturating_add(1);
+        }
+    }
+    Ok(removed)
+}
+
 /// Syncs a directory so the entries created or renamed in it survive a power loss.
 pub(super) fn sync_dir(dir: &Path) -> Result<()> {
     File::open(dir)
@@ -105,6 +125,16 @@ impl DataFiles {
                 (shard, PathBuf::from(temp))
             }
         }
+    }
+
+    /// Removes every temporary file a write left when its process died, and answers how many there were.
+    ///
+    /// # Errors
+    /// The drive's refusal while walking or removing.
+    pub(crate) async fn recover(&self) -> Result<usize> {
+        let root = self.root.join(DATA_SUBDIR);
+        // Once, before the node serves: no writer of this process exists yet, so every temporary name is a dead one.
+        blocking("recover", move || remove_temps(&root)).await
     }
 
     /// Starts writing data `id`: its directory exists and its temporary file holds the header.

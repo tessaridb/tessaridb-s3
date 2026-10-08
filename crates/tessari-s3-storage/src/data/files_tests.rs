@@ -133,7 +133,8 @@ async fn remove_takes_the_file_and_an_abandoned_temp_away() {
     written(&files, id(4), &body(), 64).await;
     let mut abandoned = files.create(id(5)).await.expect("create");
     abandoned.append(&body()).await.expect("append");
-    drop(abandoned);
+    // A crash: no destructor runs, so the temp stays.
+    std::mem::forget(abandoned);
     assert!(
         files.path(id(5)).with_extension("tmp").exists(),
         "temp of an abandoned write"
@@ -199,4 +200,60 @@ async fn a_shard_reads_back_only_as_that_shard_of_that_data() {
         .await
         .expect("removing nothing is not an error");
     std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[tokio::test]
+async fn a_write_cut_short_by_a_crash_is_cleared_at_start_and_the_piece_can_be_written_again() {
+    let root = scratch();
+    let files = DataFiles::new(root.clone(), BLOCK);
+    written(&files, id(7), &body(), 64).await;
+    let mut cut = files.create_shard(id(8), 1, 48).await.expect("create");
+    cut.append(&body()).await.expect("append");
+    // The process died here: no destructor runs, and nothing removes the temp while the data stays referenced.
+    std::mem::forget(cut);
+    assert!(
+        matches!(
+            files.create_shard(id(8), 1, 48).await,
+            Err(Error::DataIo {
+                op: "create",
+                kind: std::io::ErrorKind::AlreadyExists
+            })
+        ),
+        "the leftover temp refuses a new writer of the same shard"
+    );
+    assert_eq!(files.recover().await.expect("recover"), 1, "one temp left");
+    assert!(
+        files.path(id(7)).exists(),
+        "a committed file is not touched"
+    );
+    let mut again = files
+        .create_shard(id(8), 1, 48)
+        .await
+        .expect("written again");
+    again.append(&body()).await.expect("append");
+    again.finish().await.expect("finish");
+    assert_eq!(
+        files.recover().await.expect("recover"),
+        0,
+        "nothing left after a clean run"
+    );
+    std::fs::remove_dir_all(&root).expect("cleanup");
+}
+
+#[tokio::test]
+async fn a_write_dropped_unfinished_takes_its_temp_away_so_the_piece_can_be_written_again() {
+    let root = scratch();
+    let files = DataFiles::new(root.clone(), BLOCK);
+    let mut cancelled = files.create_shard(id(9), 0, 48).await.expect("create");
+    cancelled.append(&body()).await.expect("append");
+    // A request whose client went away, or a heal that stopped: the future holding the writer is dropped.
+    drop(cancelled);
+    let mut again = files
+        .create_shard(id(9), 0, 48)
+        .await
+        .expect("nothing is left in the way of the next writer");
+    again.append(&body()).await.expect("append");
+    again.finish().await.expect("finish");
+    assert!(files.shard_path(id(9), 0).exists());
+    std::fs::remove_dir_all(&root).expect("cleanup");
 }

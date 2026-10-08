@@ -27,12 +27,15 @@ struct Sink {
     size: u64,
 }
 
-/// A data file being written. Dropping it unfinished leaves the temporary file for removal by its data id.
+/// A data file being written. Dropping it unfinished — its future cancelled, a client gone, a heal stopped — removes
+/// the temporary file, so nothing stands in the way of the next writer of the same piece; only a crash leaves one,
+/// and start-up recovery clears those.
 pub(crate) struct DataWriter {
     sink: Option<Sink>,
     block: Vec<u8>,
     block_size: usize,
-    temp: PathBuf,
+    /// The temporary file while this writer still answers for it; `finish` and `abandon` take it over.
+    temp: Option<PathBuf>,
     path: PathBuf,
     created_dirs: bool,
     hex: String,
@@ -56,7 +59,7 @@ impl DataWriter {
             }),
             block: Vec::with_capacity(block_size),
             block_size,
-            temp,
+            temp: Some(temp),
             path,
             created_dirs,
             hex,
@@ -112,9 +115,11 @@ impl DataWriter {
 
     /// Gives the write up: the temporary file is closed and removed so the same data id can be written again.
     /// Nothing under the final name is touched.
-    pub(crate) async fn abandon(self) -> Result<()> {
-        let temp = self.temp;
-        drop(self.sink);
+    pub(crate) async fn abandon(mut self) -> Result<()> {
+        let Some(temp) = self.temp.take() else {
+            return Ok(());
+        };
+        drop(self.sink.take());
         blocking("abandon", move || match std::fs::remove_file(&temp) {
             Err(error) if error.kind() != ErrorKind::NotFound => Err(io("remove")(error)),
             _ => Ok(()),
@@ -124,7 +129,8 @@ impl DataWriter {
 
     /// Writes the last block, syncs the file, renames it into place and syncs the directory — and, when this
     /// write created the shard directories, their parents too. A failed sync is final: the write fails and is not
-    /// retried, because a retried sync can succeed over pages the kernel already dropped.
+    /// retried, because a retried sync can succeed over pages the kernel already dropped. A write that fails before
+    /// its rename removes its temporary file; one that fails after it no longer has one.
     pub(crate) async fn finish(mut self) -> Result<Finished> {
         if !self.block.is_empty() {
             self.flush_block().await?;
@@ -133,10 +139,26 @@ impl DataWriter {
             .sink
             .take()
             .ok_or(failed("finish", ErrorKind::BrokenPipe))?;
-        let (temp, path, created_dirs, name) = (self.temp, self.path, self.created_dirs, self.hex);
+        let temp = self
+            .temp
+            .take()
+            .ok_or(failed("finish", ErrorKind::BrokenPipe))?;
+        let (path, created_dirs, name) = (
+            std::mem::take(&mut self.path),
+            self.created_dirs,
+            std::mem::take(&mut self.hex),
+        );
         blocking("finish", move || {
-            sink.file.sync_all().map_err(io("sync"))?;
-            std::fs::rename(&temp, &path).map_err(io("rename"))?;
+            let renamed = sink
+                .file
+                .sync_all()
+                .map_err(io("sync"))
+                .and_then(|()| std::fs::rename(&temp, &path).map_err(io("rename")));
+            if let Err(error) = renamed {
+                // Still under its temporary name, which nobody else may hold: removed so the piece can be written again.
+                let _ = std::fs::remove_file(&temp);
+                return Err(error);
+            }
             let levels = if created_dirs { 3 } else { 1 };
             let mut dir = path.parent();
             for _ in 0..levels {
@@ -152,5 +174,18 @@ impl DataWriter {
         })
         .await
         .inspect_err(|_| tracing::error!(data = %name, "a data file did not reach the disk"))
+    }
+}
+
+impl Drop for DataWriter {
+    /// One unlink, done here rather than on the blocking pool: a destructor cannot await, and the removal must not
+    /// be left to a task nobody tracks.
+    fn drop(&mut self) {
+        if let Some(temp) = self.temp.take()
+            && let Err(error) = std::fs::remove_file(&temp)
+            && error.kind() != ErrorKind::NotFound
+        {
+            tracing::warn!(data = %self.hex, error = %error, "an unfinished write's temporary file stayed");
+        }
     }
 }

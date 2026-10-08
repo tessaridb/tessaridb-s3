@@ -28,6 +28,10 @@ reqwest.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 uuid.workspace = true
+tessaridb-client.workspace = true
+rcgen.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
 
 [lints]
 workspace = true

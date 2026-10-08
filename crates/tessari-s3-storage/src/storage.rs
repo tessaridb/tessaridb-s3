@@ -68,12 +68,18 @@ impl Storage {
         Ok(storage)
     }
 
-    /// Creates the schema when it is missing; run once at start-up.
+    /// Creates the schema when it is missing and clears what writes cut short by a crash left on the drive; run once
+    /// at start-up, before the node serves.
     ///
     /// # Errors
-    /// The metadata store's refusal or outage.
+    /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
-        crate::schema::apply(&self.pool).await
+        crate::schema::apply(&self.pool).await?;
+        let cleared = self.objects.recover().await?;
+        if cleared > 0 {
+            tracing::info!(cleared, "temporary files of interrupted writes removed");
+        }
+        Ok(())
     }
 
     /// Object operations.

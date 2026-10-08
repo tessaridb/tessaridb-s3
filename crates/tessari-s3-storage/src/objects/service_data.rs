@@ -43,6 +43,18 @@ impl ObjectService {
         }
     }
 
+    /// Removes the temporary files of writes a crash cut short, and answers how many; a node without a data
+    /// directory holds none.
+    ///
+    /// # Errors
+    /// The drive's refusal.
+    pub async fn recover(&self) -> Result<usize> {
+        match &self.data {
+            Some(files) => files.recover().await,
+            None => Ok(0),
+        }
+    }
+
     /// Removes data `id`'s bytes and then its queue entry; a failure leaves the entry for the reclaimer.
     ///
     /// # Errors

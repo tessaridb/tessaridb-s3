@@ -132,7 +132,10 @@ TESSARIDB_S3_TEST_META=127.0.0.1:9080 TESSARIDB_S3_TEST_META_USER=… TESSARIDB_
 ```
 
 With the same variables, `cargo test -p tessari-s3-node --test processes -- --ignored`
-starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them.
+starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them. The same command runs the fault
+tests, which need Docker and the `tessaridb/tessaridb:0.33.2-beta` image: they start their own three-node
+TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
+traffic, then check that every acknowledged object reads back whole and nothing else is visible.
 
 ## Branches
 
