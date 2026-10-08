@@ -75,7 +75,7 @@
   function readBuckets(v) {
     return record(v) ? list(v["buckets"], bucket) : null;
   }
-  var objectRow = (v) => record(v) && text(v["key"]) && count(v["size"]) && text(v["etag"]) && text(v["modified"]) ? { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"] } : null;
+  var objectRow = (v) => record(v) && text(v["key"]) && count(v["size"]) && text(v["etag"]) && text(v["modified"]) && textOrNull(v["content_type"]) ? { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], contentType: v["content_type"] } : null;
   function readListing(v) {
     if (!record(v) || !textOrNull(v["next"])) {
       return null;
@@ -549,6 +549,11 @@
     "sign-out": ["M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4", "M15 8l4 4-4 4", "M19 12H9"],
     folder: ["M3 7.5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"],
     file: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5"],
+    text: ["M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z", "M14 3v5h5", "M9 13h6", "M9 17h6"],
+    image: [box(3, 4, 18, 16, 2), ring(8.5, 9.5, 1.5), "M21 15.5l-5-5L5 20"],
+    video: [box(3, 5, 18, 14, 2), "M10 9l5 3-5 3z"],
+    audio: ["M9 18V6l10-2v12", ring(6.5, 18, 2.5), ring(16.5, 16, 2.5)],
+    archive: [box(3, 4, 18, 5, 1.5), "M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9", "M10 13h4"],
     download: ["M12 4v11", "M7.5 10.5L12 15l4.5-4.5", "M5 20h14"],
     trash: ["M4 7h16", "M9.5 7V4.5h5V7", "M6.5 7l1 13h9l1-13", "M10 11v5.5", "M14 11v5.5"],
     plus: ["M12 5v14", "M5 12h14"],
@@ -1577,6 +1582,36 @@
     );
   }
 
+  // src/file-kind.ts
+  //! What kind of file a key holds, read from the content type its write stored,
+  //! so a listing can say "image" or "archive" without opening the object.
+  var FILE = { icon: "file", label: "File" };
+  var TEXT = { icon: "text", label: "Text" };
+  var ARCHIVE = { icon: "archive", label: "Archive" };
+  var FAMILIES = {
+    image: { icon: "image", label: "Image" },
+    video: { icon: "video", label: "Video" },
+    audio: { icon: "audio", label: "Audio" },
+    text: TEXT
+  };
+  var READABLE = /* @__PURE__ */ new Set(["application/json", "application/xml", "application/javascript"]);
+  var PACKED = /* @__PURE__ */ new Set(["application/zip", "application/gzip", "application/x-gzip", "application/x-tar", "application/x-7z-compressed"]);
+  function kindOf(contentType) {
+    const essence = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    const [family, subtype = ""] = essence.split("/");
+    const named = family === void 0 ? void 0 : FAMILIES[family];
+    if (named !== void 0) {
+      return named;
+    }
+    if (family !== "application") {
+      return FILE;
+    }
+    if (READABLE.has(essence) || subtype.endsWith("+json") || subtype.endsWith("+xml")) {
+      return TEXT;
+    }
+    return PACKED.has(essence) ? ARCHIVE : FILE;
+  }
+
   // src/objects.ts
   //! A bucket's keys a page at a time, in the server's byte order, rolled up at
   //! `/` like a folder tree. Paging is by the server's cursor alone: there is no
@@ -1614,16 +1649,18 @@
     }
     const page = answer.value;
     const folders = page.prefixes.map(
-      (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "")
+      (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "")
     );
-    const files = page.objects.map(
-      (object2) => row(
-        el("a", { class: "name", href: format({ kind: "object", bucket: bucket2, key: object2.key }) }, icon("file"), mono(object2.key.slice(prefix.length))),
+    const files = page.objects.map((object2) => {
+      const kind = kindOf(object2.contentType);
+      return row(
+        el("a", { class: "name", href: format({ kind: "object", bucket: bucket2, key: object2.key }) }, icon(kind.icon), mono(object2.key.slice(prefix.length))),
+        el("span", { title: object2.contentType ?? "No content type was stored" }, kind.label),
         el("span", { title: `${object2.size.toLocaleString()} bytes` }, size(object2.size)),
         moment(object2.modified),
         mono(object2.etag)
-      )
-    );
+      );
+    });
     const nothing = cursor !== null ? empty("No more keys on this page.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix, cursor: null }) }, "Back to the first page")) : prefix === "" ? empty("This bucket is empty.") : empty("Nothing under this prefix.", el("a", { href: format({ kind: "objects", bucket: bucket2, prefix: "", cursor: null }) }, "Back to the top of the bucket"));
     const paging = cursor === null && page.next === null ? null : el(
       "p",
@@ -1638,7 +1675,7 @@
       el(
         "section",
         { class: "card flush" },
-        folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Size", "Last modified", "ETag"], [...folders, ...files]),
+        folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], [...folders, ...files]),
         paging
       )
     );

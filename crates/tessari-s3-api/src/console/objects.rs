@@ -40,6 +40,8 @@ struct ObjectRow {
     size: u64,
     etag: String,
     modified: String,
+    /// As stored at write; `null` when the write named none.
+    content_type: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -115,6 +117,7 @@ pub(super) async fn list(
                 size: summary.size,
                 etag: summary.etag,
                 modified: summary.modified.iso8601_millis(),
+                content_type: summary.content_type,
             }),
             Entry::Prefix(prefix) => prefixes.push(prefix),
         }

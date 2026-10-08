@@ -10,7 +10,9 @@ use crate::Result;
 use crate::answers::{first_record, incarnation_of};
 
 /// What a listing reads of each record.
-const LIST_FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, checksums";
+/// `headers` is read whole for its `content-type` (0.33 has no route to a hyphenated key); it is small — the system
+/// headers stored at write, bounded by the S3 header limit.
+const LIST_FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, checksums, headers";
 
 /// See `ObjectRepository::page`.
 pub(super) async fn page(

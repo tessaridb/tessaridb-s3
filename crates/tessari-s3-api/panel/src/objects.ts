@@ -4,6 +4,7 @@
 
 import { call, search } from "./api.ts";
 import { el, fill, mono, row, table } from "./dom.ts";
+import { kindOf } from "./file-kind.ts";
 import { moment, size } from "./format.ts";
 import { icon } from "./icons.ts";
 import { readListing } from "./models.ts";
@@ -49,16 +50,18 @@ export async function objects(screen: Screen, bucket: string, prefix: string, cu
   }
   const page = answer.value;
   const folders = page.prefixes.map((folder) =>
-    row(el("a", { class: "name", href: format({ kind: "objects", bucket, prefix: folder, cursor: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", ""),
+    row(el("a", { class: "name", href: format({ kind: "objects", bucket, prefix: folder, cursor: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", ""),
   );
-  const files = page.objects.map((object) =>
-    row(
-      el("a", { class: "name", href: format({ kind: "object", bucket, key: object.key }) }, icon("file"), mono(object.key.slice(prefix.length))),
+  const files = page.objects.map((object) => {
+    const kind = kindOf(object.contentType);
+    return row(
+      el("a", { class: "name", href: format({ kind: "object", bucket, key: object.key }) }, icon(kind.icon), mono(object.key.slice(prefix.length))),
+      el("span", { title: object.contentType ?? "No content type was stored" }, kind.label),
       el("span", { title: `${object.size.toLocaleString()} bytes` }, size(object.size)),
       moment(object.modified),
       mono(object.etag),
-    ),
-  );
+    );
+  });
   const nothing =
     cursor !== null
       ? empty("No more keys on this page.", el("a", { href: format({ kind: "objects", bucket, prefix, cursor: null }) }, "Back to the first page"))
@@ -81,7 +84,7 @@ export async function objects(screen: Screen, bucket: string, prefix: string, cu
     el(
       "section",
       { class: "card flush" },
-      folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Size", "Last modified", "ETag"], [...folders, ...files]),
+      folders.length + files.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], [...folders, ...files]),
       paging,
     ),
   );

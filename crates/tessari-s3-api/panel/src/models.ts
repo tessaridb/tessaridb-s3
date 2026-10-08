@@ -41,7 +41,13 @@ export type Bucket = {
   /** The most objects it may hold; null is no limit. */
   readonly maxObjects: number | null;
 };
-export type ObjectRow = { readonly key: string; readonly size: number; readonly etag: string; readonly modified: string };
+export type ObjectRow = {
+  readonly key: string;
+  readonly size: number;
+  readonly etag: string;
+  readonly modified: string;
+  readonly contentType: string | null;
+};
 export type Listing = { readonly objects: readonly ObjectRow[]; readonly prefixes: readonly string[]; readonly next: string | null };
 export type Detail = {
   readonly key: string;
@@ -198,8 +204,8 @@ export function readBuckets(v: unknown): readonly Bucket[] | null {
 }
 
 const objectRow = (v: unknown): ObjectRow | null =>
-  record(v) && text(v["key"]) && count(v["size"]) && text(v["etag"]) && text(v["modified"])
-    ? { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"] }
+  record(v) && text(v["key"]) && count(v["size"]) && text(v["etag"]) && text(v["modified"]) && textOrNull(v["content_type"])
+    ? { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], contentType: v["content_type"] }
     : null;
 
 export function readListing(v: unknown): Listing | null {

@@ -16,6 +16,7 @@ mod complete;
 mod confined_account;
 mod console;
 mod console_admin;
+mod console_explorer;
 mod console_keys;
 mod console_quota;
 mod console_store;

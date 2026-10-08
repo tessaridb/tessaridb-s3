@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readBuckets, readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
+import { readBuckets, readCapabilities, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, drive: own });
@@ -104,4 +104,13 @@ test("an upload key carries its id, its secret and when it stops", () => {
   assert.deepEqual(readUploadKey(key), key);
   const { expires: _gone, ...withoutExpiry } = key;
   assert.equal(readUploadKey(withoutExpiry), null);
+});
+
+test("a listing row carries the content type the write stored, null where none was", () => {
+  const row = { key: "a.png", size: 10, etag: "\"e\"", modified: "2026-10-09T00:00:00.000Z" };
+  const typed = { ...row, content_type: "image/png" };
+  assert.deepEqual(readListing({ objects: [typed], prefixes: [], next: null })?.objects, [{ ...row, contentType: "image/png" }]);
+  assert.deepEqual(readListing({ objects: [{ ...row, content_type: null }], prefixes: [], next: null })?.objects, [{ ...row, contentType: null }]);
+  assert.equal(readListing({ objects: [row], prefixes: [], next: null }), null, "the type is always sent");
+  assert.equal(readListing({ objects: [{ ...row, content_type: 3 }], prefixes: [], next: null }), null);
 });

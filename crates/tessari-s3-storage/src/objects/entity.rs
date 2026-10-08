@@ -158,6 +158,7 @@ pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
             checksum_algorithms: read_strings(fields.get("checksums"), "checksums")?
                 .into_keys()
                 .collect(),
+            content_type: read_strings(fields.get("headers"), "headers")?.remove("content-type"),
         },
     })
 }

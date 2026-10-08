@@ -167,6 +167,8 @@ pub struct ObjectSummary {
     pub modified: Timestamp,
     /// The algorithms of the checksums stored with it (`CRC64NVME` …).
     pub checksum_algorithms: Vec<String>,
+    /// The `Content-Type` stored at write, if the write named one.
+    pub content_type: Option<String>,
 }
 
 /// What a listing ended in.
