@@ -14,12 +14,12 @@ import { empty, failed, head, loading, type Screen } from "./screen.ts";
 const TITLE = "Overview";
 
 /** A figure with its label and a line of context; a link when `href` is given. */
-function tile(glyph: IconName, label: string, value: Node | string, note: Node | string, href?: string): HTMLElement {
+export function tile(glyph: IconName, label: string, value: Node | string, note: Node | string, href?: string): HTMLElement {
   const parts = [el("span", { class: "label" }, icon(glyph), label), el("span", { class: "value" }, value), el("span", { class: "note" }, note)];
   return href === undefined ? el("div", { class: "tile" }, ...parts) : el("a", { class: "tile", href }, ...parts);
 }
 
-function healing(heal: Backlog | null): HTMLElement {
+export function healing(heal: Backlog | null): HTMLElement {
   if (heal === null) {
     return tile("pulse", "Healing", "—", "Applies to cluster members; this node stores objects on its own.");
   }
@@ -33,6 +33,19 @@ function healing(heal: Backlog | null): HTMLElement {
 /** Whether a member answered just now, as text and colour. */
 function state(member: Member): HTMLElement {
   return member.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
+}
+
+/** The members with whether each answers, its disk and its internal address. */
+export function memberTable(members: readonly Member[]): HTMLElement {
+  return members.length === 0
+    ? empty("No members are registered yet.")
+    : table(
+        "Cluster members",
+        ["Member", "State", "Disk", "Internal address"],
+        members.map((member) =>
+          row(mono(member.node), state(member), member.drive === null ? "—" : meter(member.drive, `Disk space used on ${member.node}`), mono(member.endpoint)),
+        ),
+      );
 }
 
 /** The Members tile: how many are registered and, when any is silent, how many answer. */
@@ -97,18 +110,7 @@ export async function status(screen: Screen): Promise<void> {
     return;
   }
   const node = answer.value;
-  const members =
-    node.members === null
-      ? null
-      : node.members.length === 0
-        ? empty("No members are registered yet.")
-        : table(
-            "Cluster members",
-            ["Member", "State", "Disk", "Internal address"],
-            node.members.map((member) =>
-              row(mono(member.node), state(member), member.drive === null ? "—" : meter(member.drive, `Disk space used on ${member.node}`), mono(member.endpoint)),
-            ),
-          );
+  const members = node.members === null ? null : memberTable(node.members);
   fill(
     screen.main,
     head(TITLE, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),

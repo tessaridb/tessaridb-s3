@@ -258,7 +258,7 @@ code {
 
 /* `hidden` must win over the display a control's own rule sets. */
 [hidden] {
-  display: none;
+  display: none !important;
 }
 
 .muted,

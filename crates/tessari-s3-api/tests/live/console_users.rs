@@ -12,6 +12,7 @@ use tessari_s3_core::authz::{Access, Role};
 use crate::access::{Key, grant, user_with_key};
 use crate::console::{send, sign_in};
 use crate::{IGNORED, call, live_config, prepared, scratch_dir, test_node};
+use tessari_s3_storage::users::{NewUser, UserCreated};
 
 /// A server state and a console over one storage, both timed by a clock the test moves.
 pub(crate) async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
@@ -243,4 +244,89 @@ async fn a_disabled_keys_session_ends_once_its_resolution_is_older_than_the_wind
         401
     );
     assert_eq!(sign_in_as(&console, &ann).await, Err(401));
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_cluster_view_is_answered_only_to_who_may_see_it_and_the_session_says_so() {
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let storage = state.storage();
+    let ann = user_with_key(storage, "ann", "alpha", Role::Member, true).await;
+    let created = storage
+        .users()
+        .create(&NewUser {
+            name: crate::users::user("watcher"),
+            space: crate::access::space("alpha"),
+            role: Role::Member,
+            create_buckets: false,
+            operator: false,
+            cluster_viewer: true,
+        })
+        .await
+        .expect("created");
+    assert!(matches!(created, UserCreated::Created(_)));
+    let issued = storage
+        .users()
+        .issue_key(&crate::users::user("watcher"))
+        .await
+        .expect("issued")
+        .expect("watcher");
+    let watcher = Key {
+        id: issued.access_key_id,
+        secret: issued.secret.expose().to_owned(),
+    };
+    let ann_token = sign_in_as(&console, &ann).await.expect("ann");
+    let viewer_token = sign_in_as(&console, &watcher).await.expect("watcher");
+    let root = sign_in(&console).await;
+
+    let refused = send(&console, "GET", "/api/v1/cluster", Some(&ann_token), None).await;
+    assert_eq!(refused.status, 403, "a member without the permission");
+    for token in [&viewer_token, &root] {
+        let seen = send(&console, "GET", "/api/v1/cluster", Some(token), None).await;
+        assert_eq!(seen.status, 200);
+        let body = seen.json();
+        assert!(
+            body["metadata"]["addresses"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty()),
+            "{body}"
+        );
+        assert!(body.get("members").is_some() && body.get("layout").is_some());
+        assert!(body["heal_backlog"].is_object(), "{body}");
+    }
+
+    let me = |token: &str| {
+        let console = console.clone();
+        let token = token.to_owned();
+        async move {
+            send(&console, "GET", "/api/v1/session", Some(&token), None)
+                .await
+                .json()
+        }
+    };
+    let ann_may = me(&ann_token).await;
+    assert_eq!(
+        (
+            &ann_may["operate"],
+            &ann_may["administer"],
+            &ann_may["view_cluster"]
+        ),
+        (
+            &Value::Bool(false),
+            &Value::Bool(false),
+            &Value::Bool(false)
+        )
+    );
+    assert_eq!(ann_may["access_key_id"], Value::from(ann.id.clone()));
+    assert_eq!(me(&viewer_token).await["view_cluster"], Value::Bool(true));
+    let root_may = me(&root).await;
+    assert_eq!(
+        (
+            &root_may["operate"],
+            &root_may["administer"],
+            &root_may["view_cluster"]
+        ),
+        (&Value::Bool(true), &Value::Bool(true), &Value::Bool(true))
+    );
 }

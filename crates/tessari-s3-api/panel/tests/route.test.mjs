@@ -13,6 +13,7 @@ test("every route survives format then parse", () => {
     { kind: "buckets" },
     { kind: "users" },
     { kind: "spaces" },
+    { kind: "cluster" },
     { kind: "actions", before: null },
     { kind: "actions", before: 42 },
   ];
@@ -46,4 +47,9 @@ test("users and spaces are their own views", () => {
   assert.equal(format({ kind: "spaces" }), "#/spaces");
   assert.deepEqual(parse("#/users"), { kind: "users" });
   assert.deepEqual(parse("#/spaces"), { kind: "spaces" });
+});
+
+test("the cluster is its own view", () => {
+  assert.equal(format({ kind: "cluster" }), "#/cluster");
+  assert.deepEqual(parse("#/cluster"), { kind: "cluster" });
 });

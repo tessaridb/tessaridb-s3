@@ -21,7 +21,7 @@ use super::error::ConsoleError;
 
 /// A data drive's space in bytes.
 #[derive(Serialize)]
-struct DriveView {
+pub(super) struct DriveView {
     capacity: u64,
     free: u64,
     available: u64,
@@ -38,7 +38,7 @@ impl From<DriveSpace> for DriveView {
 }
 
 #[derive(Serialize)]
-struct MemberView {
+pub(super) struct MemberView {
     node: String,
     endpoint: String,
     /// Whether it answered a signed probe just now; this node answers by serving the request.
@@ -48,11 +48,11 @@ struct MemberView {
 }
 
 #[derive(Serialize)]
-struct BacklogView {
+pub(super) struct BacklogView {
     /// Objects listed for healing, counted up to the bound.
-    listed: usize,
+    pub(super) listed: usize,
     /// Whether more are listed than were counted.
-    more: bool,
+    pub(super) more: bool,
 }
 
 #[derive(Serialize)]
@@ -116,7 +116,7 @@ pub(super) async fn status(
 
 /// `member` as the console shows it: this node answers by serving the request and reports `local` as its drive;
 /// every other member is probed and asked for its drive.
-async fn view(
+pub(super) async fn view(
     state: &ConsoleState,
     this: &str,
     member: Member,

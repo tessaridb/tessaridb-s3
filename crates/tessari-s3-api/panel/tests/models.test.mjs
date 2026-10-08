@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
+import { readCapabilities, readCluster, readIssued, readSpaces, readStatus, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false }, drive: own });
@@ -53,4 +53,24 @@ test("an issued key carries its id and its secret, both as text", () => {
   const key = { access_key_id: "TSABCDEFGHIJKLMNOPQR", secret_access_key: "s".repeat(40) };
   assert.deepEqual(readIssued(key), key);
   assert.equal(readIssued({ access_key_id: "TSABCDEFGHIJKLMNOPQR" }), null);
+});
+
+test("the session says what the key may do, each as a yes or no", () => {
+  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false };
+  assert.deepEqual(readCapabilities(may), may);
+  assert.equal(readCapabilities({ ...may, operate: "no" }), null);
+});
+
+test("the cluster view reads members, a layout or none, the backlog and the metadata nodes", () => {
+  const cluster = {
+    node: "n1",
+    erasure: "2+1",
+    members: [{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }],
+    layout: { version: 1, nodes: ["n1", "n2", "n3"] },
+    heal_backlog: { listed: 0, more: false },
+    metadata: { addresses: ["127.0.0.1:9080"] },
+  };
+  assert.deepEqual(readCluster(cluster), cluster);
+  assert.deepEqual(readCluster({ ...cluster, node: null, erasure: null, members: null, layout: null })?.layout, null);
+  assert.equal(readCluster({ ...cluster, metadata: { addresses: [1] } }), null);
 });

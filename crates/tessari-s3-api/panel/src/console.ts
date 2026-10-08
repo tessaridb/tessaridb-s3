@@ -5,8 +5,9 @@
 import { actions } from "./actions.ts";
 import { call } from "./api.ts";
 import { buckets } from "./buckets.ts";
+import { cluster } from "./cluster.ts";
 import { all, announce, at } from "./dom.ts";
-import { ignored } from "./models.ts";
+import { ignored, readCapabilities, type Capabilities } from "./models.ts";
 import { object } from "./object.ts";
 import { objects } from "./objects.ts";
 import { parse, type Route } from "./route.ts";
@@ -24,6 +25,25 @@ const signOut = at("sign-out");
 /** Bumped by every render, so an answer arriving for an older view paints nothing. */
 let generation = 0;
 
+/** What the signed-in key may do; asked once per sign-in, forgotten on signing out. */
+let may: Capabilities | null = null;
+
+/** The capability each gated section needs; a section not listed is open to every signed-in key. */
+const NEEDS: Readonly<Record<string, (can: Capabilities) => boolean>> = {
+  users: (can) => can.administer,
+  spaces: (can) => can.operate,
+  cluster: (can) => can.view_cluster,
+  actions: (can) => can.operate,
+};
+
+/** Shows only the sections the key may use. The server still refuses the others; this only stops offering them. */
+function offer(can: Capabilities): void {
+  for (const link of all("[data-section]")) {
+    const need = NEEDS[link.dataset["section"] ?? ""];
+    link.hidden = need !== undefined && !need(can);
+  }
+}
+
 function draw(route: Route, screen: Screen): Promise<void> {
   switch (route.kind) {
     case "status":
@@ -38,6 +58,8 @@ function draw(route: Route, screen: Screen): Promise<void> {
       return users(screen);
     case "spaces":
       return spaces(screen);
+    case "cluster":
+      return cluster(screen);
     case "actions":
       return actions(screen, route.before);
   }
@@ -57,6 +79,7 @@ function mark(route: Route): void {
 
 function showSignIn(): void {
   generation += 1;
+  may = null;
   signOut.hidden = true;
   document.body.classList.add("signed-out");
   signIn(main, () => {
@@ -70,6 +93,20 @@ function showSignIn(): void {
 async function render(): Promise<void> {
   generation += 1;
   const mine = generation;
+  if (may === null) {
+    const asked = await call("GET", "/session", readCapabilities);
+    if (mine !== generation) {
+      return;
+    }
+    if (!asked.ok && asked.status === 401) {
+      showSignIn();
+      return;
+    }
+    if (asked.ok) {
+      may = asked.value;
+      offer(may);
+    }
+  }
   const route = parse(location.hash);
   mark(route);
   const screen: Screen = {
@@ -89,7 +126,7 @@ signOut.addEventListener("click", async () => {
   announce("Signed out.");
   showSignIn();
 });
-const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", actions: "record" };
+const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", actions: "record" };
 for (const link of all("[data-section]")) {
   const name = SECTION_ICONS[link.dataset["section"] ?? ""];
   if (name !== undefined) {

@@ -134,6 +134,40 @@
   function readIssued(v) {
     return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"]) ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] } : null;
   }
+  function readCapabilities(v) {
+    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) ? { access_key_id: v["access_key_id"], operate: v["operate"], administer: v["administer"], view_cluster: v["view_cluster"] } : null;
+  }
+  var names = (value) => list(value, (entry) => text(entry) ? entry : null);
+  function layout(v) {
+    if (v === null) {
+      return null;
+    }
+    const nodes = record(v) && count(v["version"]) ? names(v["nodes"]) : null;
+    return record(v) && count(v["version"]) && nodes !== null ? { version: v["version"], nodes } : void 0;
+  }
+  function readCluster(v) {
+    if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
+      return null;
+    }
+    const members = v["members"] === null ? null : list(v["members"], member);
+    const placed = layout(v["layout"]);
+    const backlog = v["heal_backlog"];
+    const addresses = names(v["metadata"]["addresses"]);
+    if (v["members"] !== null && members === null || placed === void 0 || addresses === null) {
+      return null;
+    }
+    if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"])) {
+      return null;
+    }
+    return {
+      node: v["node"],
+      erasure: v["erasure"],
+      members,
+      layout: placed,
+      heal_backlog: { listed: backlog["listed"], more: backlog["more"] },
+      metadata: { addresses }
+    };
+  }
   function readProblem(v) {
     return record(v) && text(v["code"]) && text(v["message"]) ? { code: v["code"], message: v["message"] } : null;
   }
@@ -284,6 +318,8 @@
         return "#/users";
       case "spaces":
         return "#/spaces";
+      case "cluster":
+        return "#/cluster";
       case "objects":
         return `#/b/${encodeURIComponent(route.bucket)}${query([
           ["prefix", route.prefix === "" ? null : route.prefix],
@@ -316,6 +352,9 @@
       }
       if (path2 === "/spaces") {
         return { kind: "spaces" };
+      }
+      if (path2 === "/cluster") {
+        return { kind: "cluster" };
       }
       if (path2 === "/actions") {
         return { kind: "actions", before: position(params.get("before")) };
@@ -665,22 +704,199 @@
     );
   }
 
+  // src/meter.ts
+  //! How full a drive is: a bar on a zero baseline whose length is the used share,
+  //! with the figures beside it in text, so the bar's colour is never the only
+  //! signal. The thresholds turn it amber, then red, before the drive is full.
+  var WARN = 0.8;
+  var CRITICAL = 0.95;
+  var used = (drive2) => Math.max(drive2.capacity - drive2.free, 0);
+  function meter(drive2, label) {
+    const taken = used(drive2);
+    const ratio = drive2.capacity === 0 ? 0 : taken / drive2.capacity;
+    const level = ratio >= CRITICAL ? "bad" : ratio >= WARN ? "warn" : "ok";
+    const bar = el("div", {
+      class: `meter ${level}`,
+      role: "meter",
+      "aria-label": label,
+      "aria-valuemin": "0",
+      "aria-valuemax": String(drive2.capacity),
+      "aria-valuenow": String(taken),
+      "aria-valuetext": `${size(taken)} of ${size(drive2.capacity)} used, ${share(taken, drive2.capacity)}`
+    });
+    bar.style.setProperty("--fill", ratio.toFixed(4));
+    return el(
+      "div",
+      { class: "gauge" },
+      bar,
+      el("span", { class: "gauge-text" }, `${size(taken)} of ${size(drive2.capacity)}`, el("span", { class: "muted" }, ` · ${share(taken, drive2.capacity)}`))
+    );
+  }
+
+  // src/status.ts
+  //! The overview: is this node and its cluster healthy, how much is stored and
+  //! how full the drives are, and is anything waiting to be healed. Each tile
+  //! links to where the operator acts on it.
+  var TITLE3 = "Overview";
+  function tile(glyph, label, value, note, href) {
+    const parts = [el("span", { class: "label" }, icon(glyph), label), el("span", { class: "value" }, value), el("span", { class: "note" }, note)];
+    return href === void 0 ? el("div", { class: "tile" }, ...parts) : el("a", { class: "tile", href }, ...parts);
+  }
+  function healing(heal) {
+    if (heal === null) {
+      return tile("pulse", "Healing", "—", "Applies to cluster members; this node stores objects on its own.");
+    }
+    if (heal.listed === 0) {
+      return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
+    }
+    const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
+    return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
+  }
+  function state(member2) {
+    return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
+  }
+  function memberTable(members) {
+    return members.length === 0 ? empty("No members are registered yet.") : table(
+      "Cluster members",
+      ["Member", "State", "Disk", "Internal address"],
+      members.map(
+        (member2) => row(mono(member2.node), state(member2), member2.drive === null ? "—" : meter(member2.drive, `Disk space used on ${member2.node}`), mono(member2.endpoint))
+      )
+    );
+  }
+  function membersTile(members) {
+    if (members === null) {
+      return tile("members", "Members", "—", "No cluster");
+    }
+    const answering = members.filter((member2) => member2.answering).length;
+    return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
+  }
+  function storedTile(usage) {
+    if (!usage.ok) {
+      return tile("buckets", "Stored", "—", "The usage figures could not be read. Reload to try again.");
+    }
+    const measured = usage.value;
+    if (measured.taken === null) {
+      return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
+    }
+    const objects2 = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
+    return tile("buckets", "Stored", size(measured.bytes), `${objects2} · measured ${moment(measured.taken)}`);
+  }
+  function drives(node) {
+    if (node.members === null) {
+      return node.drive === null ? [] : [node.drive];
+    }
+    return node.members.flatMap((member2) => member2.drive === null ? [] : [member2.drive]);
+  }
+  function diskTile(node) {
+    const read = drives(node);
+    if (read.length === 0) {
+      return tile("disk", "Disk", "—", node.members === null ? "This node stores no data on its own drive." : "No member reported its drive.");
+    }
+    const total = read.reduce(
+      (sum, drive2) => ({ capacity: sum.capacity + drive2.capacity, free: sum.free + drive2.free, available: sum.available + drive2.available }),
+      { capacity: 0, free: 0, available: 0 }
+    );
+    const scope = node.members === null ? "This node's data drive" : `Raw space on ${read.length} of ${node.members.length} members`;
+    return tile(
+      "disk",
+      "Disk",
+      el("span", {}, share(used(total), total.capacity), el("span", { class: "muted" }, " used")),
+      el("span", { class: "gauge" }, meter(total, "Disk space used"), el("span", {}, `${scope} · ${size(total.free)} free`))
+    );
+  }
+  async function status(screen) {
+    loading(screen, TITLE3, "the node's status");
+    const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
+    if (!answer.ok) {
+      failed(screen, TITLE3, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const node = answer.value;
+    const members = node.members === null ? null : memberTable(node.members);
+    fill(
+      screen.main,
+      head(TITLE3, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
+      el(
+        "div",
+        { class: "tiles" },
+        tile("node", "Node", node.node === null ? "Single" : mono(node.node), node.node === null ? "Not a cluster member" : "This node's name in the cluster"),
+        membersTile(node.members),
+        tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
+        healing(node.heal_backlog),
+        storedTile(usage),
+        diskTile(node),
+        tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
+        tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
+      ),
+      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members)
+    );
+  }
+
+  // src/cluster.ts
+  //! The cluster: its members with whether each answers and its disk, the
+  //! layout objects are placed by and its erasure code, the healing backlog,
+  //! and the metadata nodes. Only a key that may see the cluster is shown this
+  //! view; the server refuses everyone else.
+  var TITLE4 = "Cluster";
+  function layoutCard(cluster2) {
+    if (cluster2.layout === null) {
+      const why = cluster2.erasure === null ? "This node stores objects on its own." : "The layout is fixed once enough members have registered.";
+      return el("section", { class: "card" }, el("h2", {}, "Layout"), el("p", { class: "muted" }, why));
+    }
+    return el(
+      "section",
+      { class: "card" },
+      el("h2", {}, "Layout"),
+      el("p", { class: "muted" }, `Version ${cluster2.layout.version}. Shard 1 of every object goes to the first node, shard 2 to the second, and so on.`),
+      el("ol", {}, ...cluster2.layout.nodes.map((node) => el("li", {}, mono(node))))
+    );
+  }
+  async function cluster(screen) {
+    loading(screen, TITLE4, "the cluster");
+    const answer = await call("GET", "/cluster", readCluster);
+    if (!answer.ok) {
+      failed(screen, TITLE4, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const view = answer.value;
+    fill(
+      screen.main,
+      head(TITLE4, view.node === null ? "A node on its own" : el("span", {}, "This node: ", mono(view.node))),
+      el(
+        "div",
+        { class: "tiles" },
+        tile("layers", "Erasure code", view.erasure === null ? "—" : mono(view.erasure), view.erasure === null ? "Not a cluster member" : "data + parity shards per object"),
+        healing(view.erasure === null ? null : view.heal_backlog),
+        tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)])))
+      ),
+      view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),
+      layoutCard(view)
+    );
+  }
+
   // src/object.ts
   //! One object: what the server holds for it, a recorded download, and a delete
   //! that only goes through while the object is still the version shown here —
   //! the ETag on screen is the condition, so a rewrite in between is refused.
-  var TITLE3 = "Object";
+  var TITLE5 = "Object";
   function pairs(caption, values) {
     const entries = Object.entries(values);
     return entries.length === 0 ? el("div", { class: "empty" }, el("p", {}, "None.")) : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
   }
   var parent = (key) => key.slice(0, key.lastIndexOf("/") + 1);
   async function object(screen, bucket2, key) {
-    loading(screen, TITLE3, "the object");
+    loading(screen, TITLE5, "the object");
     const where = `/buckets/${encodeURIComponent(bucket2)}/object`;
     const answer = await call("GET", `${where}${search([["key", key]])}`, readDetail);
     if (!answer.ok) {
-      failed(screen, TITLE3, answer);
+      failed(screen, TITLE5, answer);
       return;
     }
     if (!screen.live()) {
@@ -868,7 +1084,7 @@
   //! Spaces: the tenants buckets and users belong to. Only operators reach this
   //! view; anyone else is told their key does not allow it. A new space takes a
   //! reason, which goes into the action record.
-  var TITLE4 = "Spaces";
+  var TITLE6 = "Spaces";
   function createForm2(screen, opener) {
     const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
     const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
@@ -917,10 +1133,10 @@
     return form;
   }
   async function spaces(screen) {
-    loading(screen, TITLE4, "spaces");
+    loading(screen, TITLE6, "spaces");
     const answer = await call("GET", "/spaces", readSpaces);
     if (!answer.ok) {
-      failed(screen, TITLE4, answer);
+      failed(screen, TITLE6, answer);
       return;
     }
     if (!screen.live()) {
@@ -929,142 +1145,13 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-space-form" }, icon("plus"), "New space");
     fill(
       screen.main,
-      head(TITLE4, `${answer.value.length.toLocaleString()} on this store`, opener),
+      head(TITLE6, `${answer.value.length.toLocaleString()} on this store`, opener),
       createForm2(screen, opener),
       el(
         "section",
         { class: "card flush" },
         answer.value.length === 0 ? empty("No spaces yet.") : table("Spaces", ["Name", "Created"], answer.value.map((space2) => row(mono(space2.name), moment(space2.created))))
       )
-    );
-  }
-
-  // src/meter.ts
-  //! How full a drive is: a bar on a zero baseline whose length is the used share,
-  //! with the figures beside it in text, so the bar's colour is never the only
-  //! signal. The thresholds turn it amber, then red, before the drive is full.
-  var WARN = 0.8;
-  var CRITICAL = 0.95;
-  var used = (drive2) => Math.max(drive2.capacity - drive2.free, 0);
-  function meter(drive2, label) {
-    const taken = used(drive2);
-    const ratio = drive2.capacity === 0 ? 0 : taken / drive2.capacity;
-    const level = ratio >= CRITICAL ? "bad" : ratio >= WARN ? "warn" : "ok";
-    const bar = el("div", {
-      class: `meter ${level}`,
-      role: "meter",
-      "aria-label": label,
-      "aria-valuemin": "0",
-      "aria-valuemax": String(drive2.capacity),
-      "aria-valuenow": String(taken),
-      "aria-valuetext": `${size(taken)} of ${size(drive2.capacity)} used, ${share(taken, drive2.capacity)}`
-    });
-    bar.style.setProperty("--fill", ratio.toFixed(4));
-    return el(
-      "div",
-      { class: "gauge" },
-      bar,
-      el("span", { class: "gauge-text" }, `${size(taken)} of ${size(drive2.capacity)}`, el("span", { class: "muted" }, ` · ${share(taken, drive2.capacity)}`))
-    );
-  }
-
-  // src/status.ts
-  //! The overview: is this node and its cluster healthy, how much is stored and
-  //! how full the drives are, and is anything waiting to be healed. Each tile
-  //! links to where the operator acts on it.
-  var TITLE5 = "Overview";
-  function tile(glyph, label, value, note, href) {
-    const parts = [el("span", { class: "label" }, icon(glyph), label), el("span", { class: "value" }, value), el("span", { class: "note" }, note)];
-    return href === void 0 ? el("div", { class: "tile" }, ...parts) : el("a", { class: "tile", href }, ...parts);
-  }
-  function healing(heal) {
-    if (heal === null) {
-      return tile("pulse", "Healing", "—", "Applies to cluster members; this node stores objects on its own.");
-    }
-    if (heal.listed === 0) {
-      return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
-    }
-    const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
-    return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
-  }
-  function state(member2) {
-    return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
-  }
-  function membersTile(members) {
-    if (members === null) {
-      return tile("members", "Members", "—", "No cluster");
-    }
-    const answering = members.filter((member2) => member2.answering).length;
-    return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
-  }
-  function storedTile(usage) {
-    if (!usage.ok) {
-      return tile("buckets", "Stored", "—", "The usage figures could not be read. Reload to try again.");
-    }
-    const measured = usage.value;
-    if (measured.taken === null) {
-      return tile("buckets", "Stored", "—", "Not measured yet. A node measures every minute after it starts.");
-    }
-    const objects2 = measured.objects === 1 ? "1 object" : `${amount(measured.objects)} objects`;
-    return tile("buckets", "Stored", size(measured.bytes), `${objects2} · measured ${moment(measured.taken)}`);
-  }
-  function drives(node) {
-    if (node.members === null) {
-      return node.drive === null ? [] : [node.drive];
-    }
-    return node.members.flatMap((member2) => member2.drive === null ? [] : [member2.drive]);
-  }
-  function diskTile(node) {
-    const read = drives(node);
-    if (read.length === 0) {
-      return tile("disk", "Disk", "—", node.members === null ? "This node stores no data on its own drive." : "No member reported its drive.");
-    }
-    const total = read.reduce(
-      (sum, drive2) => ({ capacity: sum.capacity + drive2.capacity, free: sum.free + drive2.free, available: sum.available + drive2.available }),
-      { capacity: 0, free: 0, available: 0 }
-    );
-    const scope = node.members === null ? "This node's data drive" : `Raw space on ${read.length} of ${node.members.length} members`;
-    return tile(
-      "disk",
-      "Disk",
-      el("span", {}, share(used(total), total.capacity), el("span", { class: "muted" }, " used")),
-      el("span", { class: "gauge" }, meter(total, "Disk space used"), el("span", {}, `${scope} · ${size(total.free)} free`))
-    );
-  }
-  async function status(screen) {
-    loading(screen, TITLE5, "the node's status");
-    const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
-    if (!answer.ok) {
-      failed(screen, TITLE5, answer);
-      return;
-    }
-    if (!screen.live()) {
-      return;
-    }
-    const node = answer.value;
-    const members = node.members === null ? null : node.members.length === 0 ? empty("No members are registered yet.") : table(
-      "Cluster members",
-      ["Member", "State", "Disk", "Internal address"],
-      node.members.map(
-        (member2) => row(mono(member2.node), state(member2), member2.drive === null ? "—" : meter(member2.drive, `Disk space used on ${member2.node}`), mono(member2.endpoint))
-      )
-    );
-    fill(
-      screen.main,
-      head(TITLE5, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
-      el(
-        "div",
-        { class: "tiles" },
-        tile("node", "Node", node.node === null ? "Single" : mono(node.node), node.node === null ? "Not a cluster member" : "This node's name in the cluster"),
-        membersTile(node.members),
-        tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
-        healing(node.heal_backlog),
-        storedTile(usage),
-        diskTile(node),
-        tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
-        tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
-      ),
-      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members)
     );
   }
 
@@ -1287,7 +1374,7 @@
   //! Creating a user is judged by the server on the user it would be, so a space
   //! admin who asks for an administrator, an operator or a cluster viewer is told
   //! the key does not allow it. Each row's actions are in `user-actions.ts`.
-  var TITLE6 = "Users";
+  var TITLE7 = "Users";
   function check(id, label) {
     const input = el("input", { id, name: id, type: "checkbox" });
     return { row: el("label", { class: "check", for: id }, input, label), input };
@@ -1370,10 +1457,10 @@
     return line;
   }
   async function users(screen) {
-    loading(screen, TITLE6, "users");
+    loading(screen, TITLE7, "users");
     const answer = await call("GET", "/users", readUsers);
     if (!answer.ok) {
-      failed(screen, TITLE6, answer);
+      failed(screen, TITLE7, answer);
       return;
     }
     if (!screen.live()) {
@@ -1382,7 +1469,7 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-user-form" }, icon("plus"), "New user");
     fill(
       screen.main,
-      head(TITLE6, `${answer.value.length.toLocaleString()} you administer`, opener),
+      head(TITLE7, `${answer.value.length.toLocaleString()} you administer`, opener),
       createForm3(screen, opener),
       el(
         "section",
@@ -1399,6 +1486,19 @@
   var main = at("view");
   var signOut = at("sign-out");
   var generation = 0;
+  var may = null;
+  var NEEDS = {
+    users: (can) => can.administer,
+    spaces: (can) => can.operate,
+    cluster: (can) => can.view_cluster,
+    actions: (can) => can.operate
+  };
+  function offer(can) {
+    for (const link of all("[data-section]")) {
+      const need = NEEDS[link.dataset["section"] ?? ""];
+      link.hidden = need !== void 0 && !need(can);
+    }
+  }
   function draw(route, screen) {
     switch (route.kind) {
       case "status":
@@ -1413,6 +1513,8 @@
         return users(screen);
       case "spaces":
         return spaces(screen);
+      case "cluster":
+        return cluster(screen);
       case "actions":
         return actions(screen, route.before);
     }
@@ -1429,6 +1531,7 @@
   }
   function showSignIn() {
     generation += 1;
+    may = null;
     signOut.hidden = true;
     document.body.classList.add("signed-out");
     signIn(main, () => {
@@ -1441,6 +1544,20 @@
   async function render() {
     generation += 1;
     const mine = generation;
+    if (may === null) {
+      const asked = await call("GET", "/session", readCapabilities);
+      if (mine !== generation) {
+        return;
+      }
+      if (!asked.ok && asked.status === 401) {
+        showSignIn();
+        return;
+      }
+      if (asked.ok) {
+        may = asked.value;
+        offer(may);
+      }
+    }
     const route = parse(location.hash);
     mark(route);
     const screen = {
@@ -1459,7 +1576,7 @@
     announce("Signed out.");
     showSignIn();
   });
-  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", actions: "record" };
+  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", actions: "record" };
   for (const link of all("[data-section]")) {
     const name = SECTION_ICONS[link.dataset["section"] ?? ""];
     if (name !== void 0) {

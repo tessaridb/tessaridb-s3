@@ -6,6 +6,7 @@
 mod access;
 mod actions;
 mod buckets;
+mod cluster;
 mod content;
 mod error;
 mod grants;
@@ -28,7 +29,7 @@ use axum::routing::{delete, get, post, put};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
-use tessari_s3_types::SecretKey;
+use tessari_s3_types::{Code, SecretKey};
 
 use crate::Clock;
 use crate::principals::{Principals, resolve_user_key};
@@ -52,6 +53,8 @@ struct Inner {
     node: Option<String>,
     region: String,
     erasure: Option<String>,
+    code: Option<Code>,
+    meta_addresses: Vec<String>,
     principals: Principals,
 }
 
@@ -78,6 +81,8 @@ impl ConsoleState {
                     .cluster
                     .as_ref()
                     .map(|cluster| format!("{}+{}", cluster.code.data(), cluster.code.parity())),
+                code: config.cluster.as_ref().map(|cluster| cluster.code),
+                meta_addresses: config.meta.addresses.clone(),
                 principals: Principals::new(),
             }),
         })
@@ -138,6 +143,14 @@ impl ConsoleState {
         self.inner.erasure.as_deref()
     }
 
+    fn code(&self) -> Option<Code> {
+        self.inner.code
+    }
+
+    fn meta_addresses(&self) -> &[String] {
+        &self.inner.meta_addresses
+    }
+
     fn storage(&self) -> &Storage {
         &self.inner.storage
     }
@@ -165,7 +178,11 @@ async fn not_found() -> ConsoleError {
 pub fn console_router(state: ConsoleState) -> axum::Router {
     let protected = axum::Router::new()
         .route("/api/v1/status", get(status::status))
-        .route("/api/v1/session", delete(session::sign_out))
+        .route(
+            "/api/v1/session",
+            get(session::capabilities).delete(session::sign_out),
+        )
+        .route("/api/v1/cluster", get(cluster::cluster))
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/objects", get(objects::list))

@@ -59,6 +59,22 @@ export type User = {
 export type Space = { readonly name: string; readonly created: string };
 /** A key just issued: the only answer that ever carries its secret. */
 export type IssuedKey = { readonly access_key_id: string; readonly secret_access_key: string };
+/** What the signed-in key may do, as the server's evaluator answers it. */
+export type Capabilities = {
+  readonly access_key_id: string;
+  readonly operate: boolean;
+  readonly administer: boolean;
+  readonly view_cluster: boolean;
+};
+export type Layout = { readonly version: number; readonly nodes: readonly string[] };
+export type Cluster = {
+  readonly node: string | null;
+  readonly erasure: string | null;
+  readonly members: readonly Member[] | null;
+  readonly layout: Layout | null;
+  readonly heal_backlog: Backlog;
+  readonly metadata: { readonly addresses: readonly string[] };
+};
 export type Problem = { readonly code: string; readonly message: string };
 
 type Fields = Readonly<Record<string, unknown>>;
@@ -238,6 +254,46 @@ export function readIssued(v: unknown): IssuedKey | null {
   return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"])
     ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] }
     : null;
+}
+
+export function readCapabilities(v: unknown): Capabilities | null {
+  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"])
+    ? { access_key_id: v["access_key_id"], operate: v["operate"], administer: v["administer"], view_cluster: v["view_cluster"] }
+    : null;
+}
+
+const names = (value: unknown): string[] | null => list(value, (entry) => (text(entry) ? entry : null));
+
+function layout(v: unknown): Layout | null | undefined {
+  if (v === null) {
+    return null;
+  }
+  const nodes = record(v) && count(v["version"]) ? names(v["nodes"]) : null;
+  return record(v) && count(v["version"]) && nodes !== null ? { version: v["version"], nodes } : undefined;
+}
+
+export function readCluster(v: unknown): Cluster | null {
+  if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
+    return null;
+  }
+  const members = v["members"] === null ? null : list(v["members"], member);
+  const placed = layout(v["layout"]);
+  const backlog = v["heal_backlog"];
+  const addresses = names(v["metadata"]["addresses"]);
+  if ((v["members"] !== null && members === null) || placed === undefined || addresses === null) {
+    return null;
+  }
+  if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"])) {
+    return null;
+  }
+  return {
+    node: v["node"],
+    erasure: v["erasure"],
+    members,
+    layout: placed,
+    heal_backlog: { listed: backlog["listed"], more: backlog["more"] },
+    metadata: { addresses },
+  };
 }
 
 export function readProblem(v: unknown): Problem | null {

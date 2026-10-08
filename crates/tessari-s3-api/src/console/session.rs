@@ -6,13 +6,16 @@ use std::net::SocketAddr;
 
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Extension, State};
 use axum::http::header::{CONTENT_TYPE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use tessari_s3_constants::{CONSOLE_SESSION_COOKIE, CONSOLE_SESSION_SECS};
+
+use tessari_s3_core::authz::{Action, Decision, Principal, authorize};
+use tessari_s3_core::console::Session;
 
 use super::ConsoleState;
 use super::error::ConsoleError;
@@ -104,6 +107,35 @@ pub(super) async fn sign_in(
         .headers_mut()
         .insert(SET_COOKIE, cookie(&state, &token, CONSOLE_SESSION_SECS)?);
     Ok(response)
+}
+
+/// What the signed-in key may do, as the evaluator answers it now, so the page offers only what will be allowed.
+#[derive(Serialize)]
+pub(super) struct Capabilities {
+    access_key_id: String,
+    /// Every space: spaces, every user, the action record.
+    operate: bool,
+    /// Its own space's users and grants.
+    administer: bool,
+    /// The cluster view.
+    view_cluster: bool,
+}
+
+pub(super) async fn capabilities(
+    Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
+) -> Json<Capabilities> {
+    let may = |action: &Action| authorize(&principal, action) == Decision::Allow;
+    let administer = match &principal {
+        Principal::Root => true,
+        Principal::User(user) => may(&Action::ManageSpace(user.space.clone())),
+    };
+    Json(Capabilities {
+        access_key_id: session.key_id,
+        operate: may(&Action::Operate),
+        administer,
+        view_cluster: may(&Action::ViewCluster),
+    })
 }
 
 /// Ends the session in this browser. The token itself stays valid until it expires — there is no store to revoke it
