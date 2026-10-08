@@ -1,6 +1,6 @@
 //! The decision: deny by default, explicit denies first, then the one rule that may allow.
 
-use super::model::{Access, Action, BucketResource, Principal, Role, UserPrincipal};
+use super::model::{Access, Action, BucketResource, Principal, Role, UserPrincipal, UserResource};
 
 /// Why a request was refused — for the decision log and for tests; a caller is told only that it was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,8 @@ pub enum Denied {
     Role,
     /// No grant on the bucket covers the action.
     NoGrant,
+    /// The caller is the user it would manage.
+    SelfManagement,
 }
 
 /// The evaluator's answer.
@@ -29,6 +31,12 @@ pub fn authorize(principal: &Principal, action: &Action) -> Decision {
         Principal::Root => return Decision::Allow,
         Principal::User(user) => user,
     };
+    // Nobody manages their own user — not even an operator: a self-grant is refused by the system, never by policy.
+    if let Action::ManageUser(target) = action
+        && target.name == user.name
+    {
+        return Decision::Deny(Denied::SelfManagement);
+    }
     if user.operator {
         return Decision::Allow;
     }
@@ -43,6 +51,7 @@ pub fn authorize(principal: &Principal, action: &Action) -> Decision {
                 allow_if(user.role == Role::SpaceAdmin, Denied::Role)
             }
         }
+        Action::ManageUser(target) => manage_user(user, target),
         Action::CreateBucket(space) => {
             if *space != user.space {
                 Decision::Deny(Denied::OtherSpace)
@@ -67,6 +76,16 @@ const fn allow_if(allowed: bool, otherwise: Denied) -> Decision {
     } else {
         Decision::Deny(otherwise)
     }
+}
+
+/// Managing a user: a space admin manages the plain members of its own space; authority equal to or above its own —
+/// another admin, an operator, a cluster viewer — is the operators' to create or change, so delegation cannot widen.
+fn manage_user(user: &UserPrincipal, target: &UserResource) -> Decision {
+    if target.space != user.space {
+        return Decision::Deny(Denied::OtherSpace);
+    }
+    let plain_member = target.role == Role::Member && !target.operator && !target.cluster_viewer;
+    allow_if(user.role == Role::SpaceAdmin && plain_member, Denied::Role)
 }
 
 /// A bucket action: its space's administrator and its creator may; a member otherwise needs a grant `covers`.

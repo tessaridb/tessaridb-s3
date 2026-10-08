@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::{
     Access, Action, BucketResource, Decision, Denied, Principal, Role, SpaceName, UserName,
-    UserPrincipal, authorize,
+    UserPrincipal, UserResource, authorize,
 };
 
 fn space(name: &str) -> SpaceName {
@@ -269,4 +269,82 @@ fn a_listing_sees_one_space_unless_the_caller_operates() {
     let mut operator = member;
     operator.operator = true;
     assert_eq!(Principal::User(operator).visible(), Visible::All);
+}
+
+fn target(name: &str, in_space: &str, role: Role) -> UserResource {
+    UserResource {
+        name: name.to_owned(),
+        space: space(in_space),
+        role,
+        operator: false,
+        cluster_viewer: false,
+    }
+}
+
+#[test]
+fn a_space_admin_manages_only_the_plain_members_of_its_own_space() {
+    let admin = user("boss", "alpha", Role::SpaceAdmin);
+    let member = target("ann", "alpha", Role::Member);
+    assert_eq!(
+        decide(admin.clone(), &Action::ManageUser(member.clone())),
+        Decision::Allow
+    );
+    assert_eq!(
+        decide(
+            admin.clone(),
+            &Action::ManageUser(target("bob", "beta", Role::Member))
+        ),
+        DENY_SPACE
+    );
+    let mut viewer = member.clone();
+    viewer.cluster_viewer = true;
+    let mut operator = member;
+    operator.operator = true;
+    for above in [target("peer", "alpha", Role::SpaceAdmin), viewer, operator] {
+        assert_eq!(
+            decide(admin.clone(), &Action::ManageUser(above.clone())),
+            DENY_ROLE,
+            "a space admin cannot create or manage authority equal to or above its own: {above:?}"
+        );
+        assert_eq!(
+            authorize(&Principal::Root, &Action::ManageUser(above)),
+            Decision::Allow
+        );
+    }
+    assert_eq!(
+        decide(
+            user("cid", "alpha", Role::Member),
+            &Action::ManageUser(target("ann", "alpha", Role::Member))
+        ),
+        DENY_ROLE
+    );
+}
+
+#[test]
+fn nobody_manages_their_own_user() {
+    let admin = user("boss", "alpha", Role::SpaceAdmin);
+    let mut operator = user("ops", "alpha", Role::Member);
+    operator.operator = true;
+    assert_eq!(
+        decide(
+            admin,
+            &Action::ManageUser(target("boss", "alpha", Role::Member))
+        ),
+        Decision::Deny(Denied::SelfManagement)
+    );
+    assert_eq!(
+        decide(
+            operator.clone(),
+            &Action::ManageUser(target("ops", "alpha", Role::Member))
+        ),
+        Decision::Deny(Denied::SelfManagement),
+        "the store-wide role does not lift it"
+    );
+    assert_eq!(
+        decide(
+            operator,
+            &Action::ManageUser(target("ann", "beta", Role::SpaceAdmin))
+        ),
+        Decision::Allow
+    );
 }

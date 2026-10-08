@@ -33,7 +33,12 @@ impl Seen {
         value.split(';').next().map(str::to_owned)
     }
 
-    fn code(&self) -> Option<String> {
+    /// A response header, when it is present and readable.
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(name)?.to_str().ok()
+    }
+
+    pub(crate) fn code(&self) -> Option<String> {
         self.json()
             .get("code")
             .and_then(Value::as_str)

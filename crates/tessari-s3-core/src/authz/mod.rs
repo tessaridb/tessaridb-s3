@@ -8,7 +8,8 @@ mod operations;
 
 pub use decide::{Decision, Denied, authorize};
 pub use model::{
-    Access, Action, BucketResource, Principal, Role, SpaceName, UserName, UserPrincipal, Visible,
+    Access, Action, BucketResource, Principal, Role, SpaceName, UserName, UserPrincipal,
+    UserResource, Visible,
 };
 pub use operations::{Need, Required, required};
 

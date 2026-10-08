@@ -131,6 +131,21 @@ pub struct BucketResource {
     pub creator: Option<String>,
 }
 
+/// A user as the evaluator needs it when somebody manages them: who they are, where, and with what authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserResource {
+    /// Their name.
+    pub name: String,
+    /// The space they belong to.
+    pub space: SpaceName,
+    /// Their role in it.
+    pub role: Role,
+    /// Whether they operate the store.
+    pub operator: bool,
+    /// Whether they see the cluster.
+    pub cluster_viewer: bool,
+}
+
 /// What is being asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -150,6 +165,8 @@ pub enum Action {
     ViewCluster,
     /// Administer a space's users and grants.
     ManageSpace(SpaceName),
+    /// Create a user, issue it a key, disable it or change its grants — judged on the user as it is or would be.
+    ManageUser(UserResource),
     /// Create and remove spaces, set quotas, read every space.
     Operate,
 }

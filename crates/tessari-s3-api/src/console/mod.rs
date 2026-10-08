@@ -8,19 +8,23 @@ mod actions;
 mod buckets;
 mod content;
 mod error;
+mod grants;
 mod guard;
 mod input;
+mod keys;
 mod limits;
 mod objects;
 mod page;
 mod session;
+mod spaces;
 mod status;
 mod usage;
+mod users;
 
 use std::sync::Arc;
 
 use axum::middleware::from_fn_with_state;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_storage::Storage;
@@ -175,6 +179,14 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         )
         .route("/api/v1/actions", get(actions::list))
         .route("/api/v1/usage", get(usage::usage))
+        .route("/api/v1/spaces", get(spaces::list).post(spaces::create))
+        .route("/api/v1/users", get(users::list).post(users::create))
+        .route("/api/v1/users/{user}/disabled", put(users::set_disabled))
+        .route("/api/v1/users/{user}/keys", post(keys::issue))
+        .route(
+            "/api/v1/users/{user}/grants/{bucket}",
+            put(grants::set).delete(grants::remove),
+        )
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()

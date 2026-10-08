@@ -14,7 +14,7 @@ use crate::console::{send, sign_in};
 use crate::{IGNORED, call, live_config, prepared, scratch_dir, test_node};
 
 /// A server state and a console over one storage, both timed by a clock the test moves.
-async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
+pub(crate) async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
     // A data directory, so this node has a drive the cluster view would show.
     let config = live_config(test_node(), None, Some(&scratch_dir()));
     let storage = prepared(&config).await;
@@ -27,7 +27,7 @@ async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
 }
 
 /// Signs `key` in, answering the session token, or the refusal's status.
-async fn sign_in_as(console: &ConsoleState, key: &Key) -> Result<String, u16> {
+pub(crate) async fn sign_in_as(console: &ConsoleState, key: &Key) -> Result<String, u16> {
     let body = format!(
         "{{\"access_key_id\":\"{}\",\"secret_access_key\":\"{}\"}}",
         key.id, key.secret
