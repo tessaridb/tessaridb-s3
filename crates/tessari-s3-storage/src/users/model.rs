@@ -3,7 +3,8 @@
 use tessari_s3_core::authz::{Role, SpaceName, UserName};
 use tessari_s3_types::{BucketName, ObjectKey, SecretKey, Timestamp};
 
-use super::entity::UserEntity;
+use super::entity::{AccessKeyEntity, UserEntity};
+use super::sealer::ScopeBinding;
 use crate::{Error, Result};
 
 /// How a role is stored.
@@ -70,6 +71,36 @@ pub struct KeyScope {
     pub key: ObjectKey,
     /// When it stops working, in whole seconds since the epoch.
     pub expires: i64,
+}
+
+impl KeyScope {
+    /// The scope as bound into the sealed secret's associated data.
+    pub(crate) fn binding(&self) -> ScopeBinding<'_> {
+        ScopeBinding {
+            bucket: self.bucket.as_str(),
+            key: self.key.as_str(),
+            expires: self.expires,
+        }
+    }
+}
+
+/// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
+pub(crate) fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
+    let malformed = |reason| Error::Malformed {
+        record: "access key",
+        reason,
+    };
+    match (&key.scope_bucket, &key.scope_key, key.expires) {
+        (None, None, None) => Ok(None),
+        (Some(bucket), Some(object), Some((expires, _))) => Ok(Some(KeyScope {
+            bucket: BucketName::new(bucket).map_err(|_| malformed("scope_bucket"))?,
+            key: ObjectKey::new(object).map_err(|_| malformed("scope_key"))?,
+            expires,
+        })),
+        _ => Err(malformed(
+            "a scope needs scope_bucket, scope_key and expires together",
+        )),
+    }
 }
 
 /// A live key's user and secret, for verifying a request it signed. Not `Clone`, for the same reason.

@@ -5,6 +5,29 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Spaces, users and grants: an operator creates spaces and users; every user belongs to one space as its
+  administrator or a member, may be allowed to create buckets there, and may be made a store-wide operator or cluster
+  viewer. A bucket belongs to the space it was created in; a user lists and reaches only its own space's buckets — a
+  member only those it created or was granted read or write on — and a bucket of another space answers as if it did
+  not exist. One evaluator decides every S3 operation and every console route, deny by default.
+- User access keys: issued with the secret shown once, stored sealed (XChaCha20-Poly1305 under a per-space key
+  derived from `TESSARIDB_S3_IAM_KEY`, bound to the key, its user and space); without that variable only the root
+  credential signs in. Disabling a user or a key, or removing a grant, takes effect on every node within 5 seconds.
+- One-key upload credentials: a user who may write a bucket issues, from the console, a key that uploads exactly one
+  named key of it — a single PUT or every step of a multipart upload — and nothing else, for 60 seconds to 7 days,
+  and only while the issuer may still write there. The metadata store drops it at its expiry.
+- Bucket quotas: an operator sets a byte and an object limit on a bucket (console, with a reason that is recorded);
+  every write that adds — PutObject, CopyObject, UploadPart, UploadPartCopy, CompleteMultipartUpload — is checked
+  against the last usage measurement plus the write and refused `InvalidRequest` "bucket quota exceeded". A bucket can
+  pass its limit by what is written within one usage interval; an unreadable limit or measurement refuses the write.
+- Real occupancy: the usage pass also counts the bytes each bucket holds on the drives (with the erasure overhead on
+  a cluster) and the bytes held inline in the metadata; the console shows both.
+- The console for users: sign in with any key (root or a user's); menus, screens and routes follow what that key
+  may do — the cluster view only for those allowed to see it; spaces, users, keys, grants and quotas for operators and
+  space administrators (their own space only).
+- A container image that holds the server only (`Dockerfile`, runs as an unprivileged user, a health check) and a
+  `compose.yaml` that runs it beside a TessariDB container; data survives a restart in named volumes.
+
 - Storage usage: every node measures how many objects and how many bytes each bucket holds every
   `TESSARIDB_S3_USAGE_INTERVAL_SECS` (default 60); an expiring claim in TessariDB lets one member measure per pass.
   The console shows the totals with the time they were taken, each bucket's objects and size, and the space of every

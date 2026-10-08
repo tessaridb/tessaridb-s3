@@ -5,13 +5,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tessari_s3_core::authz::{Access, UserName, UserPrincipal, Visible};
-use tessari_s3_types::{BucketName, IamKey, ObjectKey};
+use tessari_s3_types::{BucketName, IamKey};
 
 use super::credentials;
-use super::entity::AccessKeyEntity;
-use super::model::{IssuedKey, KeyScope, NewUser, Resolved, User};
+use super::model::{IssuedKey, KeyScope, NewUser, Resolved, User, scope_of};
 use super::repository::{Inserted, UserRepository};
-use super::sealer::{Binding, ScopeBinding, Sealed, Sealer};
+use super::sealer::{Binding, Sealed, Sealer};
 use super::tessaridb::TessariUsers;
 use crate::spaces::SpaceService;
 use crate::{Error, Result};
@@ -28,25 +27,6 @@ pub enum UserCreated {
     Exists,
     /// The space it was to join does not exist.
     NoSuchSpace,
-}
-
-/// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
-fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
-    let malformed = |reason| Error::Malformed {
-        record: "access key",
-        reason,
-    };
-    match (&key.scope_bucket, &key.scope_key, key.expires) {
-        (None, None, None) => Ok(None),
-        (Some(bucket), Some(object), Some((expires, _))) => Ok(Some(KeyScope {
-            bucket: BucketName::new(bucket).map_err(|_| malformed("scope_bucket"))?,
-            key: ObjectKey::new(object).map_err(|_| malformed("scope_key"))?,
-            expires,
-        })),
-        _ => Err(malformed(
-            "a scope needs scope_bucket, scope_key and expires together",
-        )),
-    }
 }
 
 /// User, access-key and grant operations.
@@ -170,11 +150,7 @@ impl UserService {
                 key_id: &id,
                 user: holder.name.as_str(),
                 space: holder.space.as_str(),
-                scope: scope.map(|scope| ScopeBinding {
-                    bucket: scope.bucket.as_str(),
-                    key: scope.key.as_str(),
-                    expires: scope.expires,
-                }),
+                scope: scope.map(KeyScope::binding),
             };
             let sealed = sealer.seal(&secret, binding)?;
             if self
@@ -228,11 +204,7 @@ impl UserService {
             key_id: id,
             user: user.name.as_str(),
             space: user.space.as_str(),
-            scope: scope.as_ref().map(|scope| ScopeBinding {
-                bucket: scope.bucket.as_str(),
-                key: scope.key.as_str(),
-                expires: scope.expires,
-            }),
+            scope: scope.as_ref().map(KeyScope::binding),
         };
         let secret = self.sealer()?.open(&sealed, binding)?;
         Ok(Some(Resolved {
