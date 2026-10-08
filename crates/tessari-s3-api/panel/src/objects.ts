@@ -11,6 +11,7 @@ import { kindOf } from "./file-kind.ts";
 import { moment, size } from "./format.ts";
 import { icon } from "./icons.ts";
 import { type Listing, type ObjectRow, readListing } from "./models.ts";
+import { objectActions } from "./object-actions.ts";
 import { describe } from "./object-pane.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, type Screen } from "./screen.ts";
@@ -58,7 +59,7 @@ export async function objects(screen: Screen, bucket: string, prefix: string, cu
   const here = (key: string | null): string => format({ kind: "objects", bucket, prefix, cursor, key });
   const links = new Map<string, HTMLAnchorElement>();
   const folderRow = (folder: string): HTMLTableRowElement =>
-    row(el("a", { class: "name", href: format({ kind: "objects", bucket, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "");
+    row(el("a", { class: "name", href: format({ kind: "objects", bucket, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "", "");
   const fileRow = (object: ObjectRow): HTMLTableRowElement => {
     const kind = kindOf(object.contentType);
     const link = el("a", { class: "name", href: here(object.key), "data-key": object.key }, icon(kind.icon), mono(object.key.slice(prefix.length)));
@@ -70,13 +71,24 @@ export async function objects(screen: Screen, bucket: string, prefix: string, cu
       }
     });
     links.set(object.key, link);
-    return row(
+    const buttons = el("div", { class: "actions" });
+    const line = row(
       link,
       el("span", { title: object.contentType ?? "No content type was stored" }, kind.label),
       el("span", { title: `${object.size.toLocaleString()} bytes` }, size(object.size)),
       moment(object.modified),
-      mono(object.etag),
+      // The full ETag is in the details; eight hex digits tell two versions apart at a glance.
+      el("span", { title: object.etag }, mono(object.etag.length > 12 ? `${object.etag.slice(0, 9)}…` : object.etag)),
+      buttons,
     );
+    const forget = (): void => {
+      links.delete(object.key);
+      if (shown === object.key) {
+        select(null);
+      }
+    };
+    buttons.append(...objectActions(screen, bucket, object, line, () => select(object.key), forget));
+    return line;
   };
   const rowsOf = (listing: Listing): HTMLTableRowElement[] => [...listing.prefixes.map(folderRow), ...listing.objects.map(fileRow)];
   const first = rowsOf(page);
@@ -105,7 +117,7 @@ export async function objects(screen: Screen, bucket: string, prefix: string, cu
   const list = el(
     "section",
     { class: "card flush" },
-    first.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], first),
+    first.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag", "Actions"], first),
     first.length === 0 && next === null ? null : paging,
   );
   /** Whether the end of the list is within a screen of being seen. */

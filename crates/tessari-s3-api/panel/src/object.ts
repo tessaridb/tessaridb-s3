@@ -7,6 +7,7 @@ import { confirmation } from "./confirm.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
 import { icon } from "./icons.ts";
 import { ignored, readDetail } from "./models.ts";
+import { deleteRefusal } from "./object-delete.ts";
 import { facts, pairs } from "./object-facts.ts";
 import { format } from "./route.ts";
 import { failed, head, loading, type Screen } from "./screen.ts";
@@ -61,9 +62,7 @@ export async function object(screen: Screen, bucket: string, key: string): Promi
             screen.signIn();
             return null;
           }
-          return done.status === 412
-            ? { ...done, message: "This object changed since you opened it, so it was not deleted." }
-            : done;
+          return deleteRefusal(done);
         },
         () => {
           fill(asking);

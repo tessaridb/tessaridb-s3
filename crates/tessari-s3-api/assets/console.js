@@ -559,6 +559,8 @@
     trash: ["M4 7h16", "M9.5 7V4.5h5V7", "M6.5 7l1 13h9l1-13", "M10 11v5.5", "M14 11v5.5"],
     plus: ["M12 5v14", "M5 12h14"],
     close: ["M6 6l12 12", "M18 6L6 18"],
+    info: [ring(12, 12, 9), "M12 11v5", "M12 7.5h.01"],
+    copy: [box(8, 8, 13, 13, 2), "M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"],
     users: [ring(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6", "M16 4.5a3.5 3.5 0 0 1 0 7", "M18 14c2 .6 3 2.8 3 6"],
     chevron: ["M9.5 6l6 6-6 6"],
     node: [box(3, 4, 18, 7, 2), box(3, 13, 18, 7, 2), "M7 7.5h.01", "M7 16.5h.01"],
@@ -1494,6 +1496,21 @@
     );
   }
 
+  // src/object-delete.ts
+  //! What a refused delete of one object tells the operator. The delete is
+  //! conditional on the ETag they saw, so a refusal usually means the object moved
+  //! on — and that is worth saying in words rather than as a status.
+  function deleteRefusal(failure) {
+    switch (failure.status) {
+      case 412:
+        return { ...failure, message: "This object changed since you saw it, so it was not deleted." };
+      case 404:
+        return { ...failure, message: "This object is already gone." };
+      default:
+        return failure;
+    }
+  }
+
   // src/file-kind.ts
   //! What kind of file a key holds, read from the content type its write stored,
   //! so a listing can say "image" or "archive" without opening the object.
@@ -1599,7 +1616,7 @@
               screen.signIn();
               return null;
             }
-            return done.status === 412 ? { ...done, message: "This object changed since you opened it, so it was not deleted." } : done;
+            return deleteRefusal(done);
           },
           () => {
             fill(asking);
@@ -1619,6 +1636,61 @@
       el("section", { class: "card flush" }, el("h2", {}, "User metadata"), pairs("User metadata", detail.metadata)),
       el("section", { class: "card flush" }, el("h2", {}, "Checksums"), pairs("Stored checksums", detail.checksums))
     );
+  }
+
+  // src/object-actions.ts
+  //! A key's row actions in the listing, as icon buttons: its details beside the
+  //! list, a download (recorded by the server), the key copied, and a delete that
+  //! only goes through while the object is still the version listed — the listed
+  //! ETag is the condition, so a rewrite in between is refused.
+  function objectActions(screen, bucket2, object2, line, details, gone) {
+    const where = `/buckets/${encodeURIComponent(bucket2)}/object`;
+    const info = iconAction("info", "Details", `Details of ${object2.key}`);
+    const download = iconAction("download", "Download", `Download ${object2.key}`);
+    const copy = iconAction("copy", "Copy key", `Copy the key ${object2.key}`);
+    const remove = iconAction("trash", "Delete…", `Delete ${object2.key}`, "danger");
+    info.addEventListener("click", details);
+    download.addEventListener("click", () => {
+      location.assign(`${path(`${where}/content`)}${search([["key", object2.key]])}`);
+    });
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(object2.key);
+        announce(`Copied the key ${object2.key}.`);
+      } catch {
+        announce("Copying is not allowed here; open the object's page and copy the key by hand.");
+      }
+    });
+    remove.addEventListener("click", () => {
+      const close = open(
+        line,
+        confirmation(
+          `delete-${line.rowIndex}`,
+          mono(`${bucket2}/${object2.key}`),
+          `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
+          "Delete object",
+          async (reason) => {
+            const done = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done.ok) {
+              const shown = settle(screen, done);
+              return shown === null ? null : deleteRefusal(shown);
+            }
+            close();
+            const beside = (line.nextElementSibling ?? line.previousElementSibling)?.querySelector("a.name");
+            line.remove();
+            gone();
+            beside?.focus();
+            announce(`Deleted ${object2.key} from ${bucket2}.`);
+            return null;
+          },
+          () => {
+            close();
+            remove.focus();
+          }
+        )
+      );
+    });
+    return [info, download, copy, remove];
   }
 
   // src/object-pane.ts
@@ -1700,7 +1772,7 @@
     const page = answer.value;
     const here = (key) => format({ kind: "objects", bucket: bucket2, prefix, cursor, key });
     const links = /* @__PURE__ */ new Map();
-    const folderRow = (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "");
+    const folderRow = (folder) => row(el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2, prefix: folder, cursor: null, key: null }) }, icon("folder"), mono(folder.slice(prefix.length))), "Folder", "", "", "", "");
     const fileRow = (object2) => {
       const kind = kindOf(object2.contentType);
       const link = el("a", { class: "name", href: here(object2.key), "data-key": object2.key }, icon(kind.icon), mono(object2.key.slice(prefix.length)));
@@ -1711,13 +1783,24 @@
         }
       });
       links.set(object2.key, link);
-      return row(
+      const buttons = el("div", { class: "actions" });
+      const line = row(
         link,
         el("span", { title: object2.contentType ?? "No content type was stored" }, kind.label),
         el("span", { title: `${object2.size.toLocaleString()} bytes` }, size(object2.size)),
         moment(object2.modified),
-        mono(object2.etag)
+        // The full ETag is in the details; eight hex digits tell two versions apart at a glance.
+        el("span", { title: object2.etag }, mono(object2.etag.length > 12 ? `${object2.etag.slice(0, 9)}…` : object2.etag)),
+        buttons
       );
+      const forget = () => {
+        links.delete(object2.key);
+        if (shown === object2.key) {
+          select(null);
+        }
+      };
+      buttons.append(...objectActions(screen, bucket2, object2, line, () => select(object2.key), forget));
+      return line;
     };
     const rowsOf = (listing) => [...listing.prefixes.map(folderRow), ...listing.objects.map(fileRow)];
     const first = rowsOf(page);
@@ -1741,7 +1824,7 @@
     const list2 = el(
       "section",
       { class: "card flush" },
-      first.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag"], first),
+      first.length === 0 ? nothing : table(`Keys under ${prefix === "" ? "the bucket" : prefix}`, ["Name", "Type", "Size", "Last modified", "ETag", "Actions"], first),
       first.length === 0 && next2 === null ? null : paging
     );
     const near = () => paging.isConnected && paging.getBoundingClientRect().top < window.innerHeight * 2;
