@@ -20,11 +20,12 @@ TessariDB cluster.
 </div>
 
 > [!NOTE]
-> **It stores and lists objects on one node, including objects uploaded in parts.** The server
-> verifies SigV4 signatures, keeps buckets and object metadata in TessariDB —
+> **It stores and lists objects on one node or across a cluster, including objects uploaded in parts.**
+> The server verifies SigV4 signatures, keeps buckets and object metadata in TessariDB —
 > objects up to 128 KiB inline, larger ones (up to 5 GiB per PUT) in verified
-> data files on the node's drive — and answers every operation it does not
-> implement `NotImplemented`.
+> data files on the node's drive, or on a cluster erasure-coded as k + m shards across
+> the nodes, acknowledged on the write quorum and healed in the background — and answers
+> every operation it does not implement `NotImplemented`.
 > There is no release and no image. Apart from the
 > [Status](#status) section and the items marked as tested below, this page
 > describes what the project is for, not a working system.
@@ -73,7 +74,7 @@ claims it; the two marked **tested** already are:
 | | |
 |---|---|
 | Stage | pre-alpha |
-| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented` |
+| Server | SigV4 (header, presigned, aws-chunked with trailers); buckets and object metadata in TessariDB, objects ≤ 128 KiB inline and larger ones in data files (BLAKE3 per 1 MiB block, verified on every read): CreateBucket, HeadBucket, DeleteBucket, ListBuckets, GetBucketLocation, PutObject, CopyObject (up to 5 GiB, COPY/REPLACE metadata, copy-source conditions, a checksum recomputed and checked), GetObject, HeadObject, GetObjectTagging (always the empty set: nothing here writes tags), DeleteObject, DeleteObjects, ListObjectsV2, ListObjects (byte order, delimiter roll-up, authenticated continuation tokens, `encoding-type=url`), CreateMultipartUpload, UploadPart, UploadPartCopy (a range or all of a source), ListParts, AbortMultipartUpload, CompleteMultipartUpload (multipart ETag, full-object or composite checksum; reads across parts, Range and `partNumber`), ListMultipartUploads (by key and initiation, key and upload-id markers, delimiter roll-up); every other operation `NotImplemented`; on a cluster (`TESSARIDB_S3_ERASURE`): RS(k, m) shards one per node, write quorum k (k + 1 when k = m), reads from any k verified shards, background healing, the internal surface over mutual TLS when configured — tested with a node killed mid-write and mid-read and the metadata leader killed |
 | Releases | none |
 | Licence | BUSL-1.1 (see [Licence](#licence)) |
 
