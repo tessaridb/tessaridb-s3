@@ -4,7 +4,7 @@
 import { call } from "./api.ts";
 import { el, fill, mono, row, table } from "./dom.ts";
 import { icon, type IconName } from "./icons.ts";
-import { readStatus, type Backlog } from "./models.ts";
+import { readStatus, type Backlog, type Member } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, type Screen } from "./screen.ts";
 
@@ -24,7 +24,23 @@ function healing(heal: Backlog | null): HTMLElement {
     return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
   }
   const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
-  return tile("pulse", "Healing", counted, el("span", { class: "chip warn" }, "objects waiting — members heal them in the background"));
+  return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
+}
+
+/** Whether a member answered just now, as text and colour. */
+function state(member: Member): HTMLElement {
+  return member.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
+}
+
+/** The Members tile: how many are registered and, when any is silent, how many answer. */
+function membersTile(members: readonly Member[] | null): HTMLElement {
+  if (members === null) {
+    return tile("members", "Members", "—", "No cluster");
+  }
+  const answering = members.filter((member) => member.answering).length;
+  return answering === members.length
+    ? tile("members", "Members", String(members.length), "Registered and answering")
+    : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
 }
 
 export async function status(screen: Screen): Promise<void> {
@@ -43,7 +59,7 @@ export async function status(screen: Screen): Promise<void> {
       ? null
       : node.members.length === 0
         ? empty("No members are registered yet.")
-        : table("Cluster members", ["Member", "Internal address"], node.members.map((member) => row(mono(member.node), mono(member.endpoint))));
+        : table("Cluster members", ["Member", "State", "Internal address"], node.members.map((member) => row(mono(member.node), state(member), mono(member.endpoint))));
   fill(
     screen.main,
     head(TITLE, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -51,7 +67,7 @@ export async function status(screen: Screen): Promise<void> {
       "div",
       { class: "tiles" },
       tile("node", "Node", node.node === null ? "Single" : mono(node.node), node.node === null ? "Not a cluster member" : "This node's name in the cluster"),
-      tile("members", "Members", node.members === null ? "—" : String(node.members.length), node.members === null ? "No cluster" : "Registered in the metadata store"),
+      membersTile(node.members),
       tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
       healing(node.heal_backlog),
       tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),

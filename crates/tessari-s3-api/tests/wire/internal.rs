@@ -146,6 +146,27 @@ async fn a_shard_is_stored_read_by_range_and_removed() {
 }
 
 #[tokio::test]
+async fn the_health_route_answers_the_cluster_and_refuses_anyone_else() {
+    let (state, dir) = internal();
+    assert_eq!(
+        sent(&state, "GET", "/internal/v1/health", Vec::new()).await,
+        (204, Vec::new())
+    );
+    let other = "another-secret-0123456789abcdef0123";
+    let (status, bytes) = send(
+        &state,
+        signed("GET", "/internal/v1/health", NOW, other, Vec::new()),
+    )
+    .await;
+    assert_eq!(status, 401);
+    assert_eq!(
+        String::from_utf8(bytes).expect("utf-8"),
+        r#"{"code":"unauthorized","message":"the request is not signed by the cluster"}"#
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
 async fn a_request_the_cluster_did_not_sign_is_refused_and_writes_nothing() {
     let (state, dir) = internal();
     let put = shard(0, "?block=64&size=160");

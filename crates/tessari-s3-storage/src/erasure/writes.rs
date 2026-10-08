@@ -35,31 +35,25 @@ pub(crate) struct ErasureWrites {
 }
 
 impl ErasureWrites {
-    /// The data plane of the node `settings` describe.
-    ///
-    /// # Errors
-    /// [`Error::Peer`] when the peer client cannot be built.
+    /// The data plane of the node `settings` describe, reaching the other nodes through `peers`.
     pub(crate) fn new(
         settings: &ClusterSettings,
         pool: MetaPool,
         cluster: ClusterService,
         shards: ShardService,
-    ) -> Result<Self> {
-        Ok(Self {
+        peers: RemoteShards,
+    ) -> Self {
+        Self {
             node: settings.node.clone(),
             code: settings.code,
             key: PlacementKey::derive(settings.secret.expose().as_bytes()),
             cluster,
             shards,
-            peers: RemoteShards::new(
-                settings.node.clone(),
-                settings.secret.clone(),
-                settings.tls.as_ref(),
-            )?,
+            peers,
             sets: TessariShardSets::new(pool),
             stall: Duration::from_secs(SHARD_STALL_SECS),
             layout: OnceCell::new(),
-        })
+        }
     }
 
     pub(super) const fn code(&self) -> Code {

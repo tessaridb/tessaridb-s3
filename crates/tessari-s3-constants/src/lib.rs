@@ -61,6 +61,9 @@ pub const INTERNAL_MAX_SKEW_SECS: i64 = 5 * 60;
 /// The internal shard routes: `{INTERNAL_SHARDS_PATH}/{data id, 32 lowercase hex}/{shard index}`.
 pub const INTERNAL_SHARDS_PATH: &str = "/internal/v1/shards";
 
+/// The internal route a node answers with 204 when the cluster asks whether it is up.
+pub const INTERNAL_HEALTH_PATH: &str = "/internal/v1/health";
+
 /// The header naming the node that sent an internal request.
 pub const INTERNAL_NODE_HEADER: &str = "x-tessari-node";
 
@@ -105,6 +108,10 @@ pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 
 /// Milliseconds of back-off per attempt between schema retries (20, 40, 60 … ms).
 pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
+
+/// Times a node proposes the first layout when the store answers `retry` (another proposal committed after this
+/// one's snapshot): the next attempt sees the committed layout and reads it back.
+pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
 
 /// Largest object stored inline in its metadata record, in bytes (128 KiB, ADR-0002 §1). Larger objects go to the
 /// data store.
@@ -165,6 +172,9 @@ pub const CONSOLE_REASON_MAX_CHARS: usize = 500;
 
 /// How far the console counts the heal backlog before it says "more".
 pub const CONSOLE_BACKLOG_COUNT_MAX: usize = 1_000;
+
+/// Seconds the console waits for a member to answer before it shows that member as not answering.
+pub const CONSOLE_MEMBER_PROBE_SECS: u64 = 2;
 
 /// Object keys (and common prefixes) on a console listing page when the request does not say.
 pub const CONSOLE_OBJECTS_PAGE_DEFAULT: usize = 100;

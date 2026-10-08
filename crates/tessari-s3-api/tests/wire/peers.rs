@@ -1,6 +1,6 @@
 //! One node calling another over a real local socket: [`RemoteShards`] against the internal router — a shard stored,
 //! read whole and by block range, and removed; a caller without the cluster secret refused; and a peer that does not
-//! answer reported as unavailable within the call's budget.
+//! answer reported as unavailable within the call's budget; a probe answered by the cluster only.
 
 use std::time::Duration;
 
@@ -160,4 +160,37 @@ async fn a_peer_that_does_not_answer_is_unavailable_within_the_budget() {
             reason: "the connection could not be opened"
         }))
     );
+}
+
+#[tokio::test]
+async fn a_probe_is_answered_by_the_cluster_only_and_bounded_by_its_budget() {
+    let (address, server, dir) = serving().await;
+    assert_eq!(caller(CLUSTER_SECRET).probe(&address, BUDGET).await, Ok(()));
+    assert_eq!(
+        caller("another-secret-0123456789abcdef0123")
+            .probe(&address, BUDGET)
+            .await,
+        Err(Error::PeerRefused { status: 401 })
+    );
+    server.abort();
+    std::fs::remove_dir_all(dir).ok();
+    let silent = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("a free port");
+    let address = silent.local_addr().expect("bound").to_string();
+    let holder = tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((socket, _)) = silent.accept().await {
+            held.push(socket);
+        }
+    });
+    assert_eq!(
+        caller(CLUSTER_SECRET)
+            .probe(&address, Duration::from_millis(300))
+            .await,
+        Err(Error::Peer(PeerError::Unavailable {
+            reason: "no answer within the budget"
+        }))
+    );
+    holder.abort();
 }

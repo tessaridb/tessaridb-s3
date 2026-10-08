@@ -1,10 +1,16 @@
 //! `GET /api/v1/status`: what this node is — its name in the cluster, the build, the region it signs for — and, on a
-//! cluster member, the registered members and how many objects wait for healing.
+//! cluster member, the registered members with whether each answers now, and how many objects wait for healing.
+
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::State;
+use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
-use tessari_s3_constants::CONSOLE_BACKLOG_COUNT_MAX;
+use tessari_s3_constants::{
+    CONSOLE_BACKLOG_COUNT_MAX, CONSOLE_MEMBER_PROBE_SECS, ERASURE_MAX_WIDTH,
+};
+use tessari_s3_storage::cluster::Member;
 
 use super::ConsoleState;
 use super::error::ConsoleError;
@@ -13,6 +19,8 @@ use super::error::ConsoleError;
 struct MemberView {
     node: String,
     endpoint: String,
+    /// Whether it answered a signed probe just now; this node answers by serving the request.
+    answering: bool,
 }
 
 #[derive(Serialize)]
@@ -38,17 +46,12 @@ pub(super) async fn status(
 ) -> Result<Json<Status>, ConsoleError> {
     let storage = state.storage();
     let members = match state.node() {
-        Some(_) => Some(
-            storage
-                .cluster()
-                .members()
-                .await?
-                .into_iter()
-                .map(|member| MemberView {
-                    node: member.node.as_str().to_owned(),
-                    endpoint: member.endpoint,
-                })
-                .collect(),
+        Some(this) => Some(
+            stream::iter(storage.cluster().members().await?)
+                .map(|member| view(&state, this, member))
+                .buffered(usize::from(ERASURE_MAX_WIDTH))
+                .collect()
+                .await,
         ),
         None => None,
     };
@@ -68,4 +71,22 @@ pub(super) async fn status(
         members,
         heal_backlog,
     }))
+}
+
+/// `member` as the console shows it: this node answers by serving the request, every other member is probed.
+async fn view(state: &ConsoleState, this: &str, member: Member) -> MemberView {
+    let answering = member.node.as_str() == this
+        || state
+            .storage()
+            .cluster()
+            .answers(
+                &member.endpoint,
+                Duration::from_secs(CONSOLE_MEMBER_PROBE_SECS),
+            )
+            .await;
+    MemberView {
+        node: member.node.as_str().to_owned(),
+        endpoint: member.endpoint,
+        answering,
+    }
 }

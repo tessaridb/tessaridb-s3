@@ -136,7 +136,7 @@ With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator consol
 and sign in with the root access key. The page needs nothing from the network — no font, no script from anywhere
 else — and runs only its own script under a strict content security policy. Everything it does goes through the
 JSON API under `/api/v1`, which can be called directly. After signing in (`POST /api/v1/session`) an operator can read the node's
-status — on a cluster member its members and how many objects wait for healing — list, create and delete buckets,
+status — on a cluster member its members, whether each answers, and how many objects wait for healing — list, create and delete buckets,
 list a bucket a page at a time, describe an object, download it (always as an attachment) and delete it under the
 ETag they saw: a changed object answers `412` and is kept. Every change and every download is recorded with the
 signed-in key and the operator's reason, required to delete; `GET /api/v1/actions` reads that record newest first.

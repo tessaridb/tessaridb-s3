@@ -8,7 +8,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::stream::{BoxStream, Stream, StreamExt};
 use tessari_s3_constants::{
-    INTERNAL_DATE_HEADER, INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH, INTERNAL_SIGNATURE_HEADER,
+    INTERNAL_DATE_HEADER, INTERNAL_HEALTH_PATH, INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH,
+    INTERNAL_SIGNATURE_HEADER,
 };
 use tessari_s3_core::internal::{InternalRequest, sign};
 use tessari_s3_infrastructure::InternalTls;
@@ -111,6 +112,24 @@ impl RemoteShards {
                 PeerMethod::Delete,
                 endpoint,
                 &path(shard),
+                PeerBody::Empty,
+                budget,
+            )
+            .await?;
+        answered(&reply, 204)
+    }
+
+    /// Asks the node at `endpoint` whether it is up: it answers only a request the cluster signed, so an answer within
+    /// `budget` means it is serving its internal surface and shares this node's secret.
+    ///
+    /// # Errors
+    /// [`Error::PeerRefused`] or [`Error::Peer`].
+    pub async fn probe(&self, endpoint: &str, budget: Duration) -> Result<()> {
+        let reply = self
+            .call(
+                PeerMethod::Get,
+                endpoint,
+                INTERNAL_HEALTH_PATH,
                 PeerBody::Empty,
                 budget,
             )

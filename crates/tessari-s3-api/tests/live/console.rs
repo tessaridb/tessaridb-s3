@@ -376,6 +376,16 @@ async fn objects_are_listed_described_downloaded_and_deleted_under_their_etag() 
     );
 }
 
+/// Whether each member, in the order the status lists them, answered.
+fn answering(status: &Value) -> Vec<bool> {
+    status["members"]
+        .as_array()
+        .expect("members")
+        .iter()
+        .map(|m| m["answering"].as_bool().expect("answering"))
+        .collect()
+}
+
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn a_members_status_names_its_members_and_its_heal_backlog() {
@@ -392,6 +402,17 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
         .map(|m| m["node"].as_str().expect("node"))
         .collect();
     assert_eq!(members, vec!["n1", "n2", "n3", "n4", "n5", "n6"]);
+    assert_eq!(answering(&status), vec![true; 6], "{status}");
+    // n1 is registered at an address nothing listens on: it answers because it is the node answering this request.
+    member.peers[1].server.abort();
+    let status = send(&member.console, "GET", "/api/v1/status", Some(&token), None)
+        .await
+        .json();
+    assert_eq!(
+        answering(&status),
+        vec![true, true, false, true, true, true],
+        "{status}"
+    );
     assert_eq!(
         (status["node"].as_str(), status["erasure"].as_str()),
         (Some("n1"), Some("4+2"))

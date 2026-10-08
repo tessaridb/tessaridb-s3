@@ -1,12 +1,17 @@
 //! Topology rules: a node registers itself, and the first layout is the one every node computes from the same
 //! registrations — whichever proposal commits first is the layout, and a node that lost the race reads it back.
 
+use std::time::Duration;
+
+use tessari_s3_constants::LAYOUT_PROPOSE_ATTEMPTS;
 use tessari_s3_core::erasure::{Code, Layout};
+use tessari_s3_infrastructure::tessaridb::RefusalClass;
 use tessari_s3_types::NodeId;
 
 use super::entity::LayoutEntity;
 use super::repository::{ClusterRepository, Proposed};
 use super::tessaridb::TessariCluster;
+use crate::peers::RemoteShards;
 use crate::{Error, Result};
 
 /// A registered node and where its internal surface answers.
@@ -22,13 +27,36 @@ pub struct Member {
 #[derive(Clone)]
 pub struct ClusterService {
     repository: TessariCluster,
+    /// The client reaching other members, on a cluster member only.
+    peers: Option<RemoteShards>,
 }
 
 impl ClusterService {
     /// The service over `repository`.
     #[must_use]
     pub const fn new(repository: TessariCluster) -> Self {
-        Self { repository }
+        Self {
+            repository,
+            peers: None,
+        }
+    }
+
+    /// The service of a cluster member, reaching the other members through `peers`.
+    #[must_use]
+    pub(crate) fn with_peers(self, peers: RemoteShards) -> Self {
+        Self {
+            peers: Some(peers),
+            ..self
+        }
+    }
+
+    /// Whether the member at `endpoint` answers a signed probe within `budget`. A node outside a cluster reaches
+    /// nobody, so it is always `false` there.
+    pub async fn answers(&self, endpoint: &str, budget: Duration) -> bool {
+        match &self.peers {
+            Some(peers) => peers.probe(endpoint, budget).await.is_ok(),
+            None => false,
+        }
     }
 
     /// Registers `node` at `endpoint`, or refreshes its registration.
@@ -95,7 +123,7 @@ async fn layout_of(repository: &impl ClusterRepository, code: Code) -> Result<Op
             .map(|node| node.as_str().to_owned())
             .collect(),
     };
-    match repository.propose(&entity).await? {
+    match propose(repository, &entity).await? {
         Proposed::Created => Ok(Some(proposal)),
         // Another node's proposal committed first; it is the layout, whatever this node computed.
         Proposed::Exists => match repository.layout(FIRST_VERSION).await? {
@@ -105,6 +133,24 @@ async fn layout_of(repository: &impl ClusterRepository, code: Code) -> Result<Op
                 reason: "refused as existing, then not found",
             }),
         },
+    }
+}
+
+/// Proposes `entity`, again when the store answers `retry`: another node's proposal committed after this one's
+/// snapshot, and the next attempt is answered that the layout exists. Bounded, so a store that keeps answering
+/// `retry` is reported rather than waited on.
+async fn propose(repository: &impl ClusterRepository, entity: &LayoutEntity) -> Result<Proposed> {
+    let mut attempt: u32 = 1;
+    loop {
+        match repository.propose(entity).await {
+            Err(Error::Meta(error))
+                if error.is_class(RefusalClass::Retry) && attempt < LAYOUT_PROPOSE_ATTEMPTS =>
+            {
+                tracing::debug!(attempt, error = %error, "layout proposal contended; proposing again");
+                attempt = attempt.saturating_add(1);
+            }
+            outcome => return outcome,
+        }
     }
 }
 

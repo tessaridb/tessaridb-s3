@@ -15,6 +15,7 @@ use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
+use crate::peers::RemoteShards;
 use crate::shards::ShardService;
 
 /// Every storage service, built over one metadata pool.
@@ -59,12 +60,19 @@ impl Storage {
         cluster: &ClusterSettings,
     ) -> Result<Self> {
         let mut storage = Self::new(pool.clone(), data_dir);
+        let peers = RemoteShards::new(
+            cluster.node.clone(),
+            cluster.secret.clone(),
+            cluster.tls.as_ref(),
+        )?;
+        storage.cluster = storage.cluster.clone().with_peers(peers.clone());
         let writes = ErasureWrites::new(
             cluster,
             pool.clone(),
             storage.cluster.clone(),
             storage.shards.clone(),
-        )?;
+            peers,
+        );
         storage.objects = storage.objects.clone().clustered(Arc::new(writes));
         storage.multipart =
             MultipartService::new(TessariMultipart::new(pool), storage.objects.clone());
@@ -97,7 +105,7 @@ impl Storage {
         &self.multipart
     }
 
-    /// Cluster topology: registered nodes and the layout.
+    /// Cluster topology: registered nodes, whether they answer, and the layout.
     #[must_use]
     pub const fn cluster(&self) -> &ClusterService {
         &self.cluster

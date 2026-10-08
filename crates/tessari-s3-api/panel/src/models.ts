@@ -3,7 +3,7 @@
 //! where its bytes become values, so nothing is cast — each reader returns the
 //! typed value or null.
 
-export type Member = { readonly node: string; readonly endpoint: string };
+export type Member = { readonly node: string; readonly endpoint: string; readonly answering: boolean };
 export type Backlog = { readonly listed: number; readonly more: boolean };
 export type Status = {
   readonly version: string;
@@ -77,7 +77,9 @@ function strings(value: unknown): Record<string, string> | null {
 }
 
 const member = (v: unknown): Member | null =>
-  record(v) && text(v["node"]) && text(v["endpoint"]) ? { node: v["node"], endpoint: v["endpoint"] } : null;
+  record(v) && text(v["node"]) && text(v["endpoint"]) && typeof v["answering"] === "boolean"
+    ? { node: v["node"], endpoint: v["endpoint"], answering: v["answering"] }
+    : null;
 
 export function readStatus(v: unknown): Status | null {
   if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {

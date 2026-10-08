@@ -1,4 +1,5 @@
-//! The internal surface: the routes other nodes of the cluster call to store, read and remove this node's shards. It
+//! The internal surface: the routes other nodes of the cluster call to store, read and remove this node's shards,
+//! and to ask whether it is up. It
 //! listens apart from the S3 surface, and every request — an unknown path included — must carry a signature made
 //! with the cluster secret before anything is routed or touched.
 
@@ -12,8 +13,8 @@ pub use serve::serve_internal;
 
 use std::sync::Arc;
 
-use axum::routing::put;
-use tessari_s3_constants::INTERNAL_SHARDS_PATH;
+use axum::routing::{get, put};
+use tessari_s3_constants::{INTERNAL_HEALTH_PATH, INTERNAL_SHARDS_PATH};
 use tessari_s3_storage::Storage;
 use tessari_s3_types::SecretKey;
 
@@ -59,7 +60,7 @@ impl InternalState {
     }
 }
 
-/// The internal router: shard routes behind signature verification, behind an in-flight limit that sheds load.
+/// The internal router: shard routes and the health route behind signature verification, behind an in-flight limit that sheds load.
 pub fn internal_router(state: InternalState) -> axum::Router {
     let limit = tower::ServiceBuilder::new()
         .layer(axum::error_handling::HandleErrorLayer::new(refusal::shed))
@@ -67,6 +68,7 @@ pub fn internal_router(state: InternalState) -> axum::Router {
         .concurrency_limit(state.inner.max_inflight);
     let route = format!("{INTERNAL_SHARDS_PATH}/{{id}}/{{index}}");
     axum::Router::new()
+        .route(INTERNAL_HEALTH_PATH, get(answer))
         .route(
             &route,
             put(shards::put_shard)
@@ -79,4 +81,10 @@ pub fn internal_router(state: InternalState) -> axum::Router {
         ))
         .layer(limit)
         .with_state(state)
+}
+
+/// `GET {INTERNAL_HEALTH_PATH}`: reached only through the signature check, so a 204 tells the calling node that this
+/// one is up and shares its cluster secret, and tells anyone else nothing.
+async fn answer() -> axum::http::StatusCode {
+    axum::http::StatusCode::NO_CONTENT
 }

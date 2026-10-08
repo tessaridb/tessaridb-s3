@@ -37,7 +37,7 @@
     }
     return out;
   }
-  var member = (v) => record(v) && text(v["node"]) && text(v["endpoint"]) ? { node: v["node"], endpoint: v["endpoint"] } : null;
+  var member = (v) => record(v) && text(v["node"]) && text(v["endpoint"]) && typeof v["answering"] === "boolean" ? { node: v["node"], endpoint: v["endpoint"], answering: v["answering"] } : null;
   function readStatus(v) {
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
       return null;
@@ -802,7 +802,17 @@
       return tile("pulse", "Healing", el("span", { class: "chip ok" }, "Healthy"), "No objects are waiting to be healed.");
     }
     const counted = heal.more ? `> ${heal.listed.toLocaleString()}` : heal.listed.toLocaleString();
-    return tile("pulse", "Healing", counted, el("span", { class: "chip warn" }, "objects waiting — members heal them in the background"));
+    return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
+  }
+  function state(member2) {
+    return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
+  }
+  function membersTile(members) {
+    if (members === null) {
+      return tile("members", "Members", "—", "No cluster");
+    }
+    const answering = members.filter((member2) => member2.answering).length;
+    return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
   }
   async function status(screen) {
     loading(screen, TITLE4, "the node's status");
@@ -815,7 +825,7 @@
       return;
     }
     const node = answer.value;
-    const members = node.members === null ? null : node.members.length === 0 ? empty("No members are registered yet.") : table("Cluster members", ["Member", "Internal address"], node.members.map((member2) => row(mono(member2.node), mono(member2.endpoint))));
+    const members = node.members === null ? null : node.members.length === 0 ? empty("No members are registered yet.") : table("Cluster members", ["Member", "State", "Internal address"], node.members.map((member2) => row(mono(member2.node), state(member2), mono(member2.endpoint))));
     fill(
       screen.main,
       head(TITLE4, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -823,7 +833,7 @@
         "div",
         { class: "tiles" },
         tile("node", "Node", node.node === null ? "Single" : mono(node.node), node.node === null ? "Not a cluster member" : "This node's name in the cluster"),
-        tile("members", "Members", node.members === null ? "—" : String(node.members.length), node.members === null ? "No cluster" : "Registered in the metadata store"),
+        membersTile(node.members),
         tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
         healing(node.heal_backlog),
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),

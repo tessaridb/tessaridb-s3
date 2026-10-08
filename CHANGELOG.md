@@ -48,6 +48,13 @@ section records which TessariDB version its metadata runs on.
   It loads nothing from off the node, runs under a strict content security policy, writes every name it shows as
   text, and does everything through the console API. The page's routes need no session (they carry no data) and
   are limited per client address.
+- The console's overview says which cluster members answer: `GET /api/v1/status` gives each member an `answering`
+  flag — the node itself, and every other member that answered a probe signed with the cluster secret within two
+  seconds — and the page shows it per member and as "N of M answering". Members answer that probe on the internal
+  surface at `GET /internal/v1/health`, behind the same signature check as the shard routes.
+- Nodes starting together agree on the first layout again: a node whose proposal was refused because another
+  node's committed after it began proposes again and reads that layout back (at most three times), instead of
+  failing with the store's `retry` refusal.
 - One node at a time heals or reclaims an object: each takes an expiring claim on the object's data in TessariDB
   first, so healers no longer duplicate work and a heal can no longer write a shard back behind a reclaim. Shard
   bytes left with no record of their object (older than the reclamation grace) are swept by the reclaimer.

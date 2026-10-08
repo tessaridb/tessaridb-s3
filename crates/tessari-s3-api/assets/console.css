@@ -741,6 +741,10 @@ tr.asking:hover td {
   color: var(--warn);
 }
 
+.chip.bad {
+  color: var(--bad);
+}
+
 /* ────────────────────────────────────────────────────────────── controls ── */
 
 .field {
