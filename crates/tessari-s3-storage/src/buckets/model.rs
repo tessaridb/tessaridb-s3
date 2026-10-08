@@ -1,9 +1,11 @@
 //! A bucket as the rest of the server sees it.
 
 use tessari_s3_core::authz::{BucketResource, SpaceName};
+use tessari_s3_core::quota::Quota;
 use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
+
 use crate::{Error, Result};
 
 /// One bucket.
@@ -21,6 +23,8 @@ pub struct Bucket {
     pub space: SpaceName,
     /// The user who created it; `None` for the root credential.
     pub creator: Option<String>,
+    /// Its limits, set by an operator; none by default.
+    pub quota: Quota,
 }
 
 impl Bucket {
@@ -48,6 +52,19 @@ impl TryFrom<BucketEntity> for Bucket {
             reason: "space_name is not a valid space name",
         })?;
         let (seconds, nanos) = entity.created;
+        let limit = |stored: Option<i64>| {
+            stored
+                .map(u64::try_from)
+                .transpose()
+                .map_err(|_| Error::Malformed {
+                    record: "bucket",
+                    reason: "a quota limit is negative",
+                })
+        };
+        let quota = Quota {
+            max_bytes: limit(entity.max_bytes)?,
+            max_objects: limit(entity.max_objects)?,
+        };
         Ok(Self {
             name,
             created: Timestamp { seconds, nanos },
@@ -55,6 +72,7 @@ impl TryFrom<BucketEntity> for Bucket {
             incarnation: entity.incarnation,
             space,
             creator: entity.creator,
+            quota,
         })
     }
 }

@@ -1,6 +1,7 @@
 //! Bucket rules: creating, finding, listing and removing buckets.
 
 use tessari_s3_core::authz::{SpaceName, Visible};
+use tessari_s3_core::quota::Quota;
 use tessari_s3_types::BucketName;
 
 use super::model::Bucket;
@@ -68,6 +69,29 @@ impl BucketService {
             .await?
             .map(Bucket::try_from)
             .transpose()
+    }
+
+    /// Sets `name`'s limits, replacing both; `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_quota(&self, name: &BucketName, quota: Quota) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        let stored = |limit: Option<u64>| {
+            limit
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| crate::Error::Malformed {
+                    record: "bucket",
+                    reason: "a quota limit above what the store holds",
+                })
+        };
+        self.repository
+            .set_limits(name, stored(quota.max_bytes)?, stored(quota.max_objects)?)
+            .await?;
+        Ok(true)
     }
 
     /// The buckets `visible` covers, in byte order of their names.

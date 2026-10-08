@@ -1,6 +1,6 @@
 //! A `buckets` record exactly as stored.
 
-use tessari_s3_infrastructure::tessaridb::Value;
+use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
 use crate::{Error, Result};
 
@@ -19,6 +19,10 @@ pub struct BucketEntity {
     pub space_name: String,
     /// The user who created it; absent for the root credential's buckets.
     pub creator: Option<String>,
+    /// The byte limit an operator set; absent for none.
+    pub max_bytes: Option<i64>,
+    /// The object limit an operator set; absent for none.
+    pub max_objects: Option<i64>,
 }
 
 impl BucketEntity {
@@ -59,6 +63,11 @@ impl BucketEntity {
             Some(Value::String(creator)) => Some(creator.clone()),
             Some(_) => return Err(malformed("creator")),
         };
+        let limit = |field: &'static str| match fields.get(field) {
+            None | Some(Value::None) => Ok(None),
+            Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
+            Some(_) => Err(malformed(field)),
+        };
         Ok(Self {
             name,
             created,
@@ -66,6 +75,8 @@ impl BucketEntity {
             incarnation,
             space_name,
             creator,
+            max_bytes: limit("max_bytes")?,
+            max_objects: limit("max_objects")?,
         })
     }
 }

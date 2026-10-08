@@ -11,5 +11,8 @@ mod error;
 pub mod internal;
 pub mod multipart;
 pub mod objects;
+pub mod quota;
+#[cfg(test)]
+mod quota_tests;
 
 pub use error::{Error, Result};

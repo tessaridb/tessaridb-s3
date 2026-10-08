@@ -211,3 +211,41 @@ async fn a_body_that_differs_from_its_signed_hash_is_bad_digest_and_creates_noth
     let head = call(&state, "HEAD", "/tampered", vec![], b"").await;
     assert_eq!(head.status, 404, "nothing was created");
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_quota_is_kept_on_the_bucket_and_cleared_by_setting_none() {
+    use tessari_s3_core::quota::Quota;
+    use tessari_s3_types::BucketName;
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    assert_eq!(
+        call(&state, "PUT", "/limited", vec![], b"").await.status,
+        200
+    );
+    let buckets = state.storage().buckets();
+    let name = BucketName::new("limited").expect("a name");
+    let read = || async {
+        buckets
+            .get(&name)
+            .await
+            .expect("read")
+            .expect("bucket")
+            .quota
+    };
+    assert_eq!(read().await, Quota::default(), "a new bucket has no limit");
+    let limit = Quota {
+        max_bytes: Some(1_000),
+        max_objects: Some(3),
+    };
+    assert!(buckets.set_quota(&name, limit).await.expect("set"));
+    assert_eq!(read().await, limit);
+    let bytes_only = Quota {
+        max_bytes: Some(5),
+        max_objects: None,
+    };
+    assert!(buckets.set_quota(&name, bytes_only).await.expect("set"));
+    assert_eq!(read().await, bytes_only, "None removes that limit");
+    let nowhere = BucketName::new("nowhere").expect("a name");
+    assert!(!buckets.set_quota(&nowhere, limit).await.expect("answered"));
+}

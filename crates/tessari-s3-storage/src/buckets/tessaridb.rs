@@ -1,7 +1,7 @@
 //! Buckets in TessariDB: one `buckets` record per bucket, id = the bucket name; every value is bound.
 
 use tessari_s3_core::authz::{SpaceName, Visible};
-use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, RefusalClass, Value};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 use tessari_s3_types::BucketName;
 
 use super::entity::BucketEntity;
@@ -80,6 +80,28 @@ impl BucketRepository for TessariBuckets {
         single(answers)?
             .map(|value| BucketEntity::from_value(&value))
             .transpose()
+    }
+
+    async fn set_limits(
+        &self,
+        name: &BucketName,
+        max_bytes: Option<i64>,
+        max_objects: Option<i64>,
+    ) -> Result<()> {
+        let limit = |value: Option<i64>| {
+            value.map_or(Value::None, |limit| Value::Number(Number::Integer(limit)))
+        };
+        let mut parameters = name_param(name);
+        parameters.push(("max_bytes".to_owned(), limit(max_bytes)));
+        parameters.push(("max_objects".to_owned(), limit(max_objects)));
+        // `SET`, never the whole record: only the two limits change, and NONE removes the field.
+        self.pool
+            .run(
+                "UPDATE buckets:$name SET max_bytes = $max_bytes, max_objects = $max_objects;",
+                parameters,
+            )
+            .await?;
+        Ok(())
     }
 
     async fn list(&self, visible: &Visible) -> Result<Vec<BucketEntity>> {

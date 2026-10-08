@@ -30,6 +30,14 @@ pub(crate) trait BucketRepository: Send + Sync {
     /// The record of `name`, if any.
     fn get(&self, name: &BucketName) -> impl Future<Output = Result<Option<BucketEntity>>> + Send;
     /// Every bucket record `visible` covers, filtered in the query.
+    /// Sets the stored limits of `name`, an absent one removing that limit; the caller has checked it exists.
+    fn set_limits(
+        &self,
+        name: &BucketName,
+        max_bytes: Option<i64>,
+        max_objects: Option<i64>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;
     /// Whether any object record lies in `name`'s range.
     fn holds_objects(&self, name: &BucketName) -> impl Future<Output = Result<bool>> + Send;
