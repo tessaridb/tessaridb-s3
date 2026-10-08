@@ -19,6 +19,7 @@ use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
 use crate::routes::objects::headers::read_put_headers;
+use crate::routes::quota::Room;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
 
@@ -174,6 +175,7 @@ fn refused(outcome: &Completed) -> Error {
             ErrorCode::BadDigest,
             "the checksum you specified did not match the object's",
         ),
+        Completed::OverQuota => (ErrorCode::InvalidRequest, "bucket quota exceeded"),
         Completed::NotWritten(Written::NoSuchBucket) => (
             ErrorCode::NoSuchBucket,
             "the specified bucket does not exist",
@@ -228,6 +230,15 @@ pub(crate) async fn complete(
             ));
         }
     }
+    let bucket = call.bucket()?;
+    // The object check here; the byte check on the listed parts' total, which only the store adds up.
+    let room = match Room::of(call, bucket).await? {
+        Some(room) => {
+            room.admit(call, bucket, Some(key), 0).await?;
+            room.bytes_left()
+        }
+        None => None,
+    };
     let request = Completion {
         parts: parse(&document)?,
         condition: headers.condition,
@@ -238,8 +249,8 @@ pub(crate) async fn complete(
                 .map(|value| (declared.algorithm, value))
         }),
         size,
+        room,
     };
-    let bucket = call.bucket()?;
     let outcome = call
         .state
         .storage()

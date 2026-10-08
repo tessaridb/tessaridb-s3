@@ -1,4 +1,6 @@
-use crate::quota::{Adding, Exceeded, Held, Quota, admits};
+use crate::authz::{Need, required};
+use crate::dispatch::{Operation, is_implemented};
+use crate::quota::{ADDING, Adding, Exceeded, Held, Quota, adds_to_bucket, admits};
 
 const HELD: Held = Held {
     objects: 9,
@@ -60,4 +62,26 @@ fn a_sum_that_would_overflow_is_over_the_limit() {
         admits(quota, held, adding(u64::MAX, false)),
         Err(Exceeded::Bytes)
     );
+}
+
+#[test]
+fn the_adding_operations_are_implemented_writes_and_only_they_add() {
+    for operation in ADDING {
+        assert!(is_implemented(operation), "{operation:?}");
+        assert_eq!(
+            required(operation).map(|needs| needs.primary),
+            Some(Need::WriteObject),
+            "{operation:?}"
+        );
+        assert!(adds_to_bucket(operation));
+    }
+    assert_eq!(ADDING.len(), 5);
+    for removes in [
+        Operation::DeleteObject,
+        Operation::DeleteObjects,
+        Operation::AbortMultipartUpload,
+        Operation::CreateMultipartUpload,
+    ] {
+        assert!(!adds_to_bucket(removes), "{removes:?}");
+    }
 }

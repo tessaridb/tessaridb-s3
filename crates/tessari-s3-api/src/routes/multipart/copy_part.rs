@@ -17,6 +17,7 @@ use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
 use crate::routes::objects::headers::read_integrity;
 use crate::routes::objects::source;
+use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
 
@@ -74,6 +75,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
             "a part carries at most 5 GiB",
         ));
     }
+    quota::admit(call, bucket, None, length).await?;
     let stream = source::bytes(objects, &object, first, last).await?;
     let uploaded = source::into_file(objects, stream, length).await?;
     let etag = format!("\"{}\"", uploaded.digests.md5_hex);

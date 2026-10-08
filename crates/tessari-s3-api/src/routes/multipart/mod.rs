@@ -17,6 +17,7 @@ use super::objects::headers::{read_integrity, read_put_headers};
 use super::objects::put::{check, declared_length};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, xml_response};
+use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
 
@@ -153,6 +154,7 @@ pub(crate) async fn upload_part(
     if !storage.multipart().exists(bucket, key, id).await? {
         return Err(no_such_upload());
     }
+    quota::admit(call, bucket, None, length).await?;
     let (uploaded, trailer) = data::receive(call, body, length).await?;
     let algorithm = match check(&integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,

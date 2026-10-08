@@ -16,6 +16,7 @@ use super::headers::{Integrity, PutHeaders, read_put_headers};
 use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::empty_response;
+use crate::routes::quota;
 use crate::{Error, Result};
 
 fn header_number(headers: &HeaderMap, name: &str) -> Result<Option<u64>> {
@@ -148,6 +149,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
             "a single PUT carries at most 5 GiB; use a multipart upload",
         ));
     }
+    quota::admit(call, call.bucket()?, Some(key), length).await?;
     match usize::try_from(length) {
         Ok(inline) if inline <= INLINE_OBJECT_MAX => {
             let (data, trailer) = read_inline(call, body, inline).await?;

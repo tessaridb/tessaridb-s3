@@ -13,6 +13,7 @@ pub mod buckets;
 pub mod listing;
 pub mod multipart;
 pub mod objects;
+mod quota;
 
 /// Runs the handler for `operation`.
 ///

@@ -18,6 +18,7 @@ use super::put::not_written;
 use super::{data, source};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
+use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
 
@@ -103,6 +104,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             "The specified copy source is larger than the maximum allowable size for a copy source: 5368709120",
         ));
     }
+    quota::admit(call, bucket, Some(key), object.size).await?;
     let algorithm = algorithm_for(call.headers, &object)?;
     let (content, digests) = copy_bytes(objects, &object).await?;
     let value = digests.value(algorithm).to_owned();

@@ -10,7 +10,7 @@ use crate::{IGNORED, Seen, call, call_with, fresh};
 
 const MIB: usize = 1 << 20;
 
-fn md5_of(document: &str) -> String {
+pub(crate) fn md5_of(document: &str) -> String {
     let mut hashes = Hashes::new();
     hashes.update(document.as_bytes());
     STANDARD.encode(hashes.finish().md5)

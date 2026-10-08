@@ -202,6 +202,9 @@ impl MultipartService {
         if request.size.is_some_and(|size| size != assembled.size) {
             return Ok(Completed::SizeMismatch);
         }
+        if request.room.is_some_and(|room| assembled.size > room) {
+            return Ok(Completed::OverQuota);
+        }
         if let Some((sent, value)) = &request.checksum
             && (*sent != checksum.algorithm() || *value != assembled.checksum)
         {

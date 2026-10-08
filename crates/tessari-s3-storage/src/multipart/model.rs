@@ -90,6 +90,8 @@ pub struct Completion {
     pub checksum: Option<(ChecksumAlgorithm, String)>,
     /// The object size the client declared (`x-amz-mp-object-size`).
     pub size: Option<u64>,
+    /// The most bytes the object may hold under its bucket's quota; `None` is no limit.
+    pub room: Option<u64>,
 }
 
 /// What a CompleteMultipartUpload ended in.
@@ -112,6 +114,8 @@ pub enum Completed {
     SizeMismatch,
     /// The whole-object checksum the client sent is not the computed one.
     ChecksumMismatch,
+    /// The listed parts hold more bytes than the bucket's quota leaves room for.
+    OverQuota,
     /// The object write did not commit, for the reason given (bucket gone, condition false).
     NotWritten(Written),
 }

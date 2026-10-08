@@ -1,6 +1,23 @@
 //! Bucket quotas (ADR-0007): an optional limit on a bucket's bytes and on its objects, checked before a write adds to
 //! it, against the last usage measurement plus what the write brings. Pure: everything it reads is in its arguments.
 
+use crate::dispatch::Operation;
+
+/// The operations that add bytes or objects to a bucket, and so are refused when they would pass its quota.
+pub const ADDING: [Operation; 5] = [
+    Operation::PutObject,
+    Operation::CopyObject,
+    Operation::UploadPart,
+    Operation::UploadPartCopy,
+    Operation::CompleteMultipartUpload,
+];
+
+/// Whether `operation` adds to the bucket it writes.
+#[must_use]
+pub fn adds_to_bucket(operation: Operation) -> bool {
+    ADDING.contains(&operation)
+}
+
 /// A bucket's limits; `None` is no limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Quota {

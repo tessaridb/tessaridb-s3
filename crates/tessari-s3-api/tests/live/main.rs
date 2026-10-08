@@ -28,6 +28,7 @@ mod listing;
 mod metadata;
 mod multipart;
 mod objects;
+mod quota;
 mod reclaim;
 #[path = "../wire/signer.rs"]
 #[allow(
