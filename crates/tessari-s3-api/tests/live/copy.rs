@@ -255,6 +255,19 @@ async fn a_data_or_multipart_source_becomes_a_single_part_object_of_its_own() {
     .await;
     assert_eq!(read.status, 200, "a single-part object is its own part 1");
     assert!(read.bytes == whole, "the copy's bytes");
+    let past = call(
+        &state,
+        "GET",
+        "/cpl/parts-copy",
+        vec![("partNumber", Some("2"))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        (past.status, past.code.as_deref()),
+        (416, Some("InvalidPartNumber")),
+        "a single-part object has no part 2"
+    );
 }
 
 #[tokio::test]

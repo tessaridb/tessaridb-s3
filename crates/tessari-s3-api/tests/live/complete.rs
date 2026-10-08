@@ -193,6 +193,19 @@ async fn complete_makes_the_listed_parts_one_object_that_reads_back_across_them(
     assert_eq!(by_part.status, 206, "{}", by_part.body);
     assert!(by_part.bytes == second, "partNumber=2 is the second part");
     assert_eq!(header(&by_part, "x-amz-mp-parts-count"), Some("3"));
+    let past = call(
+        &state,
+        "GET",
+        "/mpdone/big",
+        vec![("partNumber", Some("4"))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        (past.status, past.code.as_deref()),
+        (416, Some("InvalidPartNumber")),
+        "a part past the last"
+    );
     let listing = call(
         &state,
         "GET",

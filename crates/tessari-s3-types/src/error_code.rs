@@ -20,6 +20,8 @@ pub enum ErrorCode {
     MetadataTooLarge,
     /// 416: the requested range cannot be satisfied.
     InvalidRange,
+    /// 416: the object has no part with the requested number.
+    InvalidPartNumber,
     /// 304: the object has not changed since the condition named.
     NotModified,
     /// 412: a condition the request named does not hold.
@@ -99,6 +101,7 @@ impl ErrorCode {
             Self::MissingContentLength => "MissingContentLength",
             Self::MetadataTooLarge => "MetadataTooLarge",
             Self::InvalidRange => "InvalidRange",
+            Self::InvalidPartNumber => "InvalidPartNumber",
             Self::NotModified => "NotModified",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchKey => "NoSuchKey",
@@ -160,7 +163,7 @@ impl ErrorCode {
             Self::NoSuchKey | Self::NoSuchUpload => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
-            Self::InvalidRange => 416,
+            Self::InvalidRange | Self::InvalidPartNumber => 416,
             Self::MissingContentLength => 411,
             Self::MetadataTooLarge
             | Self::InvalidStorageClass
@@ -196,6 +199,7 @@ mod tests {
             (ErrorCode::MissingContentLength, "MissingContentLength", 411),
             (ErrorCode::MetadataTooLarge, "MetadataTooLarge", 400),
             (ErrorCode::InvalidRange, "InvalidRange", 416),
+            (ErrorCode::InvalidPartNumber, "InvalidPartNumber", 416),
             (ErrorCode::NotModified, "NotModified", 304),
             (ErrorCode::PreconditionFailed, "PreconditionFailed", 412),
             (ErrorCode::NoSuchKey, "NoSuchKey", 404),

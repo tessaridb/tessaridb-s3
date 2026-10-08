@@ -117,7 +117,12 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         Some(number) if sizes.len() == 1 && number.get() == 1 => RangeRequest::Whole,
         Some(number) => match part_bytes(&sizes, usize::from(number.get())) {
             Some((start, end)) => RangeRequest::Part { start, end },
-            None => RangeRequest::Unsatisfiable,
+            None => {
+                return Err(Error::new(
+                    ErrorCode::InvalidPartNumber,
+                    "The requested partnumber is not satisfiable",
+                ));
+            }
         },
     };
     let (status, slice) = match range {
