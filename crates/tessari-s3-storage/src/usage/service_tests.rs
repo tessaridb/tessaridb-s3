@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 use super::entity::{BucketUsageEntity, UsageEntity};
+use super::model::BucketCount;
 use super::occupancy::{Measured, ObjectFold};
 use super::repository::UsageRepository;
 use super::service::refresh;
@@ -25,6 +26,10 @@ impl UsageRepository for Fake {
     async fn store(&self, buckets: &[BucketUsageEntity]) -> Result<()> {
         *self.stored.lock().expect("unpoisoned") = Some(buckets.to_vec());
         Ok(())
+    }
+
+    async fn count_bucket(&self, _bucket: &str) -> Result<BucketCount> {
+        Ok(BucketCount::default())
     }
 
     async fn latest(&self) -> Result<Option<UsageEntity>> {

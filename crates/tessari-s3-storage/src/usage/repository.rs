@@ -3,6 +3,7 @@
 use std::future::Future;
 
 use super::entity::{BucketUsageEntity, UsageEntity};
+use super::model::BucketCount;
 use super::occupancy::Measured;
 use crate::Result;
 
@@ -14,6 +15,8 @@ pub(crate) trait UsageRepository: Send + Sync {
     fn measure(&self) -> impl Future<Output = Result<Measured>> + Send;
     /// Replaces the stored measurement with `buckets`, stamped with the store's clock.
     fn store(&self, buckets: &[BucketUsageEntity]) -> impl Future<Output = Result<()>> + Send;
+    /// What `bucket` holds now, read through its index within the quota count's time limit.
+    fn count_bucket(&self, bucket: &str) -> impl Future<Output = Result<BucketCount>> + Send;
     /// The stored measurement, if one was ever taken.
     fn latest(&self) -> impl Future<Output = Result<Option<UsageEntity>>> + Send;
 }

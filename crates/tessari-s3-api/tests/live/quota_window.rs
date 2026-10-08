@@ -1,7 +1,7 @@
-//! A bucket quota is checked only against a recent usage measurement, against a real node: once the last measurement
-//! is older than two usage intervals, a write to a LIMITED bucket is refused as unavailable rather than admitted on a
-//! figure nobody refreshed, while a bucket with no limit is unaffected; a new measurement lets the write through. The
-//! clock is moved, not waited for.
+//! A bucket quota is checked against a recent usage measurement, against a real node: once the last measurement is
+//! older than two usage intervals (or was never taken), a write to a LIMITED bucket counts that one bucket on the write
+//! path instead of trusting a figure nobody refreshed, while a bucket with no limit is unaffected. Each step is chosen
+//! so the stored figure and the live count give different answers. The clock is moved, not waited for.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -12,7 +12,7 @@ use tessari_s3_types::BucketName;
 
 use crate::console::{send, sign_in};
 use crate::console_users::states;
-use crate::{IGNORED, call};
+use crate::{IGNORED, Seen, call};
 
 /// Two intervals of the live suite's 60-second default.
 const WINDOW_SECS: i64 = 120;
@@ -31,9 +31,19 @@ async fn measure(state: &ApiState, now: &Arc<AtomicI64>) {
     now.store(taken.seconds, Ordering::Release);
 }
 
+fn over_quota(seen: &Seen) {
+    assert_eq!(
+        (seen.status, seen.code.as_deref()),
+        (400, Some("InvalidRequest")),
+        "{}",
+        seen.body
+    );
+    assert!(seen.body.contains("quota"), "{}", seen.body);
+}
+
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn a_limited_bucket_refuses_writes_once_its_measurement_is_older_than_the_window() {
+async fn a_limited_bucket_is_counted_live_once_its_measurement_is_older_than_the_window() {
     let _why = IGNORED;
     let (state, console, now) = states().await;
     let root = sign_in(&console).await;
@@ -48,7 +58,7 @@ async fn a_limited_bucket_refuses_writes_once_its_measurement_is_older_than_the_
     }
     let held = BucketName::new("held").expect("a name");
     let limit = Quota {
-        max_bytes: Some(1 << 20),
+        max_bytes: Some(10),
         max_objects: None,
     };
     assert!(
@@ -59,59 +69,42 @@ async fn a_limited_bucket_refuses_writes_once_its_measurement_is_older_than_the_
             .await
             .expect("set")
     );
-    // Never measured: nothing to check the limit against.
-    let unmeasured = call(&state, "PUT", "/held/a", vec![], b"unmeasured").await;
+
+    // Never measured: the bucket is counted as it stands, so the second write sees the first.
+    assert_eq!(stale_shown().await, serde_json::Value::Bool(true));
     assert_eq!(
-        (unmeasured.status, unmeasured.code.as_deref()),
-        (503, Some("ServiceUnavailable")),
-        "{}",
-        unmeasured.body
-    );
-    measure(&state, &now).await;
-    assert_eq!(
-        call(&state, "PUT", "/held/a", vec![], b"fresh")
+        call(&state, "PUT", "/held/a", vec![], b"123456")
             .await
             .status,
         200
     );
+    over_quota(&call(&state, "PUT", "/held/b", vec![], b"123456").await);
 
-    // At the window's edge the measurement still counts.
-    now.fetch_add(WINDOW_SECS, Ordering::AcqRel);
+    // Measured (6 bytes): writes are checked against the stored figure.
+    measure(&state, &now).await;
+    assert_eq!(stale_shown().await, serde_json::Value::Bool(false));
     assert_eq!(
-        call(&state, "PUT", "/held/b", vec![], b"edge").await.status,
+        call(&state, "PUT", "/held/c", vec![], b"123").await.status,
         200
     );
-    assert_eq!(stale_shown().await, serde_json::Value::Bool(false));
-    now.fetch_add(1, Ordering::AcqRel);
-    let stale = call(&state, "PUT", "/held/c", vec![], b"stale").await;
+    // At the window's edge the stored figure still counts: 6 + 4 fits, though the bucket now holds 9.
+    now.fetch_add(WINDOW_SECS, Ordering::AcqRel);
     assert_eq!(
-        (stale.status, stale.code.as_deref()),
-        (503, Some("ServiceUnavailable")),
-        "{}",
-        stale.body
+        call(&state, "PUT", "/held/d", vec![], b"1234").await.status,
+        200
     );
-    assert!(
-        stale.body.contains("usage"),
-        "the refusal says why: {}",
-        stale.body
-    );
+
+    // Past it the bucket is counted again: 13 held, so one byte more passes the limit the stored 6 would not.
+    now.fetch_add(1, Ordering::AcqRel);
     assert_eq!(
         stale_shown().await,
         serde_json::Value::Bool(true),
-        "the console shows an operator why"
+        "the console shows an operator the scanner has fallen behind"
     );
-    let open = call(&state, "PUT", "/open/c", vec![], b"no limit").await;
+    over_quota(&call(&state, "PUT", "/held/e", vec![], b"1").await);
+    let open = call(&state, "PUT", "/open/e", vec![], b"no limit").await;
     assert_eq!(
         open.status, 200,
-        "a bucket without a limit is not measured against anything"
-    );
-
-    // A new measurement, and the clock with it.
-    measure(&state, &now).await;
-    assert_eq!(
-        call(&state, "PUT", "/held/c", vec![], b"measured")
-            .await
-            .status,
-        200
+        "a bucket without a limit is not counted against anything"
     );
 }

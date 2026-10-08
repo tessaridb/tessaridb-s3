@@ -19,6 +19,15 @@ pub struct BucketUsage {
     pub raw_bytes: u64,
 }
 
+/// One bucket's objects and logical bytes, counted now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BucketCount {
+    /// Objects it holds.
+    pub objects: u64,
+    /// Their logical size in bytes.
+    pub bytes: u64,
+}
+
 /// The latest measurement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Usage {

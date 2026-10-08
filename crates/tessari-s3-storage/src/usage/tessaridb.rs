@@ -2,10 +2,11 @@
 //! `bucket_usage:1` record, and the `usage_claims` space holds the expiring claim of the member measuring now. Every
 //! value is bound.
 
-use tessari_s3_constants::{DATA_BLOCK_SIZE, USAGE_CLAIM_SECS};
+use tessari_s3_constants::{DATA_BLOCK_SIZE, QUOTA_COUNT_TIMEOUT_SECS, USAGE_CLAIM_SECS};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 
 use super::entity::{BucketUsageEntity, UsageEntity};
+use super::model::BucketCount;
 use super::occupancy::{Measured, ObjectFold, PartFold};
 use super::repository::UsageRepository;
 use crate::answers::{all_records, first_record};
@@ -104,6 +105,28 @@ impl UsageRepository for TessariUsage {
             )
             .await?;
         Ok(())
+    }
+
+    async fn count_bucket(&self, bucket: &str) -> Result<BucketCount> {
+        // One bucket on a write path: served by its index (even when it is most of the table), and refused rather
+        // than answered in part past the time limit. A bucket with no objects answers no group.
+        let script = format!(
+            "SELECT bucket_name, count(*) AS objects, sum(size) AS bytes FROM objects \
+             WHERE bucket_name = $bucket GROUP BY bucket_name \
+             WITHOUT SCAN GUARD USING INDEX by_bucket TIMEOUT {QUOTA_COUNT_TIMEOUT_SECS}s;"
+        );
+        let parameters = vec![("bucket".to_owned(), Value::String(bucket.to_owned()))];
+        let answers = self.pool.run(&script, parameters).await?;
+        first_record(answers.into_iter().next())?.map_or_else(
+            || Ok(BucketCount::default()),
+            |value| {
+                let row = fields(&value)?;
+                Ok(BucketCount {
+                    objects: count(row, "objects")?,
+                    bytes: count(row, "bytes")?,
+                })
+            },
+        )
     }
 
     async fn latest(&self) -> Result<Option<UsageEntity>> {

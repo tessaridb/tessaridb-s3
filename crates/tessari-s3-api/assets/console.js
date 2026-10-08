@@ -1265,7 +1265,7 @@
       return `${listed2} · sizes not measured yet`;
     }
     const measured = `${listed2} · sizes measured ${moment(usage.value.taken)}`;
-    return usage.value.stale ? `${measured} — too old to check quotas, so writes to limited buckets are refused until the next measurement` : measured;
+    return usage.value.stale ? `${measured} — too old to check quotas against, so each write to a limited bucket counts it on the spot` : measured;
   }
   async function buckets(screen) {
     loading(screen, TITLE2, "buckets");

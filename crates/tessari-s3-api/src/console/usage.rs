@@ -1,6 +1,6 @@
 //! `GET /api/v1/usage`: how many objects and bytes each bucket holds as last measured (logical, and on the drives), the totals, and when the measurement was taken — over the buckets the caller can list. Never
 //! measured answers no time and no buckets. `stale` says the measurement is too old (or missing) for a quota check, so
-//! writes to a limited bucket are being refused until the usage scanner runs.
+//! every write to a limited bucket is counting that bucket itself — the usage scanner has fallen behind.
 
 use std::collections::BTreeSet;
 

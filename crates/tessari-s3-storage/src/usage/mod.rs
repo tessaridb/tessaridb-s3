@@ -12,6 +12,6 @@ mod service;
 mod service_tests;
 mod tessaridb;
 
-pub use model::{BucketUsage, Usage};
+pub use model::{BucketCount, BucketUsage, Usage};
 pub use service::UsageService;
 pub use tessaridb::TessariUsage;

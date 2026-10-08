@@ -162,7 +162,7 @@ function measuredLine(count: number, usage: Answer<Usage>): string {
     return `${listed} · sizes not measured yet`;
   }
   const measured = `${listed} · sizes measured ${moment(usage.value.taken)}`;
-  return usage.value.stale ? `${measured} — too old to check quotas, so writes to limited buckets are refused until the next measurement` : measured;
+  return usage.value.stale ? `${measured} — too old to check quotas against, so each write to a limited bucket counts it on the spot` : measured;
 }
 
 export async function buckets(screen: Screen): Promise<void> {

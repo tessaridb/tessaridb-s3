@@ -57,6 +57,7 @@ DEFINE FIELD IF NOT EXISTS data ON reclaims TYPE uuid REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON reclaims TYPE datetime REQUIRED;
 DEFINE FIELD IF NOT EXISTS reclaiming ON reclaims TYPE datetime;
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
+DEFINE INDEX IF NOT EXISTS by_bucket ON objects FIELDS bucket_name;
 DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
 THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \

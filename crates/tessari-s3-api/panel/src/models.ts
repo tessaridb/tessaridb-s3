@@ -25,7 +25,7 @@ export type BucketUsage = {
 };
 export type Usage = {
   readonly taken: string | null;
-  /** Too old (or missing) for a quota check: writes to a limited bucket are refused until the scanner runs. */
+  /** Too old (or missing) for a quota check: each write to a limited bucket counts the bucket itself instead. */
   readonly stale: boolean;
   readonly buckets: readonly BucketUsage[];
   readonly objects: number;

@@ -230,6 +230,10 @@ pub const DEFAULT_USAGE_INTERVAL_SECS: u64 = 60;
 /// nobody refreshed.
 pub const QUOTA_MEASUREMENT_INTERVALS: u64 = 2;
 
+/// Seconds a write may spend counting one limited bucket when its usage measurement is too old. Past it the count
+/// refuses rather than answering in part, and the write is refused as unavailable.
+pub const QUOTA_COUNT_TIMEOUT_SECS: u64 = 2;
+
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 

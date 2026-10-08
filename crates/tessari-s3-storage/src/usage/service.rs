@@ -2,10 +2,10 @@
 
 use tessari_s3_constants::DATA_BLOCK_SIZE;
 use tessari_s3_core::erasure::Stripes;
-use tessari_s3_types::Code;
+use tessari_s3_types::{BucketName, Code};
 
 use super::entity::BucketUsageEntity;
-use super::model::Usage;
+use super::model::{BucketCount, Usage};
 use super::occupancy::{Geometry, Occupancy, occupancy};
 use super::repository::UsageRepository;
 use super::tessaridb::TessariUsage;
@@ -58,6 +58,15 @@ impl UsageService {
     /// The metadata store's refusal or outage, or a malformed answer.
     pub async fn refresh(&self, holder: &str) -> Result<Option<usize>> {
         refresh(&self.repository, holder, self.geometry).await
+    }
+
+    /// What `bucket` holds now, counted on the spot — for a quota check when the measurement is too old.
+    ///
+    /// # Errors
+    /// The metadata store's refusal (a count past `QUOTA_COUNT_TIMEOUT_SECS` included) or outage, or a malformed
+    /// answer.
+    pub async fn count_bucket(&self, bucket: &BucketName) -> Result<BucketCount> {
+        self.repository.count_bucket(bucket.as_str()).await
     }
 
     /// The latest measurement, if any was taken.
