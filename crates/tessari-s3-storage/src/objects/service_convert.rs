@@ -2,7 +2,7 @@
 //! the bytes, then the column goes. Run at start, before the node serves; idempotent and resumable — a pass cut short
 //! leaves records still holding bytes (converted by the next pass) and a queued data file for the reclaimer.
 
-use tessari_s3_constants::INLINE_CONVERT_BATCH;
+use tessari_s3_constants::{INLINE_CONVERT_BATCH, VERSION_CONVERT_BATCH};
 
 use super::ObjectService;
 use crate::Result;
@@ -59,6 +59,39 @@ impl ObjectService {
         if self.repository.declares_inline().await? {
             self.repository.drop_inline().await?;
         }
+        Ok(converted)
+    }
+
+    /// Gives every object a build without versions wrote its null version (ADR-0010 §8), once per store; answers how
+    /// many were converted. Run at start, before the node serves: the event releasing a replaced object's parts goes
+    /// first, then the walk, then the record saying it is done — a start cut short walks again, and an object already
+    /// converted, or written since by a versioned build, is skipped by the conversion's own condition.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn convert_versions(&self) -> Result<usize> {
+        if self.repository.versions_converted().await? {
+            return Ok(0);
+        }
+        self.repository.drop_parts_released().await?;
+        let mut converted: usize = 0;
+        let mut after = String::new();
+        loop {
+            let batch = self
+                .repository
+                .objects_after(&after, VERSION_CONVERT_BATCH)
+                .await?;
+            let Some(last) = batch.last() else {
+                break;
+            };
+            after.clone_from(&last.id);
+            for object in &batch {
+                if self.repository.adopt_null_version(object).await? {
+                    converted = converted.saturating_add(1);
+                }
+            }
+        }
+        self.repository.mark_versions_converted().await?;
         Ok(converted)
     }
 }

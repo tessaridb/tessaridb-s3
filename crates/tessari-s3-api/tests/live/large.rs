@@ -33,7 +33,11 @@ fn etag(bytes: &[u8]) -> String {
     format!("\"{}\"", hashes.finish().md5_hex)
 }
 
-async fn records(planter: &MetaPool, script: &str, parameters: Vec<(String, Value)>) -> Vec<Value> {
+pub(crate) async fn records(
+    planter: &MetaPool,
+    script: &str,
+    parameters: Vec<(String, Value)>,
+) -> Vec<Value> {
     match planter
         .run(script, parameters)
         .await

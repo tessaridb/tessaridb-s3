@@ -139,7 +139,17 @@ async fn a_store_holding_object_bytes_is_converted_at_start_and_then_refuses_the
     );
 
     let objects = state.storage().objects();
+    assert!(
+        objects.convert_versions().await.is_err(),
+        "a version is never made of an object still holding its bytes"
+    );
     assert_eq!(objects.convert_inline().await.expect("converted"), 1);
+    assert_eq!(objects.convert_versions().await.expect("then versions"), 1);
+    let kept = crate::versions_kept::versions(&planter, "legacy", "old").await;
+    assert!(
+        kept.len() == 1 && kept[0].data.is_some(),
+        "the null version points at the data file the bytes moved to: {kept:?}"
+    );
     let fields = record(&planter, "legacy", "old").await;
     assert!(
         !fields.contains_key("inline"),

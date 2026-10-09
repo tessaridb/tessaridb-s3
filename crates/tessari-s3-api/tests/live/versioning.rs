@@ -116,3 +116,40 @@ async fn only_who_administers_a_bucket_changes_its_versioning() {
     let owner = call_as(&state, ann.pair(), "PUT", "/files", query(), vec![], &body).await;
     assert_eq!(owner.status, 200, "{}", owner.body);
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_bucket_holding_only_versions_is_not_empty() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/files", vec![], b"").await.status, 200);
+    let enable = configuration("<Status>Enabled</Status>");
+    let enabled = call(&state, "PUT", "/files", vec![("versioning", None)], &enable).await;
+    assert_eq!(enabled.status, 200, "{}", enabled.body);
+    assert_eq!(
+        call(&state, "PUT", "/files/k", vec![], b"one").await.status,
+        200
+    );
+    // A delete leaves a marker in front of the version: nothing is current, two versions remain.
+    assert_eq!(
+        call(&state, "DELETE", "/files/k", vec![], b"").await.status,
+        204
+    );
+    assert_eq!(
+        call(&state, "GET", "/files/k", vec![], b"").await.status,
+        404
+    );
+
+    let refused = call(&state, "DELETE", "/files", vec![], b"").await;
+    assert_eq!(refused.status, 409, "{}", refused.body);
+    assert_eq!(
+        text(&refused.body, "Code").as_deref(),
+        Some("BucketNotEmpty")
+    );
+    assert_eq!(
+        call(&state, "GET", "/files", vec![("versioning", None)], b"")
+            .await
+            .status,
+        200
+    );
+}

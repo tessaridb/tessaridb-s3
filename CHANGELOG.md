@@ -5,6 +5,12 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Versioned buckets keep their versions: in an enabled bucket every write adds a version (its id answered in
+  `x-amz-version-id`, by PutObject, CopyObject, CompleteMultipartUpload, GetObject and HeadObject) and a delete adds a
+  delete marker, keeping every earlier version and its bytes; in a suspended bucket a write or delete replaces only the
+  null version. Concurrent writers of one key get one version each, in commit order. DeleteBucket refuses
+  `BucketNotEmpty` while any version or marker remains. A store from an earlier build gives each of its objects a null
+  version at start, once.
 - Console bucket explorer: each listed key shows its content type as stored at write (an icon and a label) beside
   size, age and ETag; selecting a key shows its headers, user metadata, checksums and part count in a side pane, read
   from its record without opening the object (the arrow keys move the selection, Escape closes it); the list appends

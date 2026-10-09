@@ -202,6 +202,9 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     set(headers, "etag", &object.etag);
     set(headers, "last-modified", &object.modified.http_date());
     set(headers, "accept-ranges", "bytes");
+    if let Some(version) = &object.version {
+        set(headers, "x-amz-version-id", version);
+    }
     let checksum_mode = call
         .headers
         .get("x-amz-checksum-mode")

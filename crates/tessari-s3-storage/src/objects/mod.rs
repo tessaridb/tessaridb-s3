@@ -7,6 +7,7 @@ mod repository;
 mod service;
 mod tessaridb;
 mod upload;
+mod version_id;
 
 pub use model::{
     Content, HealBacklog, Healed, Listed, Multipart, NewObject, ObjectSummary, Part, Reclaimed,

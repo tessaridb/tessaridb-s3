@@ -48,6 +48,15 @@ pub fn empty_response(status: StatusCode) -> Response<Body> {
     response
 }
 
+/// Adds `x-amz-version-id` when the object has a version id — once its bucket has been versioned (S3 omits the header
+/// for a bucket that never was).
+pub fn with_version(mut response: Response<Body>, version: Option<&str>) -> Response<Body> {
+    if let Some(value) = version.and_then(|version| HeaderValue::from_str(version).ok()) {
+        response.headers_mut().insert("x-amz-version-id", value);
+    }
+    response
+}
+
 /// Renders `error` for the request at `resource`. On a HEAD request the server strips the body and keeps the status
 /// and headers, which is the HEAD contract clients rely on.
 #[must_use]

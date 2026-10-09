@@ -4,6 +4,8 @@ use std::future::Future;
 
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use tessari_s3_core::versioning::Versioning;
+
 use super::model::{NewObject, ObjectSummary, Part, StoredObject};
 use crate::Result;
 
@@ -27,6 +29,40 @@ pub(crate) enum Wrote {
     Record(tessari_s3_infrastructure::tessaridb::Value),
     /// The statement's condition did not hold, or the record it named was absent.
     Refused,
+}
+
+/// What a version write needs to know about a key, read at one snapshot (ADR-0010).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Head {
+    /// The bucket's versioning state; `None` while it was never versioned.
+    pub(crate) state: Option<Versioning>,
+    /// The sequence of the key's newest version.
+    pub(crate) newest: Option<u64>,
+    /// The sequence of the key's null version.
+    pub(crate) null: Option<u64>,
+}
+
+/// The version a write or a delete adds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NewVersion {
+    /// Its sequence.
+    pub(crate) seq: u64,
+    /// Its id: `null`, or the sequence and a nonce.
+    pub(crate) version_id: String,
+}
+
+/// The version records one write or delete changes, in the transaction that writes or removes the key's `objects`
+/// record: the null version is dropped when the new one replaces it, and the new version is created after the newest.
+/// Two writers that read the same head collide on that `objects` record and on the new version's id, so one commit is
+/// refused and that writer reads the head again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VersionPlan {
+    /// The null version the new one replaces.
+    pub(crate) drop_null: Option<u64>,
+    /// The version added; `None` for a delete in a never-versioned bucket, which leaves the key nothing.
+    pub(crate) create: Option<NewVersion>,
+    /// The version id the current object answers with; `None` while the bucket was never versioned.
+    pub(crate) label: Option<String>,
 }
 
 /// A bucket's incarnation and the record at one key, read at one snapshot.
@@ -75,8 +111,15 @@ pub(crate) trait ObjectRepository: Send + Sync {
         bucket: &BucketName,
         key: &ObjectKey,
     ) -> impl Future<Output = Result<Snapshot>> + Send;
-    /// Writes `object` under `guard` as ONE statement: UPSERT, CREATE, or UPDATE … WHERE. When the object's bytes
-    /// are in a data file, the same transaction removes that file's pending `reclaims` entry.
+    /// The bucket's versioning state and the key's newest and null versions, read at one snapshot.
+    fn head(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+    ) -> impl Future<Output = Result<Head>> + Send;
+    /// Writes `object` under `guard` as ONE statement: UPSERT, CREATE, or UPDATE … WHERE — and, in the same
+    /// transaction, the version records `versions` names. When the object's bytes are in a data file, the same
+    /// transaction removes that file's pending `reclaims` entry.
     fn write(
         &self,
         bucket: &BucketName,
@@ -84,6 +127,7 @@ pub(crate) trait ObjectRepository: Send + Sync {
         incarnation: [u8; 16],
         object: &NewObject,
         guard: &Guard,
+        versions: &VersionPlan,
     ) -> impl Future<Output = Result<Wrote>> + Send;
     /// Queues data `id` for reclamation; done before its file is created.
     fn queue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
@@ -118,19 +162,23 @@ pub(crate) trait ObjectRepository: Send + Sync {
         key: &ObjectKey,
         upload: [u8; 16],
     ) -> impl Future<Output = Result<Option<Vec<Part>>>> + Send;
-    /// Removes the record at `bucket/key` only while it is of `incarnation` and its ETag is `etag`, as ONE
-    /// transaction; `false` when that did not hold or there was no record.
+    /// Removes the record at `bucket/key` only while it is of `incarnation` and its ETag is `etag`, with the version
+    /// records `versions` names, as ONE transaction; `false` when that did not hold or there was no record.
     fn remove_if(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
         incarnation: [u8; 16],
         etag: &str,
+        versions: &VersionPlan,
     ) -> impl Future<Output = Result<bool>> + Send;
-    /// Removes the record at `bucket/key`, if any.
+    /// Removes the record at `bucket/key`, if any, with the version records `versions` names, as ONE transaction;
+    /// `false` when the key's versions moved on since they were read.
     fn remove(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
-    ) -> impl Future<Output = Result<()>> + Send;
+        incarnation: [u8; 16],
+        versions: &VersionPlan,
+    ) -> impl Future<Output = Result<bool>> + Send;
 }

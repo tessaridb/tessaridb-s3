@@ -53,6 +53,12 @@ async fn main() -> anyhow::Result<()> {
             "object bytes moved from the metadata to data files"
         );
     }
+    // A store from before ADR-0010 has objects and no versions; each becomes its key's null version — after the
+    // bytes moved out above, because a version copies the object as it is then.
+    let versioned = storage.objects().convert_versions().await?;
+    if versioned > 0 {
+        tracing::info!(versioned, "objects given their null version");
+    }
     if let Some(cluster) = &config.cluster {
         // Registered before serving, so a node is never answering requests the cluster does not know it exists for.
         storage

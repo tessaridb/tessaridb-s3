@@ -78,7 +78,20 @@ WHEN $before.data != NONE AND $before.data != $after.data \
 THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
 LET $grace = $settings.grace; \
 UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
-DEFINE EVENT IF NOT EXISTS parts_released ON objects FOR UPDATE, DELETE \
+DEFINE FIELD IF NOT EXISTS version_id ON objects TYPE string;
+DEFINE TABLE IF NOT EXISTS versions (\
+ bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, version_id string REQUIRED,\
+ seq int REQUIRED, marker bool REQUIRED, modified datetime REQUIRED, size int, etag string, headers object,\
+ metadata object, checksums object, data uuid, upload uuid, parts int);
+DEFINE TABLE IF NOT EXISTS version_nulls (seq int REQUIRED);
+DEFINE TABLE IF NOT EXISTS s3_conversions (done datetime REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_version_data ON versions FIELDS data;
+DEFINE EVENT IF NOT EXISTS version_released ON versions FOR UPDATE, DELETE \
+WHEN $before.data != NONE AND $before.data != $after.data \
+THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
+LET $grace = $settings.grace; \
+UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
+DEFINE EVENT IF NOT EXISTS version_parts_released ON versions FOR UPDATE, DELETE \
 WHEN $before.upload != NONE AND $before.upload != $after.upload \
 THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
 DEFINE TABLE IF NOT EXISTS pending (\

@@ -6,6 +6,7 @@ use tessari_s3_types::BucketName;
 
 use super::entity::BucketEntity;
 use super::repository::{BucketRepository, Inserted};
+use crate::answers::first_record;
 use crate::{Error, Result};
 
 /// The TessariDB bucket repository.
@@ -162,20 +163,33 @@ impl BucketRepository for TessariBuckets {
 
     async fn holds_objects(&self, name: &BucketName) -> Result<bool> {
         let anchor = format!("{}/", name.as_str());
-        let parameters = vec![("anchor".to_owned(), Value::String(anchor))];
+        // A version's id starts with the bucket's bytes and `/` too (ADR-0010), so the first version after that anchor
+        // is the bucket's own when it holds any — a delete marker or a noncurrent version keeps the bucket non-empty.
+        let parameters = vec![
+            (
+                "versions_at".to_owned(),
+                Value::Bytes(anchor.clone().into_bytes()),
+            ),
+            ("anchor".to_owned(), Value::String(anchor)),
+        ];
         let answers = self
             .pool
             .run(
-                "SELECT bucket_name FROM objects AFTER objects:$anchor LIMIT 1;",
+                "SELECT bucket_name FROM objects AFTER objects:$anchor LIMIT 1; \
+                 SELECT bucket_name FROM versions AFTER versions:$versions_at LIMIT 1;",
                 parameters,
             )
             .await?;
-        Ok(match single(answers)? {
-            Some(Value::Object(fields)) => {
-                matches!(fields.get("bucket_name"), Some(Value::String(bucket)) if bucket == name.as_str())
-            }
-            _ => false,
-        })
+        let holds = |answer| -> Result<bool> {
+            Ok(match first_record(answer)? {
+                Some(Value::Object(fields)) => {
+                    matches!(fields.get("bucket_name"), Some(Value::String(bucket)) if bucket == name.as_str())
+                }
+                _ => false,
+            })
+        };
+        let mut answers = answers.into_iter();
+        Ok(holds(answers.next())? || holds(answers.next())?)
     }
 
     async fn remove(&self, name: &BucketName) -> Result<Option<BucketEntity>> {

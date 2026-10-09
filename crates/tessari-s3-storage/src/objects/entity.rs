@@ -140,6 +140,11 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
         metadata: read_strings(fields.get("metadata"), "metadata")?,
         checksums: read_strings(fields.get("checksums"), "checksums")?,
         content,
+        version: match fields.get("version_id") {
+            None | Some(Value::None) => None,
+            Some(Value::String(id)) => Some(id.clone()),
+            Some(_) => return Err(malformed("version_id")),
+        },
     };
     Ok((incarnation(fields)?, object))
 }

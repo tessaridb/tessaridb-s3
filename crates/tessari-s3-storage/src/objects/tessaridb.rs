@@ -4,21 +4,27 @@ use tessari_s3_constants::RECLAIM_RETRY_SECS;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
-use super::entity::{read, record};
-use super::model::{Content, NewObject, Part};
-use super::repository::{Batch, Guard, ObjectRepository, Snapshot, Wrote};
+use super::entity::read;
+use super::model::{NewObject, Part};
+use super::repository::{Batch, Guard, Head, ObjectRepository, Snapshot, VersionPlan, Wrote};
 use crate::answers::{first_record, incarnation_of};
 use crate::schema::QUEUE_FOR_RECLAIM;
 use crate::{Error, Result};
 
 #[path = "tessaridb_convert.rs"]
 mod convert;
+#[path = "tessaridb_convert_versions.rs"]
+mod convert_versions;
 #[path = "tessaridb_page.rs"]
 mod page;
 #[path = "tessaridb_parts.rs"]
 mod parts;
 #[path = "tessaridb_remove.rs"]
 mod remove;
+#[path = "tessaridb_versions.rs"]
+mod versions;
+#[path = "tessaridb_write.rs"]
+mod write;
 
 /// The TessariDB object repository.
 #[derive(Clone)]
@@ -42,6 +48,12 @@ fn id(bucket: &BucketName, key: &ObjectKey) -> Value {
 /// `invalid` (no record to update). Retry and outage classes are not this.
 fn is_condition_refusal(error: &MetaError) -> bool {
     error.is_class(RefusalClass::Conflict) || error.is_class(RefusalClass::Invalid)
+}
+
+/// A refusal of a write that changes a key's versions: its own condition, or a writer of the same key that committed
+/// first — the store answers that collision `retry` (TessariDB ref 05 M6), and the caller plans the write again.
+fn is_lost_or_refused(error: &MetaError) -> bool {
+    is_condition_refusal(error) || error.is_class(RefusalClass::Retry)
 }
 
 impl ObjectRepository for TessariObjects {
@@ -86,81 +98,18 @@ impl ObjectRepository for TessariObjects {
         incarnation: [u8; 16],
         object: &NewObject,
         guard: &Guard,
+        versions: &VersionPlan,
     ) -> Result<Wrote> {
-        let mut parameters = vec![
-            ("id".to_owned(), id(bucket, key)),
-            (
-                "object".to_owned(),
-                record(bucket.as_str(), key.as_str(), incarnation, object)?,
-            ),
-            ("incarnation".to_owned(), Value::Uuid(incarnation)),
-        ];
-        // `modified` is the store's clock at commit, merged into the bound record.
-        let statement = match guard {
-            Guard::None => {
-                "UPSERT objects:$id = object::merge($object, { modified: time::now() }) RETURN AFTER;"
-            }
-            Guard::Absent => {
-                "CREATE objects:$id = object::merge($object, { modified: time::now() }) RETURN AFTER;"
-            }
-            Guard::Etag(etag) => {
-                parameters.push(("etag".to_owned(), Value::String(etag.clone())));
-                "UPDATE objects:$id = object::merge($object, { modified: time::now() }) \
-                 WHERE etag = $etag AND incarnation = $incarnation RETURN AFTER;"
-            }
-            Guard::Incarnation(stale) => {
-                parameters.push(("stale".to_owned(), Value::Uuid(*stale)));
-                "UPDATE objects:$id = object::merge($object, { modified: time::now() }) \
-                 WHERE incarnation = $stale RETURN AFTER;"
-            }
-        };
-        // A data object commits together with the removal of its pending `reclaims` entry, and only while that entry exists
-        // unmarked — the `UPDATE` refuses, and the whole transaction with it, once a reclaimer has taken the file. The
-        // `supersede` event queues whatever data the record held before, in the same transaction. The write's answer
-        // follows `BEGIN`.
-        let (script, answer_at) = match &object.content {
-            // A completed upload: the upload must still exist (the `UPDATE` refuses the whole transaction once an
-            // abort or another completion took it), the unlisted parts go (their event queues their files), and the
-            // upload ends — all in the commit that makes the object visible.
-            Content::Parts(multipart) => {
-                let listed = multipart
-                    .parts
-                    .iter()
-                    .map(|part| Value::from(i64::from(part.number)))
-                    .collect();
-                parameters.push(("upload".to_owned(), Value::Uuid(multipart.upload)));
-                parameters.push(("listed".to_owned(), Value::Array(listed)));
-                (
-                    format!(
-                        "BEGIN; UPDATE uploads:$upload SET last_part = time::now(); {statement} \
-                         DELETE FROM parts WHERE upload = $upload AND NOT (number IN $listed) LIMIT ALL; \
-                         DELETE uploads:$upload; COMMIT;"
-                    ),
-                    2,
-                )
-            }
-            Content::Data(data) => {
-                parameters.push(("data".to_owned(), Value::Uuid(*data)));
-                (
-                    format!(
-                        "BEGIN; {statement} UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; \
-                         DELETE reclaims:$data; COMMIT;"
-                    ),
-                    1,
-                )
-            }
-        };
-        match self.pool.run(&script, parameters).await {
-            Ok(answers) => match first_record(answers.into_iter().nth(answer_at))? {
-                Some(value) => Ok(Wrote::Record(value)),
-                None => Err(Error::Malformed {
-                    record: "object",
-                    reason: "a write answered no record",
-                }),
-            },
-            Err(error) if is_condition_refusal(&error) => Ok(Wrote::Refused),
-            Err(error) => Err(error.into()),
-        }
+        write::write(
+            &self.pool,
+            bucket,
+            key,
+            incarnation,
+            object,
+            guard,
+            versions,
+        )
+        .await
     }
 
     async fn queue(&self, id: [u8; 16]) -> Result<()> {
@@ -212,13 +161,15 @@ impl ObjectRepository for TessariObjects {
 
     async fn referenced(&self, id: [u8; 16]) -> Result<bool> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        // An object or a multipart part may hold the file. `USING` makes a dropped or renamed index a refusal here
-        // rather than a full scan.
+        // An object, any version of one, or a multipart part may hold the file. `USING` makes a dropped or renamed
+        // index a refusal here rather than a full scan.
         let script = "SELECT key FROM objects WHERE data = $data LIMIT 1 USING INDEX by_data; \
-                      SELECT number FROM parts WHERE data = $data LIMIT 1 USING INDEX by_part_data;";
+                      SELECT number FROM parts WHERE data = $data LIMIT 1 USING INDEX by_part_data; \
+                      SELECT seq FROM versions WHERE data = $data LIMIT 1 USING INDEX by_version_data;";
         let mut answers = self.pool.run(script, parameters).await?.into_iter();
         let by_object = first_record(answers.next())?.is_some();
-        Ok(by_object || first_record(answers.next())?.is_some())
+        let by_part = first_record(answers.next())?.is_some();
+        Ok(by_object || by_part || first_record(answers.next())?.is_some())
     }
 
     async fn mark(&self, id: [u8; 16]) -> Result<bool> {
@@ -270,13 +221,23 @@ impl ObjectRepository for TessariObjects {
         key: &ObjectKey,
         incarnation: [u8; 16],
         etag: &str,
+        versions: &VersionPlan,
     ) -> Result<bool> {
-        remove::remove_if(&self.pool, id(bucket, key), incarnation, etag).await
+        let guard = Some(etag);
+        remove::remove(&self.pool, bucket, key, incarnation, guard, versions).await
     }
 
-    async fn remove(&self, bucket: &BucketName, key: &ObjectKey) -> Result<()> {
-        let parameters = vec![("id".to_owned(), id(bucket, key))];
-        self.pool.run("DELETE objects:$id;", parameters).await?;
-        Ok(())
+    async fn remove(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        incarnation: [u8; 16],
+        versions: &VersionPlan,
+    ) -> Result<bool> {
+        remove::remove(&self.pool, bucket, key, incarnation, None, versions).await
+    }
+
+    async fn head(&self, bucket: &BucketName, key: &ObjectKey) -> Result<Head> {
+        versions::head(&self.pool, bucket, key).await
     }
 }

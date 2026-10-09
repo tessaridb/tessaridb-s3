@@ -2,11 +2,11 @@
 //! statement; a read sees an object only if it belongs to the bucket's current incarnation. A data file is queued for
 //! reclamation before it exists and leaves the queue only in the transaction that commits an object pointing at it.
 
-use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, MULTIPART_READ_ATTEMPTS};
+use tessari_s3_constants::{MULTIPART_READ_ATTEMPTS, VERSION_WRITE_ATTEMPTS};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::entity::read;
-use super::model::{Content, NewObject, Removed, RemovedIf, StoredObject, WriteCondition, Written};
+use super::model::{Content, NewObject, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
 use super::tessaridb::TessariObjects;
 use std::sync::Arc;
@@ -19,8 +19,12 @@ use crate::{Error, Result};
 mod convert;
 #[path = "service_data.rs"]
 mod data;
+#[path = "service_delete.rs"]
+mod delete;
 #[path = "list.rs"]
 mod list;
+#[path = "service_versions.rs"]
+mod versions;
 
 /// Object operations.
 #[derive(Clone)]
@@ -62,17 +66,19 @@ impl ObjectService {
         condition: &WriteCondition,
     ) -> Result<Written> {
         let outcome = self.commit(bucket, key, object, condition).await?;
-        if let (Content::Data(id), false) =
-            (&object.content, matches!(outcome, Written::Committed(_)))
-        {
+        if let (Content::Data(id), false) = (
+            &object.content,
+            matches!(outcome, Written::Committed { .. }),
+        ) {
             // A refusal may be the reclaimer's, not the condition's: the file is then already gone.
             if !self.repository.claimable(*id).await? {
                 return Ok(Written::DataReclaimed);
             }
         }
-        if let (Content::Data(id), false) =
-            (&object.content, matches!(outcome, Written::Committed(_)))
-        {
+        if let (Content::Data(id), false) = (
+            &object.content,
+            matches!(outcome, Written::Committed { .. }),
+        ) {
             self.release_logged(*id).await;
         }
         Ok(outcome)
@@ -93,16 +99,60 @@ impl ObjectService {
             WriteCondition::IfNoneMatch => Guard::Absent,
             WriteCondition::IfMatch(etag) => Guard::Etag(etag.clone()),
         };
-        match self
-            .repository
-            .write(bucket, key, incarnation, object, &guard)
-            .await?
-        {
-            Wrote::Record(value) => Ok(Written::Committed(read(&value)?.1.modified)),
-            Wrote::Refused => {
-                self.classify_refusal(bucket, key, incarnation, object, condition)
-                    .await
+        for _ in 0..VERSION_WRITE_ATTEMPTS {
+            let plan = versions::plan(&self.repository.head(bucket, key).await?, false)?;
+            match self
+                .repository
+                .write(bucket, key, incarnation, object, &guard, &plan)
+                .await?
+            {
+                Wrote::Record(value) => {
+                    return Ok(Written::Committed {
+                        modified: read(&value)?.1.modified,
+                        version: plan.label,
+                    });
+                }
+                // A refusal is the condition's, the content's (its file reclaimed, its upload ended), or another
+                // writer of the key committed first; while the condition and the content both still hold it was the
+                // last, and the write is planned again.
+                Wrote::Refused
+                    if self.still_holds(bucket, key, incarnation, &guard).await?
+                        && self.still_takeable(&object.content).await? => {}
+                Wrote::Refused => {
+                    return self
+                        .classify_refusal(bucket, key, incarnation, object, condition)
+                        .await;
+                }
             }
+        }
+        Err(Error::Contended)
+    }
+
+    /// Whether `guard` holds on the key as it is now.
+    async fn still_holds(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        incarnation: [u8; 16],
+        guard: &Guard,
+    ) -> Result<bool> {
+        let Snapshot { object, .. } = self.repository.read(bucket, key).await?;
+        Ok(match guard {
+            Guard::None => true,
+            // A record left from an earlier incarnation is the classifier's case, not a collision.
+            Guard::Absent => object.is_none(),
+            Guard::Etag(etag) => {
+                object.is_some_and(|(record, stored)| record == incarnation && stored.etag == *etag)
+            }
+            Guard::Incarnation(_) => false,
+        })
+    }
+
+    /// Whether what a write points at can still be taken: a data file no reclaimer marked, an upload nobody ended.
+    async fn still_takeable(&self, content: &Content) -> Result<bool> {
+        match content {
+            Content::Data(id) => self.repository.claimable(*id).await,
+            Content::Parts(multipart) => self.repository.upload_open(multipart.upload).await,
         }
     }
 
@@ -132,12 +182,23 @@ impl ObjectService {
         match (condition, live, stale) {
             (WriteCondition::IfMatch(_), false, _) => Ok(Written::NoSuchKey),
             (WriteCondition::IfNoneMatch, false, Some(stale)) => {
+                let plan = versions::plan(&self.repository.head(bucket, key).await?, false)?;
                 match self
                     .repository
-                    .write(bucket, key, incarnation, object, &Guard::Incarnation(stale))
+                    .write(
+                        bucket,
+                        key,
+                        incarnation,
+                        object,
+                        &Guard::Incarnation(stale),
+                        &plan,
+                    )
                     .await?
                 {
-                    Wrote::Record(value) => Ok(Written::Committed(read(&value)?.1.modified)),
+                    Wrote::Record(value) => Ok(Written::Committed {
+                        modified: read(&value)?.1.modified,
+                        version: plan.label,
+                    }),
                     Wrote::Refused => Ok(Written::PreconditionFailed),
                 }
             }
@@ -182,79 +243,5 @@ impl ObjectService {
             }
         }
         Err(Error::Contended)
-    }
-
-    /// Removes each of `keys`, a few at a time, one outcome per key in order; `None` when the bucket does not exist.
-    /// A missing key is removed successfully, as in S3.
-    ///
-    /// # Errors
-    /// The metadata store's refusal or outage while reading the bucket; a key's own failure is its outcome.
-    pub async fn delete_many(
-        &self,
-        bucket: &BucketName,
-        keys: &[ObjectKey],
-    ) -> Result<Option<Vec<Result<()>>>> {
-        use futures_util::StreamExt;
-        if self.repository.incarnation(bucket).await?.is_none() {
-            return Ok(None);
-        }
-        // Each removal owns its inputs: a future borrowing from the iterator's closure argument is not provably
-        // `Send` for every lifetime, which the server's handler future must be.
-        let removals = keys.iter().cloned().map(|key| {
-            let repository = self.repository.clone();
-            let bucket = bucket.clone();
-            async move { repository.remove(&bucket, &key).await }
-        });
-        let outcomes = futures_util::stream::iter(removals)
-            .buffered(DELETE_OBJECTS_CONCURRENCY)
-            .collect()
-            .await;
-        Ok(Some(outcomes))
-    }
-
-    /// Removes the object at `bucket/key`; deleting a missing key succeeds, as in S3.
-    ///
-    /// # Errors
-    /// The metadata store's refusal or outage.
-    pub async fn delete(&self, bucket: &BucketName, key: &ObjectKey) -> Result<Removed> {
-        if self.repository.incarnation(bucket).await?.is_none() {
-            return Ok(Removed::NoSuchBucket);
-        }
-        self.repository.remove(bucket, key).await?;
-        Ok(Removed::Done)
-    }
-
-    /// Removes the object at `bucket/key` only while its ETag is `etag` — the check and the delete are one step.
-    ///
-    /// # Errors
-    /// The metadata store's refusal or outage.
-    pub async fn delete_if_match(
-        &self,
-        bucket: &BucketName,
-        key: &ObjectKey,
-        etag: &str,
-    ) -> Result<RemovedIf> {
-        let Some(incarnation) = self.repository.incarnation(bucket).await? else {
-            return Ok(RemovedIf::NoSuchBucket);
-        };
-        if self
-            .repository
-            .remove_if(bucket, key, incarnation, etag)
-            .await?
-        {
-            return Ok(RemovedIf::Done);
-        }
-        // Why it was refused, read back after the atomic attempt: the classification can race, the delete never could.
-        let Snapshot {
-            bucket: current,
-            object: existing,
-        } = self.repository.read(bucket, key).await?;
-        if current != Some(incarnation) {
-            return Ok(RemovedIf::NoSuchBucket);
-        }
-        match existing {
-            Some((record, _)) if record == incarnation => Ok(RemovedIf::PreconditionFailed),
-            _ => Ok(RemovedIf::NoSuchKey),
-        }
     }
 }

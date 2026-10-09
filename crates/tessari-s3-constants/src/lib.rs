@@ -276,6 +276,11 @@ pub const COMPLETE_MULTIPART_BODY_MAX: usize = 10_000 * 512;
 /// every time.
 pub const MULTIPART_READ_ATTEMPTS: u32 = 3;
 
+/// Attempts of one write or delete of a key before giving up when another writer of the same key commits first every
+/// time; each attempt reads the key's newest version again (ADR-0010). One writer wins each round, so with n writers of
+/// one key the last of them needs n attempts; past this bound the request is answered as contended (503 SlowDown).
+pub const VERSION_WRITE_ATTEMPTS: u32 = 32;
+
 /// Most parts one ListParts page carries, and the default.
 pub const LIST_PARTS_MAX: usize = 1000;
 
@@ -287,6 +292,9 @@ pub const DEFAULT_SPACE: &str = "default";
 
 /// Object records still holding their bytes (a store from before ADR-0008) converted per batch at start.
 pub const INLINE_CONVERT_BATCH: usize = 100;
+
+/// Object records read per batch while a store from before ADR-0010 gets its null versions at start.
+pub const VERSION_CONVERT_BATCH: usize = 100;
 
 /// The size a source must exceed for UploadPartCopy to copy a byte range of it. AWS documents "greater than 5 MB";
 /// read as MiB, the unit of the part minimum it sits beside (inferred — the page does not say which).

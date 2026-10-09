@@ -105,6 +105,8 @@ pub enum Completed {
         checksum: (ChecksumAlgorithm, String),
         /// Whether the checksum is composite (otherwise it covers the whole object).
         composite: bool,
+        /// The completed object's version id once its bucket has been versioned.
+        version: Option<String>,
     },
     /// The upload does not exist for this bucket and key (never did, aborted, or completed).
     NoSuchUpload,

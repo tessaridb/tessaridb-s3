@@ -13,7 +13,7 @@ use tessari_s3_types::{ErrorCode, ObjectKey};
 use super::data;
 use super::headers::{Integrity, PutHeaders, read_put_headers};
 use crate::pipeline::call::Call;
-use crate::pipeline::response::empty_response;
+use crate::pipeline::response::{empty_response, with_version};
 use crate::routes::quota;
 use crate::{Error, Result};
 
@@ -166,8 +166,8 @@ async fn commit(
         .put(bucket, key, &object, &headers.condition)
         .await?
     {
-        Written::Committed(_) => {
-            let mut response = empty_response(StatusCode::OK);
+        Written::Committed { version, .. } => {
+            let mut response = with_version(empty_response(StatusCode::OK), version.as_deref());
             let response_headers = response.headers_mut();
             if let Ok(value) = HeaderValue::from_str(&etag) {
                 response_headers.insert("etag", value);
@@ -200,7 +200,7 @@ pub(super) fn not_written(written: &Written) -> Error {
             ErrorCode::PreconditionFailed,
             "at least one of the preconditions you specified did not hold",
         ),
-        Written::Committed(_) => (
+        Written::Committed { .. } => (
             ErrorCode::InternalError,
             "a committed write was reported as refused",
         ),

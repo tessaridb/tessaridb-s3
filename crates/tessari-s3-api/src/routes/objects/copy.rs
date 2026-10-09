@@ -16,7 +16,7 @@ use super::headers::read_put_headers;
 use super::put::not_written;
 use super::{data, source};
 use crate::pipeline::call::Call;
-use crate::pipeline::response::xml_response;
+use crate::pipeline::response::{with_version, xml_response};
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -131,16 +131,19 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         .put(bucket, key, &copied, &headers.condition)
         .await?
     {
-        Written::Committed(modified) => Ok(xml_response(
-            StatusCode::OK,
-            format!(
-                "<CopyObjectResult xmlns=\"{S3_NAMESPACE}\"><ETag>{}</ETag><LastModified>{}</LastModified>\
-                 <Checksum{name}>{}</Checksum{name}><ChecksumType>FULL_OBJECT</ChecksumType></CopyObjectResult>",
-                escape(&copied.etag),
-                modified.iso8601_millis(),
-                escape(&value),
-                name = algorithm.name()
+        Written::Committed { modified, version } => Ok(with_version(
+            xml_response(
+                StatusCode::OK,
+                format!(
+                    "<CopyObjectResult xmlns=\"{S3_NAMESPACE}\"><ETag>{}</ETag><LastModified>{}</LastModified>\
+                     <Checksum{name}>{}</Checksum{name}><ChecksumType>FULL_OBJECT</ChecksumType></CopyObjectResult>",
+                    escape(&copied.etag),
+                    modified.iso8601_millis(),
+                    escape(&value),
+                    name = algorithm.name()
+                ),
             ),
+            version.as_deref(),
         )),
         refused => Err(not_written(&refused)),
     }

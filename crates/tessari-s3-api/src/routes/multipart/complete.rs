@@ -17,7 +17,7 @@ use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 use super::{key_text, no_such_upload, upload_id};
 use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
-use crate::pipeline::response::xml_response;
+use crate::pipeline::response::{with_version, xml_response};
 use crate::routes::objects::headers::read_put_headers;
 use crate::routes::quota::Room;
 use crate::xml::{S3_NAMESPACE, escape};
@@ -261,6 +261,7 @@ pub(crate) async fn complete(
         etag,
         checksum: (algorithm, value),
         composite,
+        version,
     } = outcome
     else {
         return Err(refused(&outcome));
@@ -273,15 +274,18 @@ pub(crate) async fn complete(
     } else {
         "FULL_OBJECT"
     };
-    Ok(xml_response(
-        StatusCode::OK,
-        format!(
-            "<CompleteMultipartUploadResult xmlns=\"{S3_NAMESPACE}\"><Location>/{bucket}/{key}</Location>\
-             <Bucket>{bucket}</Bucket><Key>{key}</Key><ETag>{}</ETag><Checksum{name}>{}</Checksum{name}>\
-             <ChecksumType>{kind}</ChecksumType></CompleteMultipartUploadResult>",
-            escape(&etag),
-            escape(&value)
+    Ok(with_version(
+        xml_response(
+            StatusCode::OK,
+            format!(
+                "<CompleteMultipartUploadResult xmlns=\"{S3_NAMESPACE}\"><Location>/{bucket}/{key}</Location>\
+                 <Bucket>{bucket}</Bucket><Key>{key}</Key><ETag>{}</ETag><Checksum{name}>{}</Checksum{name}>\
+                 <ChecksumType>{kind}</ChecksumType></CompleteMultipartUploadResult>",
+                escape(&etag),
+                escape(&value)
+            ),
         ),
+        version.as_deref(),
     ))
 }
 

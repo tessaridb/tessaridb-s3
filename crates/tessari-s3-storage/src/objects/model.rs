@@ -68,6 +68,8 @@ pub struct StoredObject {
     pub checksums: BTreeMap<String, String>,
     /// The bytes or the data file holding them.
     pub content: Content,
+    /// The version id, once the bucket has been versioned (`null` for a null version); none before that.
+    pub version: Option<String>,
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.
@@ -84,8 +86,13 @@ pub enum WriteCondition {
 /// What a write ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Written {
-    /// Committed at this instant.
-    Committed(Timestamp),
+    /// Committed at `modified`; `version` is the id it answers with once its bucket has been versioned.
+    Committed {
+        /// The commit instant.
+        modified: Timestamp,
+        /// `null` or the new version's id; `None` while the bucket was never versioned.
+        version: Option<String>,
+    },
     /// The bucket does not exist.
     NoSuchBucket,
     /// The condition did not hold: 412.

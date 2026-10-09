@@ -241,10 +241,11 @@ impl MultipartService {
             .put(bucket, key, &object, &request.condition)
             .await?
         {
-            Written::Committed(_) => Ok(Completed::Done {
+            Written::Committed { version, .. } => Ok(Completed::Done {
                 etag: assembled.etag,
                 checksum: (checksum.algorithm(), assembled.checksum),
                 composite: matches!(checksum, ObjectChecksum::Composite(_)),
+                version,
             }),
             // An abort or another completion that won leaves no upload, whatever else the refusal looked like.
             _ if self.repository.upload(id).await?.is_none() => Ok(Completed::NoSuchUpload),
