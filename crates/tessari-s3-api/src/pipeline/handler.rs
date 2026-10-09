@@ -100,6 +100,7 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         &principal,
         &addressed,
         &parts.headers,
+        query.iter().any(|(name, _)| name == "versionId"),
     )
     .await?;
     let call = Call {

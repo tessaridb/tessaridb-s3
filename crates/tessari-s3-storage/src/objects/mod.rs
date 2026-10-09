@@ -11,7 +11,7 @@ mod version_id;
 
 pub use model::{
     Content, HealBacklog, Healed, Listed, Multipart, NewObject, ObjectSummary, Part, Reclaimed,
-    Removed, RemovedIf, StoredObject, WriteCondition, Written,
+    Removed, RemovedIf, StoredObject, VersionRemoved, WriteCondition, Written,
 };
 pub use reader::ObjectReader;
 pub use service::ObjectService;

@@ -131,10 +131,30 @@ pub struct Healed {
 }
 
 /// What a delete ended in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Removed {
-    /// The key holds no object now (whether or not it did before).
-    Done,
+    /// The key holds no object now (whether or not it did before); `marker` is the id of the delete marker the delete
+    /// added, once the bucket has been versioned.
+    Done {
+        /// The added delete marker's version id (`null` while suspended).
+        marker: Option<String>,
+    },
+    /// The bucket does not exist.
+    NoSuchBucket,
+}
+
+/// What a delete naming one version ended in (S3 ref 08 M3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionRemoved {
+    /// The version is gone; `marker` when it was a delete marker. When it was the newest, the next newest is current.
+    Done {
+        /// Whether the removed version was a delete marker.
+        marker: bool,
+    },
+    /// No version of the key has that id: it is already gone.
+    Absent,
+    /// No version this server issues is spelled so.
+    Malformed,
     /// The bucket does not exist.
     NoSuchBucket,
 }

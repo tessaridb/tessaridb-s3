@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- DeleteObject with `versionId` permanently removes that version: when it was the newest the next newest becomes
+  current, and removing a delete marker brings the object back (`x-amz-delete-marker: true`). It needs who administers
+  the bucket, not a writer; a malformed id is refused `InvalidArgument`, an id naming no version answers 204. A simple
+  delete in a versioned bucket answers the marker it added (`x-amz-delete-marker`, `x-amz-version-id`).
 - Versioned buckets keep their versions: in an enabled bucket every write adds a version (its id answered in
   `x-amz-version-id`, by PutObject, CopyObject, CompleteMultipartUpload, GetObject and HeadObject) and a delete adds a
   delete marker, keeping every earlier version and its bytes; in a suspended bucket a write or delete replaces only the

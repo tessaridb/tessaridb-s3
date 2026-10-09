@@ -51,6 +51,7 @@ mod users;
 mod users_sealed;
 mod versioning;
 mod versions_convert;
+mod versions_delete;
 mod versions_kept;
 
 use axum::body::{Body, to_bytes};

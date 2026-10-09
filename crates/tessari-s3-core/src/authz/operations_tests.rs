@@ -1,4 +1,4 @@
-use super::{Need, required};
+use super::{Need, required, required_naming_version};
 use crate::dispatch::{Operation, implemented};
 
 #[test]
@@ -40,6 +40,21 @@ fn copies_also_need_the_source_readable() {
     }
     let put = required(Operation::PutObject).expect("PutObject is implemented");
     assert!(!put.source_read);
+}
+
+#[test]
+fn deleting_a_version_needs_who_administers_the_bucket() {
+    assert_eq!(
+        required_naming_version(Operation::DeleteObject).map(|needs| needs.primary),
+        Some(Need::ConfigureBucket)
+    );
+    for read in [Operation::GetObject, Operation::HeadObject] {
+        assert_eq!(
+            required_naming_version(read).map(|needs| needs.primary),
+            Some(Need::ReadObject),
+            "{read:?}: reading a version is a read"
+        );
+    }
 }
 
 #[test]

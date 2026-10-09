@@ -85,3 +85,13 @@ pub const fn required(operation: Operation) -> Option<Required> {
         _ => None,
     }
 }
+
+/// What `operation` needs when the request names a version (`versionId`): deleting a version is permanent — the one
+/// loss versioning exists to prevent — so it needs who administers the bucket; anything else needs what it always does.
+#[must_use]
+pub const fn required_naming_version(operation: Operation) -> Option<Required> {
+    match operation {
+        Operation::DeleteObject => on(Need::ConfigureBucket),
+        other => required(other),
+    }
+}

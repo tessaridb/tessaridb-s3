@@ -63,12 +63,13 @@ pub(super) async fn remove_key(
     bucket: &BucketName,
     key: &ObjectKey,
     incarnation: [u8; 16],
-) -> Result<()> {
+) -> Result<Option<String>> {
     for _ in 0..VERSION_WRITE_ATTEMPTS {
         let head = repository.head(bucket, key).await?;
         let plan = plan(&head, true)?;
         if repository.remove(bucket, key, incarnation, &plan).await? {
-            return Ok(());
+            // The delete marker's id, when the bucket's state had the delete add one.
+            return Ok(plan.create.and(plan.label));
         }
     }
     Err(Error::Contended)

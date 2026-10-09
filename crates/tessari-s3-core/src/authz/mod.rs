@@ -11,7 +11,7 @@ pub use model::{
     Access, Action, BucketResource, Principal, Role, SpaceName, UploadPrincipal, UserName,
     UserPrincipal, UserResource, Visible,
 };
-pub use operations::{Need, Required, required};
+pub use operations::{Need, Required, required, required_naming_version};
 
 #[cfg(test)]
 mod decide_tests;

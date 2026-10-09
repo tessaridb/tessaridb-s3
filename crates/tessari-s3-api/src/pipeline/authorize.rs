@@ -6,7 +6,9 @@
 
 use axum::http::HeaderMap;
 use tessari_s3_core::authz::Need;
-use tessari_s3_core::authz::{Action, BucketResource, Decision, Principal, authorize, required};
+use tessari_s3_core::authz::{
+    Action, BucketResource, Decision, Principal, authorize, required, required_naming_version,
+};
 use tessari_s3_core::dispatch::Operation;
 use tessari_s3_types::{BucketName, ErrorCode};
 
@@ -28,13 +30,19 @@ pub async fn authorize_operation(
     principal: &Principal,
     addressed: &Addressed,
     headers: &HeaderMap,
+    names_version: bool,
 ) -> Result<()> {
     let space = match principal {
         Principal::Root => return Ok(()),
         Principal::User(user) => &user.space,
         Principal::Upload(upload) => &upload.parent.space,
     };
-    let needs = required(operation).ok_or_else(denied)?;
+    let needs = if names_version {
+        required_naming_version(operation)
+    } else {
+        required(operation)
+    }
+    .ok_or_else(denied)?;
     // A one-key credential asks to upload the key it addresses; anything else it asks is judged as asked, and refused.
     if let (Principal::Upload(_), true, Some(key)) = (principal, needs.upload, &addressed.key) {
         let action = Action::Upload {

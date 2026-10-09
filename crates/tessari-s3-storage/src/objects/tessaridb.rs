@@ -21,6 +21,8 @@ mod page;
 mod parts;
 #[path = "tessaridb_remove.rs"]
 mod remove;
+#[path = "tessaridb_version_delete.rs"]
+mod version_delete;
 #[path = "tessaridb_versions.rs"]
 mod versions;
 #[path = "tessaridb_write.rs"]

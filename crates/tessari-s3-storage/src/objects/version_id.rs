@@ -33,9 +33,45 @@ pub(crate) fn named(seq: u64, nonce: u64) -> String {
     format!("{seq:016x}{nonce:016x}")
 }
 
+/// Which version a version id names, as far as its spelling tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Naming {
+    /// The key's null version, wherever it sits.
+    Null,
+    /// The version numbered so — if its stored id is the whole id, nonce included.
+    Seq(u64),
+}
+
+/// What `id` names; `None` when no version this server issues could be spelled so.
+pub(crate) fn parse(id: &str) -> Option<Naming> {
+    if id == NULL {
+        return Some(Naming::Null);
+    }
+    let lower_hex = |byte: &u8| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte);
+    if id.len() != 32 || !id.as_bytes().iter().all(lower_hex) {
+        return None;
+    }
+    u64::from_str_radix(id.get(..16)?, 16).ok().map(Naming::Seq)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{key_prefix, named, record_id};
+    use super::{Naming, key_prefix, named, parse, record_id};
+
+    #[test]
+    fn a_version_id_reads_back_as_what_it_names() {
+        assert_eq!(parse(&named(7, 0xdead_beef)), Some(Naming::Seq(7)));
+        assert_eq!(parse("null"), Some(Naming::Null));
+        for refused in [
+            "",
+            "NULL",
+            "0000000000000007",
+            "000000000000000700000000DEADBEEF",
+            "g".repeat(32).as_str(),
+        ] {
+            assert_eq!(parse(refused), None, "{refused:?}");
+        }
+    }
 
     #[test]
     fn ids_sort_by_key_in_byte_order_then_newest_first() {
