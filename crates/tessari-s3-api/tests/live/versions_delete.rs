@@ -199,6 +199,98 @@ async fn only_who_administers_a_bucket_deletes_a_version() {
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_batch_deletes_versions_by_id_and_reports_each_key_as_s3_does() {
+    let _why = IGNORED;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    let storage = state.storage();
+    let ann = user_with_key(storage, "ann", "alpha", Role::Member, true).await;
+    let bob = user_with_key(storage, "bob", "alpha", Role::Member, false).await;
+    assert_eq!(
+        call_as(&state, ann.pair(), "PUT", "/files", vec![], vec![], b"")
+            .await
+            .status,
+        200
+    );
+    grant(
+        storage,
+        "bob",
+        "files",
+        Access {
+            read: true,
+            write: true,
+        },
+    )
+    .await;
+    set_versioning(&state, "files", "Enabled").await;
+    let old = version_header(&put(&state, "/files/k", b"old").await).expect("an id");
+    put(&state, "/files/k", b"new").await;
+    put(&state, "/files/m", b"m").await;
+    let document = format!(
+        "<Delete><Object><Key>k</Key><VersionId>{old}</VersionId></Object>\
+         <Object><Key>m</Key></Object>\
+         <Object><Key>k</Key><VersionId>bad</VersionId></Object></Delete>"
+    );
+
+    // A writer: the simple delete goes ahead, the version entries are refused one by one and remove nothing.
+    let md5 = crate::delete_many::md5_of(&document);
+    let by_writer = call_as(
+        &state,
+        bob.pair(),
+        "POST",
+        "/files",
+        vec![("delete", None)],
+        vec![("content-md5", md5.as_str())],
+        document.as_bytes(),
+    )
+    .await;
+    assert_eq!(by_writer.status, 200, "{}", by_writer.body);
+    assert!(
+        by_writer.body.contains(&format!(
+            "<Error><Key>k</Key><VersionId>{old}</VersionId><Code>AccessDenied</Code>"
+        )),
+        "{}",
+        by_writer.body
+    );
+    assert!(
+        by_writer.body.contains(
+            "<Deleted><Key>m</Key><DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>"
+        )
+    );
+    assert_eq!(
+        versions(&planter, "files", "k").await.len(),
+        2,
+        "nothing of `k` went"
+    );
+
+    let by_owner = crate::delete_many::delete_many(&state, "files", &document).await;
+    assert_eq!(by_owner.status, 200, "{}", by_owner.body);
+    assert!(
+        by_owner.body.contains(&format!(
+            "<Deleted><Key>k</Key><VersionId>{old}</VersionId></Deleted>"
+        )),
+        "{}",
+        by_owner.body
+    );
+    assert!(
+        by_owner
+            .body
+            .contains("<Error><Key>k</Key><VersionId>bad</VersionId><Code>InvalidArgument</Code>"),
+        "{}",
+        by_owner.body
+    );
+    assert_eq!(
+        versions(&planter, "files", "k").await.len(),
+        1,
+        "the named version went"
+    );
+    assert_eq!(
+        call(&state, "GET", "/files/k", vec![], b"").await.body,
+        "new"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn version_deletes_racing_writes_leave_the_newest_version_current() {
     let _why = IGNORED;
     let (state, planter, _) = fresh_with(scratch_dir()).await;

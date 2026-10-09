@@ -3,7 +3,33 @@ use tessari_s3_types::ErrorCode;
 use super::{Request, parse};
 
 fn keys(request: &Request) -> Vec<&str> {
-    request.keys.iter().map(|key| key.as_str()).collect()
+    request
+        .entries
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .collect()
+}
+
+#[test]
+fn a_version_id_comes_back_beside_its_key() {
+    let request = parse(b"<Delete><Object><Key>k</Key><VersionId>v1</VersionId></Object><Object><Key>j</Key></Object></Delete>")
+        .expect("parses");
+    let versions: Vec<Option<&str>> = request
+        .entries
+        .iter()
+        .map(|(_, version)| version.as_deref())
+        .collect();
+    assert_eq!(
+        (keys(&request), versions),
+        (vec!["k", "j"], vec![Some("v1"), None])
+    );
+    assert_eq!(
+        code(
+            "<Delete><Object><Key>k</Key><VersionId>a</VersionId><VersionId>b</VersionId></Object></Delete>"
+        ),
+        Some(ErrorCode::MalformedXml),
+        "one version per entry"
+    );
 }
 
 fn code(document: &str) -> Option<ErrorCode> {
@@ -31,7 +57,7 @@ fn a_thousand_keys_are_accepted_and_a_thousand_and_one_are_malformed() {
         format!("<Delete>{objects}</Delete>")
     };
     assert_eq!(
-        parse(document(1000).as_bytes()).map(|r| r.keys.len()),
+        parse(document(1000).as_bytes()).map(|r| r.entries.len()),
         Ok(1000)
     );
     assert_eq!(code(&document(1001)), Some(ErrorCode::MalformedXml));
@@ -40,7 +66,6 @@ fn a_thousand_keys_are_accepted_and_a_thousand_and_one_are_malformed() {
 #[test]
 fn what_is_not_implemented_is_refused_by_name() {
     for element in [
-        "<VersionId>v</VersionId>",
         "<ETag>\"e\"</ETag>",
         "<LastModifiedTime>2026-01-01T00:00:00Z</LastModifiedTime>",
         "<Size>1</Size>",

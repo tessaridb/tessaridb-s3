@@ -25,7 +25,11 @@ fn document(keys: &[&str], quiet: bool) -> String {
     format!("<Delete xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{quiet}{objects}</Delete>")
 }
 
-async fn delete_many(state: &tessari_s3_api::ApiState, bucket: &str, document: &str) -> Seen {
+pub(crate) async fn delete_many(
+    state: &tessari_s3_api::ApiState,
+    bucket: &str,
+    document: &str,
+) -> Seen {
     let md5 = md5_of(document);
     call_with(
         state,
@@ -190,11 +194,6 @@ async fn a_request_this_server_cannot_honour_deletes_nothing() {
     let refs: Vec<&str> = too_many.iter().map(String::as_str).collect();
     let cases = [
         (document(&refs, false), 400, "MalformedXML"),
-        (
-            "<Delete><Object><Key>k</Key><VersionId>v1</VersionId></Object></Delete>".to_owned(),
-            501,
-            "NotImplemented",
-        ),
         (
             "<Delete><Object><Key>k</Key><ETag>\"x\"</ETag></Object></Delete>".to_owned(),
             501,

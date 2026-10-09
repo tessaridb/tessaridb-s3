@@ -143,6 +143,18 @@ pub enum Removed {
     NoSuchBucket,
 }
 
+/// What one entry of a batch delete ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Deleted {
+    /// A simple delete: the key holds no current object; `marker` is the id of the delete marker it added.
+    Current {
+        /// The added delete marker's version id, once the bucket has been versioned.
+        marker: Option<String>,
+    },
+    /// A delete naming a version.
+    Version(VersionRemoved),
+}
+
 /// What a delete naming one version ended in (S3 ref 08 M3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionRemoved {

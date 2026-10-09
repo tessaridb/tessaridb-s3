@@ -73,6 +73,23 @@ pub async fn authorize_operation(
     Ok(())
 }
 
+/// Whether `principal` administers bucket `name` — what a DeleteObjects entry naming a version needs, judged once for
+/// the bucket because grants are per bucket.
+///
+/// # Errors
+/// `AccessDenied` when the bucket cannot be reached; the store's failure when it cannot be read.
+pub async fn may_configure(
+    state: &ApiState,
+    principal: &Principal,
+    name: &BucketName,
+) -> Result<bool> {
+    if matches!(principal, Principal::Root) {
+        return Ok(true);
+    }
+    let action = Action::ConfigureBucket(bucket(state, Some(name)).await?);
+    Ok(matches!(authorize(principal, &action), Decision::Allow))
+}
+
 /// The bucket `name` as the evaluator needs it; a missing bucket is refused like one the caller may not reach.
 async fn bucket(state: &ApiState, name: Option<&BucketName>) -> Result<BucketResource> {
     let name = name.ok_or_else(denied)?;

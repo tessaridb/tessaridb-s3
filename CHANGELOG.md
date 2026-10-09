@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- DeleteObjects takes a `VersionId` per entry: that version is removed as DeleteObject with `versionId` removes it,
+  each `<Deleted>` names its `VersionId`, and a removed or added delete marker is reported with `DeleteMarker` and
+  `DeleteMarkerVersionId`. Entries naming a version are refused `AccessDenied` one by one for a caller who does not
+  administer the bucket, and the batch's other entries go ahead.
 - DeleteObject with `versionId` permanently removes that version: when it was the newest the next newest becomes
   current, and removing a delete marker brings the object back (`x-amz-delete-marker: true`). It needs who administers
   the bucket, not a writer; a malformed id is refused `InvalidArgument`, an id naming no version answers 204. A simple
