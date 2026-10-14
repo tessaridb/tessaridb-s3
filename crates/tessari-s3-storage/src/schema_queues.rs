@@ -1,8 +1,9 @@
-//! Moves the work lists an earlier build kept on plain tables onto the queues of ADR-0009, at start-up. The events that
-//! queued replaced data into `gc` are dropped and the schema applied again, which defines them anew (a definition
-//! saying `IF NOT EXISTS` never replaces one); then each `gc` entry becomes a `reclaims` record held back until its queuing instant plus the recorded grace, with its
-//! `reclaiming` mark kept, and each `heals` entry a `heal_queue` record due at once. Every entry moves in its own
-//! transaction together with its removal, so a start cut short resumes where it stopped; an emptied table is dropped.
+//! Moves the work lists an earlier build kept on plain tables onto the queues of ADR-0009, at start-up, after the
+//! schema is applied — which already replaced the events that queued replaced data into `gc` (every reclamation event
+//! is defined `OR REPLACE`). Each `gc` entry becomes a `reclaims` record held back until its queuing instant plus the
+//! grace, with its `reclaiming` mark kept, and each `heals` entry a `heal_queue` record due at once. Every entry moves
+//! in its own transaction together with its removal, so a start cut short resumes where it stopped; an emptied table
+//! is dropped.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Value};
 
@@ -15,20 +16,7 @@ const BATCH: usize = 100;
 ///
 /// # Errors
 /// The metadata store's refusal or outage.
-pub(crate) async fn convert(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<usize> {
-    let mut stale = Vec::new();
-    for (event, table) in [("supersede", "objects"), ("part_superseded", "parts")] {
-        if queues_into_gc(pool, table).await? {
-            stale.push(format!("DROP EVENT {event} ON {table};"));
-        }
-    }
-    if !stale.is_empty() {
-        // One transaction: both go, or neither. A start stopped before the schema is applied again finds them gone and
-        // its own schema application, which runs first, defines them.
-        pool.run(&format!("BEGIN; {} COMMIT;", stale.join(" ")), Vec::new())
-            .await?;
-        crate::schema::apply(pool, reclaim_grace_secs).await?;
-    }
+pub(crate) async fn convert(pool: &MetaPool) -> Result<usize> {
     let tables = tables(pool).await?;
     let mut moved = 0_usize;
     if tables.iter().any(|name| name == "gc") {
@@ -37,10 +25,8 @@ pub(crate) async fn convert(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<
                 pool,
                 "gc",
                 "SELECT data, queued, reclaiming FROM gc",
-                "BEGIN; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
-                 LET $grace = $settings.grace; \
-                 UPSERT reclaims:$data SET data = $data, \
-                 due = time::from_unix(time::unix($queued) + $grace), reclaiming = $reclaiming; \
+                "BEGIN; UPSERT reclaims:$data SET data = $data, \
+                 due = $queued + duration::from_secs($reclaim_grace), reclaiming = $reclaiming; \
                  DELETE gc:$data; COMMIT;",
             )
             .await?,
@@ -58,31 +44,6 @@ pub(crate) async fn convert(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<
         );
     }
     Ok(moved)
-}
-
-/// Whether `table` (this module's own literal) still carries an event queuing into `gc`, as its definition reads.
-async fn queues_into_gc(pool: &MetaPool, table: &str) -> Result<bool> {
-    match pool
-        .run(&format!("INFO FOR TABLE {table};"), Vec::new())
-        .await?
-        .into_iter()
-        .next()
-    {
-        Some(Answer::Value {
-            value: Value::Object(info),
-            ..
-        }) => match info.get("definition") {
-            Some(Value::String(definition)) => Ok(definition.contains("UPSERT gc:")),
-            _ => Err(Error::Malformed {
-                record: "table info",
-                reason: "definition",
-            }),
-        },
-        _ => Err(Error::Malformed {
-            record: "table info",
-            reason: "not a value",
-        }),
-    }
 }
 
 /// The tables of the configured database.

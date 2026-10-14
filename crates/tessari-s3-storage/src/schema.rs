@@ -9,9 +9,9 @@ use crate::Result;
 /// The table definitions, run inside the configured namespace and database. The `reclaims` queue holds the data ids
 /// whose files may be reclaimed: an upload's own id from before its file exists until the commit that references it,
 /// and — through the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it
-/// replaced. Each record is held back until `due`, the queuing instant plus the grace in `s3_settings:'reclaim'`
-/// (written here from configuration, in the same transaction, because an event takes no parameter); its
-/// `reclaiming` mark is the fence a commit asserts against, set by a reclaimer before it removes a byte (ADR-0009).
+/// replaced. Each record is held back until `due`, the queuing instant plus the database parameter `$reclaim_grace`
+/// (defined here from configuration at every start; the events read it, and their bodies are replaced at every start
+/// too, so a store from an earlier build gets this build's); its `reclaiming` mark is the fence a commit asserts against, set by a reclaimer before it removes a byte (ADR-0009).
 /// Multipart uploads keep their own records (`uploads`, `parts`), never seen by an object read or a listing, and a
 /// replaced or removed part queues its data the same way (`part_superseded`). A completed upload's parts become an
 /// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
@@ -52,19 +52,17 @@ DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
  data uuid, upload uuid, parts int);
-DEFINE TABLE IF NOT EXISTS s3_settings (grace int REQUIRED);
-UPSERT s3_settings:'reclaim' SET grace = $grace;
+DEFINE PARAM OR REPLACE $reclaim_grace VALUE $grace;
 DEFINE QUEUE IF NOT EXISTS reclaims TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS data ON reclaims TYPE uuid REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON reclaims TYPE datetime REQUIRED;
 DEFINE FIELD IF NOT EXISTS reclaiming ON reclaims TYPE datetime;
 DEFINE INDEX IF NOT EXISTS by_data ON objects FIELDS data;
 DEFINE INDEX IF NOT EXISTS by_bucket ON objects FIELDS bucket_name;
-DEFINE EVENT IF NOT EXISTS supersede ON objects FOR UPDATE, DELETE \
+DEFINE EVENT OR REPLACE supersede ON objects FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
-THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
-LET $grace = $settings.grace; \
-UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
+THEN { LET $old = $before.data; \
+UPSERT reclaims:$old SET data = $old, due = time::now() + duration::from_secs($reclaim_grace); };
 DEFINE TABLE IF NOT EXISTS uploads (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, initiated datetime REQUIRED,\
  headers object REQUIRED, metadata object REQUIRED, checksum_algorithm string, checksum_type string,\
@@ -74,11 +72,10 @@ DEFINE TABLE IF NOT EXISTS parts (\
  modified datetime REQUIRED, checksums object REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_upload ON parts FIELDS upload;
 DEFINE INDEX IF NOT EXISTS by_part_data ON parts FIELDS data;
-DEFINE EVENT IF NOT EXISTS part_superseded ON parts FOR UPDATE, DELETE \
+DEFINE EVENT OR REPLACE part_superseded ON parts FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
-THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
-LET $grace = $settings.grace; \
-UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
+THEN { LET $old = $before.data; \
+UPSERT reclaims:$old SET data = $old, due = time::now() + duration::from_secs($reclaim_grace); };
 DEFINE FIELD IF NOT EXISTS version_id ON objects TYPE string;
 DEFINE TABLE IF NOT EXISTS versions (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, version_id string REQUIRED,\
@@ -87,11 +84,10 @@ DEFINE TABLE IF NOT EXISTS versions (\
 DEFINE TABLE IF NOT EXISTS version_nulls (seq int REQUIRED);
 DEFINE TABLE IF NOT EXISTS s3_conversions (done datetime REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_version_data ON versions FIELDS data;
-DEFINE EVENT IF NOT EXISTS version_released ON versions FOR UPDATE, DELETE \
+DEFINE EVENT OR REPLACE version_released ON versions FOR UPDATE, DELETE \
 WHEN $before.data != NONE AND $before.data != $after.data \
-THEN { LET $old = $before.data; LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
-LET $grace = $settings.grace; \
-UPSERT reclaims:$old SET data = $old, due = time::from_unix(time::unix(time::now()) + $grace); };
+THEN { LET $old = $before.data; \
+UPSERT reclaims:$old SET data = $old, due = time::now() + duration::from_secs($reclaim_grace); };
 DEFINE EVENT IF NOT EXISTS version_parts_released ON versions FOR UPDATE, DELETE \
 WHEN $before.upload != NONE AND $before.upload != $after.upload \
 THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
@@ -161,16 +157,14 @@ pub async fn apply(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
 
 /// Queues data `$data` for reclamation, held back by the grace the schema recorded — the one statement every
 /// server-side path queues with, so it and the events compute `due` from the same value.
-pub(crate) const QUEUE_FOR_RECLAIM: &str = "LET $settings = (SELECT grace FROM ONLY s3_settings:'reclaim'); \
-LET $grace = $settings.grace; \
-UPSERT reclaims:$data SET data = $data, due = time::from_unix(time::unix(time::now()) + $grace);";
+pub(crate) const QUEUE_FOR_RECLAIM: &str = "UPSERT reclaims:$data SET data = $data, due = time::now() + duration::from_secs($reclaim_grace);";
 
 /// The schema's one parameter: the reclamation grace, in seconds.
 fn grace(
     reclaim_grace_secs: u64,
 ) -> Result<Vec<(String, tessari_s3_infrastructure::tessaridb::Value)>> {
     let seconds = i64::try_from(reclaim_grace_secs).map_err(|_| crate::Error::Malformed {
-        record: "s3_settings",
+        record: "reclaim grace",
         reason: "a grace beyond i64",
     })?;
     Ok(vec![(

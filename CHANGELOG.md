@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- The reclamation grace is the metadata database's parameter `$reclaim_grace` instead of an `s3_settings` record,
+  and the events that queue replaced data are defined `OR REPLACE`, so every start brings a store from an earlier
+  build to this build's events without detecting and dropping the old ones. An existing `s3_settings` record is left
+  in place and no longer read.
 - A console action whose record append lost to a concurrent one waits a growing, randomly spread interval before
   appending again, instead of retrying at once; under load an action is no longer answered `500` with
   `action_not_recorded` after being carried out.

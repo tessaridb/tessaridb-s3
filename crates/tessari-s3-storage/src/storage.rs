@@ -119,7 +119,7 @@ impl Storage {
     /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
         crate::schema::apply(&self.pool, self.reclaim_grace_secs).await?;
-        let moved = crate::schema_queues::convert(&self.pool, self.reclaim_grace_secs).await?;
+        let moved = crate::schema_queues::convert(&self.pool).await?;
         if moved > 0 {
             tracing::info!(moved, "work-list entries moved onto the queues");
         }

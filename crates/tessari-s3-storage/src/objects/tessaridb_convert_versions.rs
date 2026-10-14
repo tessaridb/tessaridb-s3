@@ -77,22 +77,12 @@ impl TessariObjects {
     /// Drops `parts_released` from `objects` when the table still carries it: a build without versions released a
     /// replaced object's parts there, and with versions a replaced object's parts belong to its version.
     pub(crate) async fn drop_parts_released(&self) -> Result<()> {
-        let answers = self.pool.run("INFO FOR TABLE objects;", Vec::new()).await?;
-        let Some(Answer::Value {
-            value: Value::Object(info),
-            ..
-        }) = answers.into_iter().next()
-        else {
-            return Err(malformed("the table answered no description"));
-        };
-        let Some(Value::String(definition)) = info.get("definition") else {
-            return Err(malformed("the table description has no definition"));
-        };
-        if definition.contains("DEFINE EVENT parts_released") {
-            self.pool
-                .run("DROP EVENT parts_released ON objects;", Vec::new())
-                .await?;
-        }
+        self.pool
+            .run(
+                "DROP EVENT IF EXISTS parts_released ON objects;",
+                Vec::new(),
+            )
+            .await?;
         Ok(())
     }
 
