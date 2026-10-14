@@ -5,6 +5,8 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- The console's empty states (no buckets yet, an empty bucket or folder) sit inset in their card like a table does,
+  instead of against its edges.
 - Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or

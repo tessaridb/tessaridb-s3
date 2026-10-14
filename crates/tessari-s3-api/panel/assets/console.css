@@ -496,7 +496,9 @@ main:focus,
 
 .card.flush > .toolbar,
 .card.flush > .paging,
-.card.flush > .empty {
+/* Inset wherever it sits in the card: a list redrawn into a wrapper (the buckets filter, an object page) holds it a
+   level down, and there it would otherwise touch the card's edges. */
+.card.flush .empty {
   padding: var(--s-5) var(--card-inset);
   margin: 0;
 }
