@@ -4,6 +4,12 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# `paste` is unmaintained, with no vulnerability reported and no maintained release to move to. It is a
+# compile-time macro reached only through the AVIF encoder (image → ravif → rav1e), so no code of it runs in the
+# server. Ignored by its ID alone, so any later advisory against it still fails the check.
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "unmaintained compile-time macro under the AVIF encoder; nothing to upgrade to" },
+]
 
 [bans]
 multiple-versions = "warn"

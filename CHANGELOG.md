@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- `tessaridb-s3-bench`, a load generator that measures the server from the client side. It runs PUT, GET, HEAD,
+  ListObjectsV2 and DELETE for each object-size class and concurrency step, multipart uploads included. It reports
+  latency percentiles, rates, failures by S3 error code and a correctness check of every GET. `summarise` combines
+  like-for-like runs.
 - The console's empty states (no buckets yet, an empty bucket or folder) sit inset in their card like a table does,
   instead of against its edges.
 - Media rules per bucket, kept in the bucket's record: which content types under which key prefix get which

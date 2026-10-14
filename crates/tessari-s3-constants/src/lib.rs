@@ -400,3 +400,36 @@ pub const VERSION_CONVERT_BATCH: usize = 100;
 /// The size a source must exceed for UploadPartCopy to copy a byte range of it. AWS documents "greater than 5 MB";
 /// read as MiB, the unit of the part minimum it sits beside (inferred — the page does not say which).
 pub const RANGE_COPY_SOURCE_MIN: u64 = 5 * 1024 * 1024;
+
+/// Requests per benchmark phase (one operation, one size class, one concurrency) unless the byte budget allows fewer.
+pub const BENCH_DEFAULT_OPS: usize = 1000;
+
+/// Operations at the start of every benchmark phase left out of its histogram, while connections and caches warm.
+pub const BENCH_DEFAULT_WARMUP: usize = 50;
+
+/// Bytes one benchmark write phase may put; a large class gets fewer operations rather than a longer run.
+pub const BENCH_PHASE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// Object bytes the benchmark may hold in flight at once; a concurrency step above it is skipped for that class.
+pub const BENCH_INFLIGHT_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// Key prefixes the benchmark spreads its objects over.
+pub const BENCH_DEFAULT_PREFIXES: usize = 16;
+
+/// Part size of the benchmark's multipart class, and its object size in parts.
+pub const BENCH_PART_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Parts in one object of the benchmark's multipart class (256 MiB).
+pub const BENCH_MULTIPART_PARTS: u32 = 16;
+
+/// ListObjectsV2 requests per benchmark list phase.
+pub const BENCH_LIST_OPS: usize = 200;
+
+/// Significant decimal digits a benchmark latency histogram keeps.
+pub const BENCH_HISTOGRAM_DIGITS: u8 = 3;
+
+/// Longest latency a benchmark histogram records, in microseconds (one hour); a longer one counts at the top.
+pub const BENCH_HISTOGRAM_MAX_MICROS: u64 = 3_600_000_000;
+
+/// How long one benchmark request may take before it counts as a transport failure.
+pub const BENCH_REQUEST_TIMEOUT_SECS: u64 = 600;

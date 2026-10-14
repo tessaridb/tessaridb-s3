@@ -9,6 +9,7 @@
 
 mod header;
 mod presign;
+mod sign;
 mod streaming;
 
 use tessari_s3_core::auth::{

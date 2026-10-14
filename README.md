@@ -81,7 +81,8 @@ claims it; the two marked **tested** already are:
 
 ## Building
 
-A Cargo workspace on Rust 1.98 (edition 2024). It builds one process, `tessaridb-s3`.
+A Cargo workspace on Rust 1.98 (edition 2024). It builds the server, `tessaridb-s3`, and a load generator for it,
+`tessaridb-s3-bench` (see [Measuring](#measuring)).
 
 ```sh
 cargo build --workspace
@@ -174,6 +175,31 @@ starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them. T
 tests, which need Docker and the `tessaridb/tessaridb:0.34.0-beta` image: they start their own three-node
 TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
 traffic, then check that every acknowledged object reads back whole and nothing else is visible.
+
+## Measuring
+
+`tessaridb-s3-bench` measures a running server from the client side. Per object-size class (4 KiB, 128 KiB, 1 MiB,
+64 MiB, and 256 MiB uploaded in 16 MiB parts) and per concurrency step, it PUTs a set of keys spread over
+prefixes, GETs them back, HEADs them, lists them with ListObjectsV2 and deletes them. Each request is signed with
+SigV4 and declares its body's SHA-256. Every GET body is compared with what was PUT. A single mismatch marks the run
+invalid, and the command then exits non-zero. Latency is recorded from the request leaving to the last byte
+arriving. Building and hashing a body happens before the clock starts and is reported as the client's preparation
+share.
+
+```sh
+cargo build --release -p tessari-s3-bench
+TESSARIDB_S3_BENCH_ENDPOINT=127.0.0.1:9100 TESSARIDB_S3_BENCH_ACCESS_KEY=… TESSARIDB_S3_BENCH_SECRET_KEY=… \
+TESSARIDB_S3_BENCH_SERVER_BUILD=<image tag or commit> TESSARIDB_S3_BENCH_HOST_NOTE="<hardware, cluster shape>" \
+  target/release/tessaridb-s3-bench run          # prints a table, writes bench-<start>.json
+target/release/tessaridb-s3-bench summarise bench-*.json   # median and range per phase across runs
+```
+
+A run is shaped with `TESSARIDB_S3_BENCH_CLASSES` (`4k,128k,1m,64m,multipart`), `_CONCURRENCY` (`1,4,16,64`),
+`_OPS` (1000 per phase; a large class gets fewer, within 4 GiB a phase), `_WARMUP` (50 operations left out at the
+start of each phase), `_PREFIXES` (16), `_BUCKET` (`tessaridb-s3-bench`, created if absent) and `_OUT` (the report
+directory). A concurrency step that would hold more than 1 GiB of bodies at once is skipped for that class.
+`summarise` refuses reports that differ in server build, endpoint, host or workload. Only like-for-like runs are
+compared.
 
 ## In a container
 
