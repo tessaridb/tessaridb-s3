@@ -8,6 +8,7 @@ mod error;
 mod iam_config;
 mod kafka;
 pub mod media_image;
+pub mod media_video;
 mod meta_config;
 mod notify_config;
 pub mod peer;

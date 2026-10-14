@@ -49,6 +49,9 @@ pub struct S3Config {
     pub usage_interval_secs: u64,
     /// `TESSARIDB_S3_MEDIA_WORKERS` — image renditions made at once on this node (0 to 64; 0 makes none here).
     pub media_workers: usize,
+    /// `TESSARIDB_S3_FFMPEG` — the ffmpeg this node runs for video renditions and posters; unset, it takes no video
+    /// tasks.
+    pub ffmpeg: Option<std::path::PathBuf>,
     /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
     pub cluster: Option<ClusterSettings>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
@@ -199,6 +202,7 @@ impl S3Config {
                         reason: "not a whole number from 0 to 64",
                     })?,
             },
+            ffmpeg: get("TESSARIDB_S3_FFMPEG").map(|path| std::path::PathBuf::from(path.trim())),
             data_dir: get("TESSARIDB_S3_DATA_DIR")
                 .map(|dir| std::path::PathBuf::from(dir.trim()))
                 .ok_or(Error::MissingConfig {

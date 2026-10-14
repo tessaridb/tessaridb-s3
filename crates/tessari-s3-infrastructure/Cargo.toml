@@ -13,7 +13,7 @@ tessari-s3-types.workspace = true
 tessari-s3-observability.workspace = true
 thiserror.workspace = true
 tessaridb-client.workspace = true
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["sync", "time", "process"] }
 tracing.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

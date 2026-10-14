@@ -34,7 +34,7 @@ subtle.workspace = true
 [dev-dependencies]
 tessari-s3-daemons.workspace = true
 rskafka.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs"] }
 hmac.workspace = true
 sha2.workspace = true
 rcgen.workspace = true

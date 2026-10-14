@@ -19,9 +19,10 @@ use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
     Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, NotifyWorker, Reclaimer,
-    UploadReaper, UsageScanner, run,
+    UploadReaper, UsageScanner, VideoWorker, run,
 };
 use tessari_s3_storage::Storage;
+use tessari_s3_storage::media::TaskQueue;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
@@ -151,8 +152,23 @@ async fn main() -> anyhow::Result<()> {
         || "single".to_owned(),
         |cluster| cluster.node.as_str().to_owned(),
     );
+    // A node back under its own name takes back what it held when it stopped, rather than waiting the holds out.
+    for queue in [TaskQueue::Images, TaskQueue::Videos] {
+        media.reclaim(queue, &consumer).await?;
+    }
     for _ in 0..config.media_workers {
         let worker = ImageWorker::new(media.clone(), storage.objects().clone(), consumer.clone());
+        daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
+    }
+    // Only a node with ffmpeg takes video and poster tasks; the others leave them in the queue for it.
+    if let Some(ffmpeg) = &config.ffmpeg {
+        let worker = VideoWorker::new(
+            media.clone(),
+            storage.objects().clone(),
+            consumer.clone(),
+            tessari_s3_infrastructure::media_video::Ffmpeg::new(ffmpeg.clone()),
+            std::env::temp_dir(),
+        );
         daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
     }
     let scanner = UsageScanner::new(

@@ -7,14 +7,13 @@ use std::time::Duration;
 use tessari_s3_constants::{
     DAEMON_RUN_TIMEOUT_SECS, MEDIA_BATCH, MEDIA_MAX_INPUT_BYTES, MEDIA_POLL_SECS,
 };
-use tessari_s3_core::media::{ImageFormat, Output, RENDITIONS};
-use tessari_s3_infrastructure::media_image::{Encoding, render};
+use tessari_s3_core::media::Output;
+use tessari_s3_infrastructure::media_image::render;
 use tessari_s3_storage::media::{MediaService, Task, TaskQueue};
-use tessari_s3_storage::objects::{Content, ObjectService, Written};
-use tessari_s3_types::{BucketName, ObjectKey};
+use tessari_s3_storage::objects::ObjectService;
 
-use crate::Error;
 use crate::daemon::{Daemon, DaemonFuture, Report};
+use crate::media_work::{encoding, landed, original, target, work};
 
 /// Renders image tasks.
 pub struct ImageWorker {
@@ -40,64 +39,34 @@ impl ImageWorker {
         let Output::Image { size, format } = rendition.output else {
             return Err("not an image output".to_owned());
         };
-        let (Ok(bucket), Ok(key)) = (
-            BucketName::new(&rendition.bucket),
-            ObjectKey::new(&rendition.key),
-        ) else {
+        let Some((bucket, object)) = original(&self.objects, rendition).await? else {
             return Ok(());
         };
-        let object = self
-            .objects
-            .stored(&bucket, &key, rendition.version_id.as_deref())
-            .await
-            .map_err(|error| error.to_string())?;
-        let Some(object) = object.filter(|object| match &object.content {
-            Content::Data(id) => *id == rendition.source,
-            Content::Parts(multipart) => multipart.upload == rendition.source,
-        }) else {
-            return Ok(());
-        };
-        let original = self
+        let bytes = self
             .objects
             .read_whole(&object, MEDIA_MAX_INPUT_BYTES)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "the original is larger than a media worker reads".to_owned())?;
-        let encoding = match format {
-            ImageFormat::Jpeg => Encoding::Jpeg,
-            ImageFormat::Png => Encoding::Png,
-            ImageFormat::Webp => Encoding::Webp,
-            ImageFormat::Avif => Encoding::Avif,
-        };
+        let encoder = encoding(format);
         // Bounded by the input guards before any decoding starts; it cannot be cancelled once running.
-        let made = tokio::task::spawn_blocking(move || render(&original, &[(size, encoding)]))
+        let made = tokio::task::spawn_blocking(move || render(&bytes, &[(size, encoder)]))
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| error.to_string())?
             .pop()
             .ok_or_else(|| "no rendition was made".to_owned())?;
-        let target = ObjectKey::new(&format!(
-            "{}{RENDITIONS}{}",
-            rendition.key,
-            rendition.output.file_name()
-        ))
-        .map_err(|_| "the rendition's key is longer than a key may be".to_owned())?;
-        match self
+        let written = self
             .objects
-            .put_bytes(&bucket, &target, &made.bytes, format.content_type())
+            .put_bytes(
+                &bucket,
+                &target(rendition)?,
+                &made.bytes,
+                format.content_type(),
+            )
             .await
-            .map_err(|error| error.to_string())?
-        {
-            Written::Committed { .. } | Written::NoSuchBucket => Ok(()),
-            _ => Err("the rendition was not written".to_owned()),
-        }
-    }
-}
-
-fn failed(error: &tessari_s3_storage::Error) -> Error {
-    Error::Run {
-        daemon: "media-images",
-        message: error.to_string(),
+            .map_err(|error| error.to_string())?;
+        landed(&written)
     }
 }
 
@@ -116,32 +85,18 @@ impl Daemon for ImageWorker {
 
     fn run_once(&self) -> DaemonFuture<'_> {
         Box::pin(async move {
-            let (mut made, mut retried) = (0_usize, 0_usize);
-            for _ in 0..MEDIA_BATCH {
-                let Some(task) = self
-                    .media
-                    .claim(TaskQueue::Images, &self.consumer, 1)
-                    .await
-                    .map_err(|e| failed(&e))?
-                    .pop()
-                else {
-                    break;
-                };
-                match self.make(&task).await {
-                    Ok(()) => {
-                        made = made.saturating_add(1);
-                        self.media.rendered(&task).await.map_err(|e| failed(&e))?;
-                    }
-                    Err(reason) => {
-                        tracing::warn!(daemon = "media-images", task = %task.name, %reason, "a rendition was not made");
-                        retried = retried.saturating_add(1);
-                        self.media
-                            .retry(&task, &reason)
-                            .await
-                            .map_err(|e| failed(&e))?;
-                    }
-                }
-            }
+            let (made, retried) = work(
+                "media-images",
+                &self.media,
+                TaskQueue::Images,
+                &self.consumer,
+                MEDIA_BATCH,
+                |task| async move {
+                    let outcome = self.make(&task).await;
+                    (task, outcome)
+                },
+            )
+            .await?;
             Ok(Report {
                 message: format!("renditions made {made}, handed back {retried}"),
             })

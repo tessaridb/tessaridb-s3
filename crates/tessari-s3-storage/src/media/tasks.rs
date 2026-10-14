@@ -105,6 +105,16 @@ impl TaskRepository for TessariMedia {
         Ok(())
     }
 
+    async fn release_all(&self, queue: TaskQueue, consumer: &str) -> Result<()> {
+        let script = format!(
+            "RELEASE ALL FROM {} FOR CONSUMER {};",
+            queue.table(),
+            quoted(consumer)?
+        );
+        self.pool.run(&script, Vec::new()).await?;
+        Ok(())
+    }
+
     async fn spent(&self, queue: TaskQueue, attempts: i64, limit: usize) -> Result<Vec<Task>> {
         let script = format!(
             "SELECT * FROM {} WHERE attempts >= $attempts LIMIT $limit;",

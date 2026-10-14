@@ -49,6 +49,14 @@ impl MediaService {
         self.repository.release(task, error, delay).await
     }
 
+    /// Frees every task of `queue` held under `consumer` — what a node that restarted under its own name left held.
+    ///
+    /// # Errors
+    /// A malformed consumer name, or the metadata store's refusal or outage.
+    pub async fn reclaim(&self, queue: TaskQueue, consumer: &str) -> Result<()> {
+        self.repository.release_all(queue, consumer).await
+    }
+
     /// Up to `limit` tasks of `queue` whose hand-outs are spent: no worker takes them again.
     ///
     /// # Errors

@@ -54,6 +54,7 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/usr/local/bin/tessaridb-s3-healthcheck"]
 
 # No init process: the server handles SIGTERM and SIGINT itself (draining
-# in-flight requests for TESSARIDB_S3_SHUTDOWN_GRACE_SECS) and forks nothing,
-# so it is correct as PID 1.
+# in-flight requests for TESSARIDB_S3_SHUTDOWN_GRACE_SECS), and the only child
+# it ever starts — ffmpeg, when TESSARIDB_S3_FFMPEG names one — it waits for or
+# kills and reaps itself, so it is correct as PID 1. This image carries no ffmpeg.
 ENTRYPOINT ["/usr/local/bin/tessaridb-s3"]

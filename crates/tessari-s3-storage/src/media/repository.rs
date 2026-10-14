@@ -39,6 +39,12 @@ pub(crate) trait TaskRepository: Send + Sync {
         error: &str,
         delay_secs: u64,
     ) -> impl Future<Output = Result<()>> + Send;
+    /// Frees every task of `queue` any session holds under `consumer`.
+    fn release_all(
+        &self,
+        queue: TaskQueue,
+        consumer: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
     /// Up to `limit` tasks of `queue` handed out at least `attempts` times.
     fn spent(
         &self,

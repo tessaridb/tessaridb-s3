@@ -335,3 +335,17 @@ fn two_image_workers_run_unless_configured_and_zero_renders_nothing() {
         );
     }
 }
+
+#[test]
+fn video_renditions_need_ffmpeg_named_and_a_blank_name_is_unset() {
+    assert_eq!(load(&CREDENTIALS).expect("loads").ffmpeg, None);
+    let mut vars = CREDENTIALS.to_vec();
+    vars.push(("TESSARIDB_S3_FFMPEG", " /usr/bin/ffmpeg "));
+    assert_eq!(
+        load(&vars).expect("loads").ffmpeg,
+        Some(std::path::PathBuf::from("/usr/bin/ffmpeg"))
+    );
+    let mut blank = CREDENTIALS.to_vec();
+    blank.push(("TESSARIDB_S3_FFMPEG", "  "));
+    assert_eq!(load(&blank).expect("loads").ffmpeg, None);
+}

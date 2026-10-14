@@ -309,6 +309,13 @@ pub const MEDIA_RETRY_MAX_SECS: u64 = 600;
 /// `media_images` and `media_videos`.
 pub const MEDIA_TASK_ATTEMPTS: i64 = 5;
 
+/// The longest one ffmpeg run may take before it is stopped: under the `media_videos` queue's 3600 s hold, so a live
+/// worker is not raced.
+pub const MEDIA_FFMPEG_TIMEOUT_SECS: u64 = 3000;
+
+/// The largest video original a worker copies out for ffmpeg, in bytes.
+pub const MEDIA_MAX_VIDEO_INPUT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
 /// Image workers a node runs when `TESSARIDB_S3_MEDIA_WORKERS` is not set.
 pub const DEFAULT_MEDIA_WORKERS: usize = 2;
 

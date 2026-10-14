@@ -20,7 +20,11 @@ section records which TessariDB version its metadata runs on.
   plans the objects the `media` group hands it into tasks in the metadata store's `media_images` queue (once per
   version and output) and renders tasks from it with `TESSARIDB_S3_MEDIA_WORKERS` workers (default 2, `0` for none);
   a failed task is tried again after a growing wait and stays listed after five tries. An original over 64 MiB or
-  50 megapixels gets none. Video and poster outputs are not made yet.
+  50 megapixels gets none.
+- Video renditions and posters through the operator's ffmpeg (`TESSARIDB_S3_FFMPEG`, run as its own process, never
+  linked): MP4 (H.264 High, 4:2:0, AAC, index first) and WebM (VP9, 4:2:0, Opus) at the listed height, never
+  enlarged, and a poster from a representative frame encoded like an image; tasks wait in `media_videos` for a node
+  with ffmpeg. A node restarted under its own name takes back the rendition tasks it held when it stopped.
 - Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or
