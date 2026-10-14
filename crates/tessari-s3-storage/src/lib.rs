@@ -9,6 +9,7 @@ pub mod data;
 pub mod erasure;
 mod error;
 pub mod lifecycle;
+pub mod media;
 pub mod multipart;
 pub mod notifications;
 pub mod objects;
@@ -19,6 +20,7 @@ mod schema_queues;
 pub mod shards;
 pub mod spaces;
 mod storage;
+mod topic_groups;
 pub mod usage;
 pub mod users;
 

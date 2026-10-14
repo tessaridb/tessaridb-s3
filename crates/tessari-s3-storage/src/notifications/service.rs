@@ -5,15 +5,14 @@ use std::collections::BTreeMap;
 
 use tessari_s3_constants::{NOTIFY_RETRY_MAX_SECS, NOTIFY_RETRY_STEP_SECS};
 use tessari_s3_core::notification::{Rule, matches};
-use tessari_s3_infrastructure::tessaridb::{Number, Value};
-use tessari_s3_types::{BucketName, Timestamp};
+use tessari_s3_types::BucketName;
 
-use super::entity::MessageEntity;
 use super::model::{Due, Event};
 use super::repository::NotificationRepository;
 use super::tessaridb::TessariNotifications;
+use crate::Result;
 use crate::buckets::BucketService;
-use crate::{Error, Result};
+use crate::topic_groups::{self, event};
 
 /// Notification delivery operations.
 #[derive(Clone)]
@@ -22,58 +21,9 @@ pub struct NotificationService {
     buckets: BucketService,
 }
 
-const fn malformed(reason: &'static str) -> Error {
-    Error::Malformed {
-        record: "object_events",
-        reason,
-    }
-}
-
-fn event(message: MessageEntity) -> Result<Event> {
-    let Value::Object(fields) = message.value else {
-        return Err(malformed("a message is not an object"));
-    };
-    let text = |field: &'static str| match fields.get(field) {
-        Some(Value::String(text)) => Ok(Some(text.clone())),
-        None | Some(Value::None) => Ok(None),
-        Some(_) => Err(malformed(field)),
-    };
-    let required = |field: &'static str| text(field)?.ok_or_else(|| malformed(field));
-    let size = match fields.get("size") {
-        Some(Value::Number(Number::Integer(size))) => {
-            Some(u64::try_from(*size).map_err(|_| malformed("size"))?)
-        }
-        None | Some(Value::None) => None,
-        Some(_) => return Err(malformed("size")),
-    };
-    let at = match fields.get("at") {
-        Some(Value::Datetime { seconds, nanos }) => Timestamp {
-            seconds: *seconds,
-            nanos: *nanos,
-        },
-        _ => return Err(malformed("at")),
-    };
-    Ok(Event {
-        position: message.position,
-        deliveries: message.deliveries,
-        bucket: required("bucket_name")?,
-        key: required("key")?,
-        name: required("event")?,
-        version_id: text("version_id")?,
-        size,
-        etag: text("etag")?,
-        at,
-    })
-}
-
 /// Seconds before a delivery handed out `deliveries` times is tried again: doubling from the step, capped.
 fn retry_after(deliveries: u64) -> u64 {
-    let doublings = u32::try_from(deliveries.saturating_sub(1))
-        .unwrap_or(u32::MAX)
-        .min(16);
-    NOTIFY_RETRY_STEP_SECS
-        .saturating_mul(1_u64 << doublings)
-        .min(NOTIFY_RETRY_MAX_SECS)
+    topic_groups::retry_after(deliveries, NOTIFY_RETRY_STEP_SECS, NOTIFY_RETRY_MAX_SECS)
 }
 
 impl NotificationService {

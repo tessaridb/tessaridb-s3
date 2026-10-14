@@ -285,6 +285,29 @@ pub const NOTIFY_RETRY_MAX_SECS: u64 = 300;
 /// Seconds between delivery runs when the last found nothing.
 pub const NOTIFY_POLL_SECS: u64 = 1;
 
+/// How long the media group holds a handed-out object before giving it to another worker: longer than the slowest
+/// rendition a worker may take, so a live worker is not raced.
+pub const MEDIA_ACK_DEADLINE_SECS: u64 = 600;
+
+/// Hand-outs of one object before the media group gives it up to `media_failed`.
+pub const MEDIA_DELIVERIES: u32 = 5;
+
+/// Objects the media group lets be in flight at once, across every worker.
+pub const MEDIA_IN_FLIGHT: usize = 16;
+
+/// Objects one media worker takes per read.
+pub const MEDIA_BATCH: usize = 4;
+
+/// The first wait before an object whose renditions failed is tried again; each later wait doubles, up to
+/// [`MEDIA_RETRY_MAX_SECS`].
+pub const MEDIA_RETRY_STEP_SECS: u64 = 10;
+
+/// The longest wait before a failed object is tried again.
+pub const MEDIA_RETRY_MAX_SECS: u64 = 600;
+
+/// Seconds between a media worker's reads when nothing was handed out.
+pub const MEDIA_POLL_SECS: u64 = 1;
+
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 

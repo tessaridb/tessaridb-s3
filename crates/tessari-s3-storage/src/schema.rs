@@ -118,6 +118,7 @@ DEFINE FIELD IF NOT EXISTS op ON objects TYPE string;
 DEFINE TOPIC IF NOT EXISTS object_events RETAIN 7d;
 DEFINE TOPIC IF NOT EXISTS object_events_dead RETAIN 30d;
 DEFINE TOPIC IF NOT EXISTS s3_notifications RETAIN 7d;
+DEFINE TOPIC IF NOT EXISTS media_failed RETAIN 30d;
 DEFINE EVENT OR REPLACE object_created ON objects FOR CREATE, UPDATE \
 WHEN $after.notify = true AND $after.op != NONE AND ($after.data ?? $after.upload) != ($before.data ?? $before.upload) \
 THEN { LET $named = string::concat('c-', type::string($after.data ?? $after.upload)); \

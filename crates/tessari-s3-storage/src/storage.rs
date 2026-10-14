@@ -16,6 +16,7 @@ use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
+use crate::media::{MediaService, TessariMedia};
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::notifications::{NotificationService, TessariNotifications};
 use crate::objects::{ObjectService, TessariObjects};
@@ -174,6 +175,12 @@ impl Storage {
             TessariNotifications::new(self.pool.clone()),
             self.buckets.clone(),
         )
+    }
+
+    /// Media jobs: objects created where a bucket's media rules may take them.
+    #[must_use]
+    pub fn media(&self) -> MediaService {
+        MediaService::new(TessariMedia::new(self.pool.clone()), self.buckets.clone())
     }
 
     /// Bucket operations.

@@ -2,8 +2,8 @@
 
 use std::future::Future;
 
-use super::entity::MessageEntity;
 use crate::Result;
+use crate::topic_groups::MessageEntity;
 
 /// Topic-group queries for the destination `target`.
 pub(crate) trait NotificationRepository: Send + Sync {
