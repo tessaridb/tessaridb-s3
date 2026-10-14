@@ -180,12 +180,12 @@ pub(super) async fn page(
     ];
     // `LIMIT` takes a literal on 0.33.1; the limit is this server's own integer, never a caller's value.
     let script = format!(
-        "BEGIN; SELECT incarnation FROM ONLY buckets:$bucket; \
+        "SELECT incarnation FROM ONLY buckets:$bucket; \
          SELECT upload, bucket_name, key, incarnation, initiated, position FROM pending AFTER pending:$after \
-         LIMIT {limit}; COMMIT;"
+         LIMIT {limit};"
     );
+    // Plain reads, the bucket first: an upload is listed only when it carries the incarnation read before it.
     let mut answers = pool.run(&script, parameters).await?.into_iter();
-    let _begin = answers.next();
     let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
     let walked = match answers.next() {
         Some(Answer::Records { records, .. }) => records,

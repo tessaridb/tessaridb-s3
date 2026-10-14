@@ -427,3 +427,63 @@ async fn a_declared_composite_checksum_is_the_checksum_of_the_part_checksums() {
     );
     assert_eq!(header(&read, "x-amz-checksum-type"), Some("COMPOSITE"));
 }
+
+/// Uploads `parts` to `path` as one multipart object.
+async fn multipart_put(state: &tessari_s3_api::ApiState, path: &str, parts: &[&[u8]]) {
+    let upload = create(state, path).await;
+    let mut listed = Vec::new();
+    for (number, bytes) in (1_u16..).zip(parts) {
+        let number = number.to_string();
+        let tag = etag(&part(state, path, &upload, &number, bytes).await);
+        listed.push((number, tag));
+    }
+    let pairs: Vec<(&str, &str)> = listed
+        .iter()
+        .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect();
+    let done = complete(state, path, &upload, Vec::new(), &document(&pairs)).await;
+    assert_eq!(done.status, 200, "{}", done.body);
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_multipart_object_overwritten_while_read_reads_whole_every_time() {
+    let _why = IGNORED;
+    let (state, _planter) = fresh().await;
+    assert_eq!(
+        call(&state, "PUT", "/mpbusy", vec![], b"").await.status,
+        200
+    );
+    let rounds: Vec<(Vec<u8>, Vec<u8>)> = (1..=12_u8)
+        .map(|round| (body(5 * MIB, round), vec![round; 64]))
+        .collect();
+    multipart_put(&state, "/mpbusy/big", &[&rounds[0].0, &rounds[0].1]).await;
+    let wholes: Vec<Vec<u8>> = rounds
+        .iter()
+        .map(|(a, b)| [a.as_slice(), b].concat())
+        .collect();
+    // The key is replaced by a new multipart object again and again while it is read: S3 answers the old object or
+    // the new one, never a mix and never a part short.
+    let writer = {
+        let state = state.clone();
+        let rounds = rounds.clone();
+        tokio::spawn(async move {
+            for (first, second) in rounds.iter().skip(1) {
+                multipart_put(&state, "/mpbusy/big", &[first, second]).await;
+            }
+        })
+    };
+    let mut reads = 0_u32;
+    while !writer.is_finished() {
+        let read = call(&state, "GET", "/mpbusy/big", vec![], b"").await;
+        assert_eq!(read.status, 200, "read {reads}: {}", read.body);
+        assert!(
+            wholes.contains(&read.bytes),
+            "read {reads} returned {} bytes that are no whole version",
+            read.bytes.len()
+        );
+        reads = reads.saturating_add(1);
+    }
+    writer.await.expect("the writer ran");
+    assert!(reads > 1, "the reads did not overlap the overwrites");
+}

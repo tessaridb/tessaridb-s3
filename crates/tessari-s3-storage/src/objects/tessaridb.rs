@@ -79,10 +79,11 @@ impl ObjectRepository for TessariObjects {
             ),
             ("id".to_owned(), id(bucket, key)),
         ];
-        // One transaction, so the bucket's incarnation and the object are read at one snapshot.
-        let script = "BEGIN; SELECT incarnation FROM ONLY buckets:$bucket; SELECT * FROM ONLY objects:$id; COMMIT;";
+        // Two plain reads, the bucket first: an object is taken only when it carries the incarnation read just before
+        // it, and every write is fenced on that incarnation in its own commit, so the pair answers as of one moment.
+        let script =
+            "SELECT incarnation FROM ONLY buckets:$bucket; SELECT * FROM ONLY objects:$id;";
         let mut answers = self.pool.run(script, parameters).await?.into_iter();
-        let _begin = answers.next();
         let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
         let object = first_record(answers.next())?
             .map(|value| read(&value))

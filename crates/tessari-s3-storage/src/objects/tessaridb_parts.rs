@@ -30,7 +30,7 @@ fn part(value: &Value) -> Result<Part> {
     })
 }
 
-/// The parts of upload `upload` in number order, if the object record `object` is still the one completed from it.
+/// The parts of upload `upload` in number order, if the object record `object` still names it after they are read.
 pub(super) async fn parts_of(
     pool: &MetaPool,
     object: Value,
@@ -40,15 +40,18 @@ pub(super) async fn parts_of(
         ("id".to_owned(), object),
         ("upload".to_owned(), Value::Uuid(upload)),
     ];
-    // One snapshot: the object still on this upload, and the upload's parts. `LIMIT` takes a literal; this is the
-    // server's own constant.
+    // Two plain reads, the parts FIRST: a completed upload's parts never change and go only after no object names
+    // the upload, and an upload id never comes back — so the object still naming it afterwards proves the parts were
+    // whole when they were read. `LIMIT` takes a literal; this is the server's own constant.
     let script = format!(
-        "BEGIN; SELECT upload FROM ONLY objects:$id; \
-         SELECT number, data, size FROM parts WHERE upload = $upload LIMIT {MULTIPART_MAX_PARTS} \
-         USING INDEX by_upload; COMMIT;"
+        "SELECT number, data, size FROM parts WHERE upload = $upload LIMIT {MULTIPART_MAX_PARTS} \
+         USING INDEX by_upload; SELECT upload FROM ONLY objects:$id;"
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();
-    let _begin = answers.next();
+    let records = match answers.next() {
+        Some(Answer::Records { records, .. }) => records,
+        _ => Vec::new(),
+    };
     let still = matches!(
         first_record(answers.next())?,
         Some(Value::Object(fields)) if fields.get("upload") == Some(&Value::Uuid(upload))
@@ -56,10 +59,6 @@ pub(super) async fn parts_of(
     if !still {
         return Ok(None);
     }
-    let records = match answers.next() {
-        Some(Answer::Records { records, .. }) => records,
-        _ => Vec::new(),
-    };
     let mut parts = records
         .iter()
         .map(|(_, value)| part(value))

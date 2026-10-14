@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Object reads, the object listing and the uploads listing run as plain reads instead of transactions. A multipart
+  object's parts are read before the object is confirmed to still name them, so a read that overlaps an overwrite
+  answers the old object or the new one whole, never a part short. Writes that change several records stay one
+  transaction.
 - DeleteObjects takes a `VersionId` per entry: that version is removed as DeleteObject with `versionId` removes it,
   each `<Deleted>` names its `VersionId`, and a removed or added delete marker is reported with `DeleteMarker` and
   `DeleteMarkerVersionId`. Entries naming a version are refused `AccessDenied` one by one for a caller who does not

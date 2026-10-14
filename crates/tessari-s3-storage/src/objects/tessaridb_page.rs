@@ -41,11 +41,11 @@ pub(super) async fn page(
         None => String::new(),
     };
     let script = format!(
-        "BEGIN; SELECT incarnation FROM ONLY buckets:$bucket; {exact} \
-         SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT {limit}; COMMIT;"
+        "SELECT incarnation FROM ONLY buckets:$bucket; {exact} \
+         SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT {limit};"
     );
+    // Plain reads, the bucket first: a row is listed only when it carries the incarnation read before it.
     let mut answers = pool.run(&script, parameters).await?.into_iter();
-    let _begin = answers.next();
     let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
     let mut rows = Vec::new();
     if at.is_some()
