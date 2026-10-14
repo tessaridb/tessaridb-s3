@@ -33,7 +33,7 @@ async fn sign_in(
     code: &str,
     shape: Shape,
 ) -> Result<String, OidcError> {
-    let started = client.begin().await.expect("begun");
+    let started = client.begin(None).await.expect("begun");
     provider.grant(&started.url, code, shape);
     finish(client, &started, code).await
 }
@@ -48,7 +48,7 @@ async fn finish(client: &OidcClient, started: &Started, code: &str) -> Result<St
 #[tokio::test]
 async fn the_authorization_request_carries_pkce_state_and_nonce() {
     let provider = Provider::start().await;
-    let started = client(&provider, 60).begin().await.expect("begun");
+    let started = client(&provider, 60).begin(None).await.expect("begun");
     let url = openidconnect::url::Url::parse(&started.url).expect("a URL");
     assert!(
         started
@@ -67,10 +67,12 @@ async fn the_authorization_request_carries_pkce_state_and_nonce() {
     assert_eq!(pair("state").as_deref(), Some(started.state.as_str()));
     assert_eq!(pair("nonce").as_deref(), Some(started.nonce.expose()));
     assert!(pair("scope").is_some_and(|scope| scope.split(' ').any(|s| s == "openid")));
+    // An ordinary sign-in asks for no particular freshness.
+    assert_eq!(pair("max_age"), None);
     // The verifier itself never travels in the URL; its challenge does.
     assert!(!started.url.contains(started.verifier.expose()));
     // Two sign-ins never share a state, a nonce or a verifier.
-    let again = client(&provider, 60).begin().await.expect("begun");
+    let again = client(&provider, 60).begin(None).await.expect("begun");
     assert_ne!(again.state, started.state);
     assert_ne!(again.nonce.expose(), started.nonce.expose());
     assert_ne!(again.verifier.expose(), started.verifier.expose());
@@ -114,7 +116,7 @@ async fn every_wrong_id_token_is_refused_for_its_own_reason() {
 async fn an_iss_response_parameter_naming_another_issuer_stops_the_sign_in_before_the_exchange() {
     let provider = Provider::start().await;
     let client = client(&provider, 60);
-    let started = client.begin().await.expect("begun");
+    let started = client.begin(None).await.expect("begun");
     provider.grant(&started.url, "code-mixed", Shape::Good);
     assert_eq!(
         client
@@ -147,8 +149,8 @@ async fn an_iss_response_parameter_naming_another_issuer_stops_the_sign_in_befor
 async fn a_code_redeems_once_and_only_with_its_own_verifier() {
     let provider = Provider::start().await;
     let client = client(&provider, 60);
-    let started = client.begin().await.expect("begun");
-    let other = client.begin().await.expect("begun");
+    let started = client.begin(None).await.expect("begun");
+    let other = client.begin(None).await.expect("begun");
     provider.grant(&started.url, "code-pkce", Shape::Good);
     // Another sign-in's verifier is refused by the provider, and that attempt spends the code.
     assert_eq!(
@@ -213,4 +215,43 @@ async fn unknown_key_ids_cannot_make_the_console_fetch_keys_more_than_once_per_i
         );
     }
     assert_eq!(provider.key_fetches(), 1, "no refresh inside the interval");
+}
+
+#[tokio::test]
+async fn a_fresh_sign_in_asks_for_max_age_and_finish_reports_when_its_holder_authenticated() {
+    let provider = Provider::start().await;
+    let client = client(&provider, 60);
+    let started = client.begin(Some(300)).await.expect("begun");
+    let url = openidconnect::url::Url::parse(&started.url).expect("a URL");
+    let max_age = url
+        .query_pairs()
+        .find(|(key, _)| key == "max_age")
+        .map(|(_, value)| value.into_owned());
+    assert_eq!(max_age.as_deref(), Some("300"));
+    let now = chrono::Utc::now().timestamp();
+    let authenticated = |shape: Shape, code: &'static str| {
+        let client = client.clone();
+        let provider = &provider;
+        async move {
+            let started = client.begin(None).await.expect("begun");
+            provider.grant(&started.url, code, shape);
+            client
+                .finish(code, None, &started.nonce, &started.verifier)
+                .await
+                .expect("signed in")
+                .authenticated
+        }
+    };
+    let fresh = authenticated(Shape::Good, "code-fresh")
+        .await
+        .expect("auth_time");
+    assert!((now - 30..=now).contains(&fresh), "{fresh} vs {now}");
+    let stale = authenticated(Shape::StaleAuth, "code-stale")
+        .await
+        .expect("auth_time");
+    assert!(
+        (now - 3_700..=now - 3_500).contains(&stale),
+        "{stale} vs {now}"
+    );
+    assert_eq!(authenticated(Shape::NoAuthTime, "code-none").await, None);
 }

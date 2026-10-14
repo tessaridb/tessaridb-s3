@@ -10,7 +10,7 @@ fn key() -> Subject {
 }
 
 fn token() -> String {
-    issue(SECRET, &key(), NOW, HOUR, NONCE)
+    issue(SECRET, &key(), NOW, HOUR, Some(NOW), NONCE)
 }
 
 #[test]
@@ -18,6 +18,7 @@ fn a_session_verifies_until_it_expires_and_names_its_key() {
     let expected = Session {
         subject: key(),
         expires: NOW + HOUR,
+        authenticated: Some(NOW),
     };
     assert_eq!(verify(SECRET, &token(), NOW), Ok(expected.clone()));
     assert_eq!(verify(SECRET, &token(), NOW + HOUR - 1), Ok(expected));
@@ -66,7 +67,8 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
         "v1.",
         "v1..",
         "v1.abc.def",
-        "v3.abc.def",
+        "v2.abc.def",
+        "v4.abc.def",
         "v1.!!!.???",
         "v1.abc.def.ghi",
     ] {
@@ -79,7 +81,8 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
     // A genuine signature under another version label, and with a part appended: the version and the shape are
     // checked, not only the signature.
     let good = token();
-    let relabelled = good.replacen("v2.", "v3.", 1);
+    // v2 is the format before the authentication time was carried; its tokens are refused, not read without it.
+    let relabelled = good.replacen("v3.", "v2.", 1);
     assert_eq!(
         verify(SECRET, &relabelled, NOW),
         Err(SessionError::Malformed)
@@ -92,29 +95,64 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
 
 #[test]
 fn two_sessions_issued_in_the_same_second_differ_by_their_nonce() {
-    assert_ne!(token(), issue(SECRET, &key(), NOW, HOUR, [8; 16]));
+    assert_ne!(
+        token(),
+        issue(SECRET, &key(), NOW, HOUR, Some(NOW), [8; 16])
+    );
 }
 
 #[test]
 fn a_session_names_whether_it_holds_a_key_or_a_person() {
     let person = Subject::User("alice".to_owned());
-    let session = verify(SECRET, &issue(SECRET, &person, NOW, HOUR, NONCE), NOW);
+    let session = verify(SECRET, &issue(SECRET, &person, NOW, HOUR, None, NONCE), NOW);
     assert_eq!(
         session,
         Ok(Session {
             subject: person,
-            expires: NOW + HOUR
+            expires: NOW + HOUR,
+            authenticated: None,
         })
     );
     // A key and a user spelled alike are two different sessions, and each limits under its own label.
     let alike = Subject::Key("alice".to_owned());
     assert_ne!(
-        issue(SECRET, &alike, NOW, HOUR, NONCE),
-        issue(SECRET, &Subject::User("alice".to_owned()), NOW, HOUR, NONCE)
+        issue(SECRET, &alike, NOW, HOUR, None, NONCE),
+        issue(
+            SECRET,
+            &Subject::User("alice".to_owned()),
+            NOW,
+            HOUR,
+            None,
+            NONCE
+        )
     );
     assert_eq!(alike.label(), "key:alice");
     assert_eq!(Subject::User("alice".to_owned()).label(), "user:alice");
     // The action record names a key as it always has, and a person so that no generated key id can be mistaken for them.
     assert_eq!(alike.operator(), "alice");
     assert_eq!(Subject::User("alice".to_owned()).operator(), "user:alice");
+}
+
+#[test]
+fn a_session_carries_when_its_holder_authenticated_and_answers_whether_that_is_recent() {
+    let earlier = NOW - 200;
+    let session = verify(
+        SECRET,
+        &issue(SECRET, &key(), NOW, HOUR, Some(earlier), NONCE),
+        NOW,
+    )
+    .expect("verifies");
+    assert_eq!(session.authenticated, Some(earlier));
+    // Recent within the bound, inclusive; older, or unknown, is not.
+    assert!(session.authenticated_within(earlier + 300, 300));
+    assert!(!session.authenticated_within(earlier + 301, 300));
+    let unknown =
+        verify(SECRET, &issue(SECRET, &key(), NOW, HOUR, None, NONCE), NOW).expect("verifies");
+    assert_eq!(unknown.authenticated, None);
+    assert!(!unknown.authenticated_within(NOW, 300));
+    // The time is signed: a token claiming another authentication time is another token.
+    assert_ne!(
+        issue(SECRET, &key(), NOW, HOUR, Some(NOW), NONCE),
+        issue(SECRET, &key(), NOW, HOUR, Some(earlier), NONCE)
+    );
 }

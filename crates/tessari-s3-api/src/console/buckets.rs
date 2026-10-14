@@ -141,6 +141,7 @@ pub(super) async fn delete(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let Delete { reason: given } = json(&headers, &body, "expected reason")?;
     let why = reason(given, true)?;
     let name = bucket_name(&bucket)?;

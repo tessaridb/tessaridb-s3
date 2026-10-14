@@ -10,6 +10,10 @@ section records which TessariDB version its metadata runs on.
   `amr`, and the identity linked to a user by an operator (`PUT`/`DELETE /api/v1/users/{user}/identity`, recorded).
   In-flight sign-ins live in the metadata store for ten minutes and are taken once. A console session now names
   either an access key or a user; sessions issued before this version are no longer accepted.
+- Privileged console acts (issuing a key or an upload key, linking an identity, setting or removing a grant, setting
+  a quota, deleting a bucket) require an authentication from the last five minutes; an older one is refused with
+  `reauthentication_required`. A console session now carries when its holder authenticated (format v3); sessions
+  issued before this version are no longer accepted.
 - With an identity provider configured, a root sign-in to the console is break-glass: it requires a `reason`, lasts
   15 minutes, is recorded before the session is issued, and is announced to `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK`
   when that is set.

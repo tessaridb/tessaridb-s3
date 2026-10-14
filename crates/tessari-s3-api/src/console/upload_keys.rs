@@ -47,6 +47,7 @@ pub(super) async fn issue(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let Issue {
         key,
         expires_in,

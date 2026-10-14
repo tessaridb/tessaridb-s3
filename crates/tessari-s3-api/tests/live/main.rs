@@ -18,6 +18,7 @@ mod console;
 mod console_admin;
 mod console_break_glass;
 mod console_explorer;
+mod console_fresh_auth;
 mod console_keys;
 mod console_media;
 mod console_oidc;

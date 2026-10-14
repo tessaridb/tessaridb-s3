@@ -11,7 +11,32 @@ use openidconnect::{
 };
 
 use crate::console_config::OidcSettings;
-use crate::oidc::OidcError;
+
+/// Why a sign-in through the provider was refused. The console answers every one alike; the reason is for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum OidcError {
+    /// The provider's discovery document or keys could not be had, and none are held.
+    #[error("the identity provider is unavailable")]
+    Unavailable,
+    /// The authorization response's `iss` names another issuer (a mix-up).
+    #[error("the authorization response names another issuer")]
+    IssuerMismatch,
+    /// The provider refused the code: unknown, spent, expired, or the PKCE verifier does not match.
+    #[error("the identity provider refused the code")]
+    CodeRefused,
+    /// The token response carries no ID token.
+    #[error("the token response carries no ID token")]
+    NoIdToken,
+    /// The ID token failed a check: `signature`, `issuer`, `audience`, `expired`, `nonce` or `claims`.
+    #[error("the ID token was refused: {0}")]
+    IdTokenRefused(&'static str),
+    /// The ID token's `at_hash` is not the access token's.
+    #[error("the ID token does not match the access token")]
+    AccessTokenMismatch,
+    /// The ID token's `amr` names none of the configured second factors.
+    #[error("the sign-in carries no second factor")]
+    NoSecondFactor,
+}
 
 /// The signature algorithms an ID token may use; anything else, `none` and every HMAC included, is refused.
 pub const ALLOWED_ALGORITHMS: [CoreJwsSigningAlgorithm; 3] = [
@@ -20,14 +45,22 @@ pub const ALLOWED_ALGORITHMS: [CoreJwsSigningAlgorithm; 3] = [
     CoreJwsSigningAlgorithm::EdDsa,
 ];
 
-/// The ID token's subject and `amr`, after every check against `metadata`'s keys.
+/// What a verified ID token says about its holder.
+pub(crate) struct Verified {
+    pub(crate) subject: String,
+    pub(crate) amr: Vec<String>,
+    /// `auth_time`, in seconds since the epoch, when the token carries it.
+    pub(crate) auth_time: Option<i64>,
+}
+
+/// What the ID token says about its holder, after every check against `metadata`'s keys.
 pub(crate) fn verify(
     settings: &OidcSettings,
     id_token: &CoreIdToken,
     metadata: &CoreProviderMetadata,
     nonce: &Nonce,
     access_token: &openidconnect::AccessToken,
-) -> std::result::Result<(String, Vec<String>), OidcError> {
+) -> std::result::Result<Verified, OidcError> {
     let issuer = IssuerUrl::new(settings.issuer.clone()).map_err(|_| OidcError::Unavailable)?;
     let verifier = CoreIdTokenVerifier::new_public_client(
         ClientId::new(settings.client_id.clone()),
@@ -59,7 +92,11 @@ pub(crate) fn verify(
                 .collect()
         })
         .unwrap_or_default();
-    Ok((claims.subject().as_str().to_owned(), amr))
+    Ok(Verified {
+        subject: claims.subject().as_str().to_owned(),
+        amr,
+        auth_time: claims.auth_time().map(|at| at.timestamp()),
+    })
 }
 
 /// The check an ID-token refusal names; a key id the console does not hold is told apart, so it can refresh.

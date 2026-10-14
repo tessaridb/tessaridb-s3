@@ -170,6 +170,12 @@ before the session exists; a record that cannot be written refuses the sign-in. 
 sign-in is announced to it as it happens. An alert that cannot be delivered does not bar the path: it is logged and
 the record's outcome says `alert_failed`. Without an identity provider, root signs in as before.
 
+Privileged acts need a recent sign-in: issuing a key or an upload key, linking an identity, setting or removing a
+grant, setting a quota and deleting a bucket are refused with `401 reauthentication_required` when the operator last
+authenticated more than five minutes ago. Other requests continue under the same session. A key holder authenticates
+again by signing in. A person signed in through the provider counts from the ID token's `auth_time` (no `auth_time`
+counts as long ago); `/api/v1/auth/oidc/start?fresh=true` asks the provider for `max_age=300`.
+
 The page is built from TypeScript in `crates/tessari-s3-api/panel/`; its output is committed to
 `crates/tessari-s3-api/assets/` and embedded in the binary, so building the server never needs Node. Only changing
 the page does:

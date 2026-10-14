@@ -42,6 +42,7 @@ pub(super) async fn link(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let oidc = state.oidc().ok_or_else(ConsoleError::not_found)?;
     let LinkRequest {
         subject,

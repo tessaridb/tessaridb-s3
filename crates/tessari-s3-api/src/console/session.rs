@@ -115,6 +115,8 @@ pub(super) async fn sign_in(
         &Subject::Key(access_key_id.clone()),
         now,
         lifetime,
+        // A key's secret was just checked: its holder authenticated now.
+        Some(now),
         nonce,
     );
     tracing::info!(client = %client.ip(), key_id = access_key_id, "console sign-in");

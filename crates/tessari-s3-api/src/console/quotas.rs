@@ -46,6 +46,7 @@ pub(super) async fn set(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let SetQuota {
         max_bytes,
         max_objects,

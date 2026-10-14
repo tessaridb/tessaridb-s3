@@ -41,8 +41,12 @@ type Key = (&'static str, [u8; 32]);
 /// How the token endpoint answers a code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Shape {
-    /// A correct ID token, with a second factor in `amr`.
+    /// A correct ID token, with a second factor in `amr`, authenticated five seconds ago.
     Good,
+    /// Correct, but its holder authenticated an hour ago.
+    StaleAuth,
+    /// Correct, but it does not say when its holder authenticated.
+    NoAuthTime,
     /// Correct, but `amr` names a password only.
     NoSecondFactor,
     /// Signed for another nonce.
@@ -290,6 +294,14 @@ fn id_token(issuer: &str, grant: &Grant, access: &AccessToken) -> String {
         EmptyAdditionalClaims {},
     )
     .set_nonce(Some(Nonce::new(nonce)))
+    .set_auth_time(match grant.shape {
+        Shape::NoAuthTime => None,
+        Shape::StaleAuth => Some(at(-60)),
+        _ => Some(
+            now.checked_sub_signed(Duration::seconds(5))
+                .expect("an instant in range"),
+        ),
+    })
     .set_auth_method_refs(Some(
         factors
             .iter()

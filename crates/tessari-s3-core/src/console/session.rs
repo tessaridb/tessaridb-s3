@@ -1,5 +1,6 @@
 //! Console sessions: what an operator holds after signing in. A token names who it was issued to — the access key
-//! that signed in, or the S3 user an identity provider vouched for — and when it stops being accepted, signed with HMAC-SHA256 under the root secret, so any node of the cluster can verify it
+//! that signed in, or the S3 user an identity provider vouched for — when its holder authenticated, and when it stops
+//! being accepted, signed with HMAC-SHA256 under the root secret, so any node of the cluster can verify it
 //! with no session store and changing the root secret ends every session. It is compared in constant time.
 
 use base64::Engine;
@@ -9,9 +10,9 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 /// The version prefix; a new token format gets a new prefix, never a reinterpretation of this one.
-const VERSION: &str = "v2";
+const VERSION: &str = "v3";
 /// The first line of every message signed, so this signature can never be mistaken for another use of the secret.
-const SCHEME: &str = "TESSARI-S3-CONSOLE-SESSION-V2";
+const SCHEME: &str = "TESSARI-S3-CONSOLE-SESSION-V3";
 
 /// Who a session was issued to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,17 @@ pub struct Session {
     pub subject: Subject,
     /// Seconds since the epoch at which the session stops being accepted.
     pub expires: i64,
+    /// Seconds since the epoch at which its holder last proved who they are; `None` when that is not known.
+    pub authenticated: Option<i64>,
+}
+
+impl Session {
+    /// Whether its holder authenticated at most `max_age` seconds before `now`; an unknown time never is.
+    #[must_use]
+    pub fn authenticated_within(&self, now: i64, max_age: i64) -> bool {
+        self.authenticated
+            .is_some_and(|at| now.saturating_sub(at) <= max_age)
+    }
 }
 
 /// Why a console session token was refused.
@@ -99,14 +111,22 @@ fn mac(secret: &[u8], payload: &[u8]) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// A token for `subject`, issued at `now` and accepted for `lifetime` seconds; `nonce` makes two tokens of one second
-/// differ.
+/// A token for `subject`, issued at `now` and accepted for `lifetime` seconds, whose holder authenticated at
+/// `authenticated` (if known); `nonce` makes two tokens of one second differ.
 #[must_use]
-pub fn issue(secret: &[u8], subject: &Subject, now: i64, lifetime: i64, nonce: [u8; 16]) -> String {
+pub fn issue(
+    secret: &[u8],
+    subject: &Subject,
+    now: i64,
+    lifetime: i64,
+    authenticated: Option<i64>,
+    nonce: [u8; 16],
+) -> String {
     let expires = now.saturating_add(lifetime);
     let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    let authenticated = authenticated.map_or_else(|| "-".to_owned(), |at| at.to_string());
     let payload = format!(
-        "{}\n{}\n{now}\n{expires}\n{nonce}",
+        "{}\n{}\n{now}\n{expires}\n{authenticated}\n{nonce}",
         subject.kind(),
         subject.name()
     );
@@ -144,24 +164,42 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     }
     let text = String::from_utf8(payload).map_err(|_| SessionError::Malformed)?;
     let mut fields = text.split('\n');
-    let (Some(kind), Some(name), Some(_issued), Some(expires), Some(_nonce), None) = (
+    let (
+        Some(kind),
+        Some(name),
+        Some(_issued),
+        Some(expires),
+        Some(authenticated),
+        Some(_nonce),
+        None,
+    ) = (
         fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
-    ) else {
+        fields.next(),
+    )
+    else {
         return Err(SessionError::Malformed);
     };
     let subject = Subject::parse(kind, name).ok_or(SessionError::Malformed)?;
     let expires = expires
         .parse::<i64>()
         .map_err(|_| SessionError::Malformed)?;
+    let authenticated = match authenticated {
+        "-" => None,
+        at => Some(at.parse::<i64>().map_err(|_| SessionError::Malformed)?),
+    };
     if now >= expires {
         return Err(SessionError::Expired);
     }
-    Ok(Session { subject, expires })
+    Ok(Session {
+        subject,
+        expires,
+        authenticated,
+    })
 }
 
 #[cfg(test)]

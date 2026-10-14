@@ -12,7 +12,9 @@ use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use tessari_s3_constants::{CONSOLE_OIDC_LOGIN_SECS, CONSOLE_SESSION_SECS};
+use tessari_s3_constants::{
+    CONSOLE_FRESH_AUTH_SECS, CONSOLE_OIDC_LOGIN_SECS, CONSOLE_SESSION_SECS,
+};
 use tessari_s3_core::authz::UserName;
 use tessari_s3_core::console::Subject;
 use tessari_s3_infrastructure::oidc::{OidcClient, OidcError};
@@ -21,6 +23,14 @@ use tessari_s3_storage::identities::PendingLogin;
 use super::ConsoleState;
 use super::error::ConsoleError;
 use super::session::cookie;
+
+/// How a sign-in starts: `fresh=true` asks the provider to make the person authenticate again (`max_age`), as a
+/// privileged act requires.
+#[derive(Deserialize)]
+pub(super) struct Start {
+    #[serde(default)]
+    fresh: bool,
+}
 
 /// What the provider sends the browser back with; anything else in the query is ignored.
 #[derive(Deserialize)]
@@ -57,10 +67,15 @@ fn redirect(to: &str) -> Result<Response, ConsoleError> {
 pub(super) async fn start(
     State(state): State<ConsoleState>,
     ConnectInfo(client): ConnectInfo<SocketAddr>,
+    Query(start): Query<Start>,
 ) -> Result<Response, ConsoleError> {
     let oidc = state.oidc().ok_or_else(ConsoleError::not_found)?;
     admit(&state, &client)?;
-    let started = oidc.begin().await.map_err(|error| {
+    let max_age = start
+        .fresh
+        .then(|| u64::try_from(CONSOLE_FRESH_AUTH_SECS).ok())
+        .flatten();
+    let started = oidc.begin(max_age).await.map_err(|error| {
         tracing::warn!(error = %error, "console sign-in through the identity provider could not start");
         ConsoleError::unavailable()
     })?;
@@ -86,8 +101,8 @@ pub(super) async fn callback(
 ) -> Result<Response, ConsoleError> {
     let oidc = state.oidc().ok_or_else(ConsoleError::not_found)?;
     admit(&state, &client)?;
-    let name = match signed_in(&state, oidc, back).await? {
-        Ok(name) => name,
+    let (name, authenticated) = match signed_in(&state, oidc, back).await? {
+        Ok(signed) => signed,
         Err(reason) => {
             tracing::warn!(client = %client.ip(), reason, "console sign-in through the identity provider refused");
             return Err(ConsoleError::sign_in_refused());
@@ -101,6 +116,7 @@ pub(super) async fn callback(
         &subject,
         state.now(),
         CONSOLE_SESSION_SECS,
+        authenticated,
         nonce,
     );
     tracing::info!(client = %client.ip(), user = name.as_str(), "console sign-in through the identity provider");
@@ -111,12 +127,13 @@ pub(super) async fn callback(
     Ok(response)
 }
 
-/// The user a return signs in, or the reason it does not; the outer error is the store's or the provider's outage.
+/// The user a return signs in and when they authenticated at the provider, or the reason it does not; the outer error
+/// is the store's or the provider's outage.
 async fn signed_in(
     state: &ConsoleState,
     oidc: &OidcClient,
     back: Return,
-) -> Result<Result<UserName, &'static str>, ConsoleError> {
+) -> Result<Result<(UserName, Option<i64>), &'static str>, ConsoleError> {
     let Some(login_state) = back.state else {
         return Ok(Err("no state"));
     };
@@ -159,5 +176,5 @@ async fn signed_in(
     if state.user_principal(name.as_str()).await?.is_none() {
         return Ok(Err("the linked user is disabled"));
     }
-    Ok(Ok(name))
+    Ok(Ok((name, identity.authenticated)))
 }

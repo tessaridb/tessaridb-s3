@@ -171,6 +171,10 @@ pub const CONSOLE_SESSION_SECS: i64 = 3_600;
 /// Seconds a root sign-in lasts where an identity provider is configured: the emergency path is bounded.
 pub const CONSOLE_BREAK_GLASS_SECS: i64 = 900;
 
+/// How recently an operator must have authenticated for a privileged act (issuing a key, changing a grant or a quota,
+/// deleting a bucket); older, they authenticate again.
+pub const CONSOLE_FRESH_AUTH_SECS: i64 = 300;
+
 /// The cookie the console session travels in.
 pub const CONSOLE_SESSION_COOKIE: &str = "tessaridb_s3_console";
 

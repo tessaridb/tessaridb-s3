@@ -21,6 +21,14 @@ struct Body {
 }
 
 impl ConsoleError {
+    pub(crate) const fn reauthentication_required() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "reauthentication_required",
+            message: "this act needs a recent sign-in: sign in again",
+        }
+    }
+
     pub(crate) const fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,

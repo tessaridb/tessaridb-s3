@@ -34,6 +34,7 @@ pub(super) async fn set(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let Grant {
         read,
         write,
@@ -94,6 +95,7 @@ pub(super) async fn remove(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ConsoleError> {
+    super::access::recently_authenticated(&state, &session)?;
     let Remove { reason: given } = json(&headers, &body, "expected reason")?;
     let why = reason(given, true)?;
     let user = managed(&state, &principal, &name).await?;

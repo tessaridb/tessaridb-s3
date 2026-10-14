@@ -23,8 +23,8 @@ use tessari_s3_types::SecretKey;
 use crate::Result;
 use crate::console_config::OidcSettings;
 use crate::oidc_http::ProviderHttp;
-pub use crate::oidc_verify::ALLOWED_ALGORITHMS;
 use crate::oidc_verify::verify;
+pub use crate::oidc_verify::{ALLOWED_ALGORITHMS, OidcError};
 
 type Client = CoreClient<
     EndpointSet,
@@ -34,32 +34,6 @@ type Client = CoreClient<
     EndpointMaybeSet,
     EndpointMaybeSet,
 >;
-
-/// Why a sign-in through the provider was refused. The console answers every one alike; the reason is for the log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum OidcError {
-    /// The provider's discovery document or keys could not be had, and none are held.
-    #[error("the identity provider is unavailable")]
-    Unavailable,
-    /// The authorization response's `iss` names another issuer (a mix-up).
-    #[error("the authorization response names another issuer")]
-    IssuerMismatch,
-    /// The provider refused the code: unknown, spent, expired, or the PKCE verifier does not match.
-    #[error("the identity provider refused the code")]
-    CodeRefused,
-    /// The token response carries no ID token.
-    #[error("the token response carries no ID token")]
-    NoIdToken,
-    /// The ID token failed a check: `signature`, `issuer`, `audience`, `expired`, `nonce` or `claims`.
-    #[error("the ID token was refused: {0}")]
-    IdTokenRefused(&'static str),
-    /// The ID token's `at_hash` is not the access token's.
-    #[error("the ID token does not match the access token")]
-    AccessTokenMismatch,
-    /// The ID token's `amr` names none of the configured second factors.
-    #[error("the sign-in carries no second factor")]
-    NoSecondFactor,
-}
 
 /// A sign-in sent to the provider: where to send the browser, and what its callback must match.
 #[derive(Debug, Clone)]
@@ -81,6 +55,9 @@ pub struct ProviderIdentity {
     pub issuer: String,
     /// The provider's subject for the person.
     pub subject: String,
+    /// When the person last authenticated at the provider (`auth_time`, never later than now); `None` when the ID
+    /// token does not say.
+    pub authenticated: Option<i64>,
 }
 
 /// The console's OpenID Connect client; cheap to clone, every clone sharing what it fetched.
@@ -211,22 +188,26 @@ impl OidcClient {
         .set_redirect_uri(redirect))
     }
 
-    /// Starts a sign-in: a fresh state, nonce and PKCE verifier, and the URL that sends the browser to the provider.
+    /// Starts a sign-in: a fresh state, nonce and PKCE verifier, and the URL that sends the browser to the provider —
+    /// asking it, with `max_age`, to make the person authenticate again if they last did longer ago than that.
     ///
     /// # Errors
     /// [`OidcError::Unavailable`] when the provider's discovery document cannot be had.
-    pub async fn begin(&self) -> std::result::Result<Started, OidcError> {
+    pub async fn begin(&self, max_age: Option<u64>) -> std::result::Result<Started, OidcError> {
         let metadata = self.discovered(false).await?;
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-        let (url, state, nonce) = self
-            .client(&metadata)?
+        let client = self.client(&metadata)?;
+        let mut request = client
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
                 CsrfToken::new_random,
                 Nonce::new_random,
             )
-            .set_pkce_challenge(challenge)
-            .url();
+            .set_pkce_challenge(challenge);
+        if let Some(seconds) = max_age {
+            request = request.set_max_age(std::time::Duration::from_secs(seconds));
+        }
+        let (url, state, nonce) = request.url();
         Ok(Started {
             url: url.to_string(),
             state: state.secret().clone(),
@@ -266,25 +247,30 @@ impl OidcClient {
             })?;
         let id_token = token.id_token().ok_or(OidcError::NoIdToken)?;
         let nonce = Nonce::new(nonce.expose().to_owned());
-        let (subject, amr) =
-            match verify(settings, id_token, &metadata, &nonce, token.access_token()) {
-                Err(OidcError::IdTokenRefused("unknown key")) => {
-                    // A key the console does not hold: the provider may have rotated; ask once, then decide.
-                    let refreshed = self.discovered(true).await?;
-                    verify(settings, id_token, &refreshed, &nonce, token.access_token())
-                }
-                other => other,
+        let verified = match verify(settings, id_token, &metadata, &nonce, token.access_token()) {
+            Err(OidcError::IdTokenRefused("unknown key")) => {
+                // A key the console does not hold: the provider may have rotated; ask once, then decide.
+                let refreshed = self.discovered(true).await?;
+                verify(settings, id_token, &refreshed, &nonce, token.access_token())
             }
-            .map_err(|error| match error {
-                OidcError::IdTokenRefused("unknown key") => OidcError::IdTokenRefused("signature"),
-                other => other,
-            })?;
-        if !amr.iter().any(|factor| settings.mfa_amr.contains(factor)) {
+            other => other,
+        }
+        .map_err(|error| match error {
+            OidcError::IdTokenRefused("unknown key") => OidcError::IdTokenRefused("signature"),
+            other => other,
+        })?;
+        if !verified
+            .amr
+            .iter()
+            .any(|factor| settings.mfa_amr.contains(factor))
+        {
             return Err(OidcError::NoSecondFactor);
         }
         Ok(ProviderIdentity {
             issuer: settings.issuer.clone(),
-            subject,
+            subject: verified.subject,
+            // A provider's clock ahead of ours must not make an authentication look more recent than now.
+            authenticated: verified.auth_time.map(|at| at.min(now_secs())),
         })
     }
 }
