@@ -14,6 +14,7 @@ mod notify_config;
 pub mod oidc;
 mod oidc_config;
 mod oidc_http;
+mod oidc_logout;
 mod oidc_verify;
 pub mod peer;
 pub mod tessaridb;

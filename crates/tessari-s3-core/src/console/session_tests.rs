@@ -17,6 +17,7 @@ fn token() -> String {
 fn a_session_verifies_until_it_expires_and_names_its_key() {
     let expected = Session {
         subject: key(),
+        issued: NOW,
         expires: NOW + HOUR,
         authenticated: Some(NOW),
     };
@@ -109,6 +110,7 @@ fn a_session_names_whether_it_holds_a_key_or_a_person() {
         session,
         Ok(Session {
             subject: person,
+            issued: NOW,
             expires: NOW + HOUR,
             authenticated: None,
         })

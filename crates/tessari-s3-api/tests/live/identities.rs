@@ -134,3 +134,52 @@ async fn an_identity_resolves_to_its_one_user_and_moves_only_with_that_user() {
     assert_eq!(resolve("subject-2").await, None);
     assert!(!identities.unlink(&user("ann")).await.expect("answered"));
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_logout_marks_when_a_users_sessions_ended_and_its_token_is_acted_on_once() {
+    let _why = IGNORED;
+    let (storage, _) = with_ann().await;
+    let identities = storage.identities();
+    let ann = user("ann");
+    assert_eq!(identities.sessions_ended(&ann).await.expect("read"), None);
+    identities
+        .end_sessions(&ann, 1_800_000_000)
+        .await
+        .expect("written");
+    assert_eq!(
+        identities.sessions_ended(&ann).await.expect("read"),
+        Some(1_800_000_000)
+    );
+    identities
+        .end_sessions(&ann, 1_800_000_100)
+        .await
+        .expect("written");
+    assert_eq!(
+        identities.sessions_ended(&ann).await.expect("read"),
+        Some(1_800_000_100),
+        "a later logout moves the mark"
+    );
+    // A logout token's id is acted on once, also when its deliveries race.
+    let mut racing = tokio::task::JoinSet::new();
+    for _ in 0..6 {
+        let identities = storage.identities().clone();
+        racing.spawn(async move {
+            identities
+                .take_logout("jti-racing-0123", 300)
+                .await
+                .expect("answered")
+        });
+    }
+    let mut taken = 0;
+    while let Some(outcome) = racing.join_next().await {
+        taken += usize::from(outcome.expect("joined"));
+    }
+    assert_eq!(taken, 1, "exactly one delivery is acted on");
+    assert!(
+        !identities
+            .take_logout("jti-racing-0123", 300)
+            .await
+            .expect("answered")
+    );
+}

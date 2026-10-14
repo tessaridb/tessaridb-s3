@@ -70,6 +70,8 @@ impl Subject {
 pub struct Session {
     /// Who signed in.
     pub subject: Subject,
+    /// Seconds since the epoch at which the session was issued.
+    pub issued: i64,
     /// Seconds since the epoch at which the session stops being accepted.
     pub expires: i64,
     /// Seconds since the epoch at which its holder last proved who they are; `None` when that is not known.
@@ -167,7 +169,7 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     let (
         Some(kind),
         Some(name),
-        Some(_issued),
+        Some(issued),
         Some(expires),
         Some(authenticated),
         Some(_nonce),
@@ -188,6 +190,7 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     let expires = expires
         .parse::<i64>()
         .map_err(|_| SessionError::Malformed)?;
+    let issued = issued.parse::<i64>().map_err(|_| SessionError::Malformed)?;
     let authenticated = match authenticated {
         "-" => None,
         at => Some(at.parse::<i64>().map_err(|_| SessionError::Malformed)?),
@@ -197,6 +200,7 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     }
     Ok(Session {
         subject,
+        issued,
         expires,
         authenticated,
     })

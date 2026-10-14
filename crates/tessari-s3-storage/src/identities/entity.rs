@@ -24,6 +24,28 @@ pub struct LinkEntity {
     pub user_name: String,
 }
 
+/// The `after` of a `console_logouts` record: when its user's console sessions were last ended.
+///
+/// # Errors
+/// [`Error::Malformed`] when the field is missing or not a whole number.
+pub fn logout_after(value: &Value) -> Result<i64> {
+    match value {
+        Value::Object(fields) => match fields.get("after") {
+            Some(Value::Number(tessari_s3_infrastructure::tessaridb::Number::Integer(at))) => {
+                Ok(*at)
+            }
+            _ => Err(Error::Malformed {
+                record: "console logout",
+                reason: "after",
+            }),
+        },
+        _ => Err(Error::Malformed {
+            record: "console logout",
+            reason: "not an object",
+        }),
+    }
+}
+
 fn text(value: &Value, record: &'static str, field: &'static str) -> Result<String> {
     match value {
         Value::Object(fields) => match fields.get(field) {

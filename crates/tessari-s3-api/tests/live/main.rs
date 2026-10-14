@@ -20,6 +20,7 @@ mod console_break_glass;
 mod console_explorer;
 mod console_fresh_auth;
 mod console_keys;
+mod console_logout;
 mod console_media;
 mod console_oidc;
 mod console_quota;

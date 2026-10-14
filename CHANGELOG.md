@@ -10,6 +10,8 @@ section records which TessariDB version its metadata runs on.
   `amr`, and the identity linked to a user by an operator (`PUT`/`DELETE /api/v1/users/{user}/identity`, recorded).
   In-flight sign-ins live in the metadata store for ten minutes and are taken once. A console session now names
   either an access key or a user; sessions issued before this version are no longer accepted.
+- OpenID Connect back-channel logout at `/api/v1/auth/oidc/backchannel-logout`: a verified logout token ends every
+  console session of the user its identity is linked to, at their next request. Unlinking an identity does the same.
 - Privileged console acts (issuing a key or an upload key, linking an identity, setting or removing a grant, setting
   a quota, deleting a bucket) require an authentication from the last five minutes; an older one is refused with
   `reauthentication_required`. A console session now carries when its holder authenticated (format v3); sessions

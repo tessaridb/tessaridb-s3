@@ -11,6 +11,7 @@ use axum::extract::{ConnectInfo, Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
 use serde::Deserialize;
 use tessari_s3_constants::{
     CONSOLE_FRESH_AUTH_SECS, CONSOLE_OIDC_LOGIN_SECS, CONSOLE_SESSION_SECS,
@@ -38,6 +39,18 @@ pub(super) struct Return {
     code: Option<String>,
     state: Option<String>,
     iss: Option<String>,
+}
+
+/// The routes a sign-in through the provider uses, none behind a session: the start, the callback and the provider's
+/// back-channel logout.
+pub(super) fn routes() -> axum::Router<ConsoleState> {
+    axum::Router::new()
+        .route("/api/v1/auth/oidc/start", get(start))
+        .route("/api/v1/auth/oidc/callback", get(callback))
+        .route(
+            "/api/v1/auth/oidc/backchannel-logout",
+            post(super::logout::backchannel),
+        )
 }
 
 fn admit(state: &ConsoleState, client: &SocketAddr) -> Result<(), ConsoleError> {

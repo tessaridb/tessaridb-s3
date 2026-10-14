@@ -38,6 +38,36 @@ const SECOND: Key = ("k2", [2; 32]);
 /// A signing key: its id and the seed it is derived from.
 type Key = (&'static str, [u8; 32]);
 
+/// The event a back-channel logout token announces.
+const LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
+
+/// How a back-channel logout token is made, right or in one of the ways it can be wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Logout {
+    /// Signed with the published key, every claim as the specification requires.
+    Good,
+    /// Naming another issuer.
+    WrongIssuer,
+    /// Addressed to another client.
+    WrongAudience,
+    /// Carrying a `nonce`, which a logout token must not.
+    WithNonce,
+    /// Without the back-channel logout event.
+    NoEvent,
+    /// Issued ten minutes ago.
+    Stale,
+    /// Naming a provider session (`sid`) and no subject.
+    OnlySid,
+    /// `alg: none`, unsigned.
+    Unsigned,
+    /// HMAC-signed with the client's own secret.
+    Hmac,
+    /// Signed with the second key, which the provider has not published.
+    UnknownKey,
+    /// Signed with the published key, then one byte of the claims changed.
+    Tampered,
+}
+
 /// How the token endpoint answers a code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Shape {
@@ -171,6 +201,70 @@ impl Provider {
     /// Starts publishing the second key beside the first.
     pub(crate) fn publish_second_key(&self) {
         self.shared.published.lock().expect("keys").push(SECOND);
+    }
+
+    /// A back-channel logout token for `subject` with id `jti`, made as `how` says.
+    pub(crate) fn logout_token(&self, subject: &str, jti: &str, how: Logout) -> String {
+        let now = Utc::now().timestamp();
+        let mut claims = serde_json::json!({
+            "iss": if how == Logout::WrongIssuer { "http://127.0.0.1:1" } else { self.issuer.as_str() },
+            "aud": if how == Logout::WrongAudience { "another-client" } else { CLIENT_ID },
+            "iat": if how == Logout::Stale { now.saturating_sub(600) } else { now },
+            "jti": jti,
+            "sub": subject,
+            "events": { LOGOUT_EVENT: {} },
+        });
+        if how == Logout::WithNonce {
+            claims["nonce"] = serde_json::Value::String("a-nonce".to_owned());
+        }
+        if how == Logout::NoEvent {
+            claims["events"] = serde_json::json!({});
+        }
+        if how == Logout::OnlySid {
+            claims["sid"] = serde_json::Value::String("a-session".to_owned());
+            if let Some(object) = claims.as_object_mut() {
+                object.remove("sub");
+            }
+        }
+        let (alg, kid) = match how {
+            Logout::Unsigned => ("none", None),
+            Logout::Hmac => ("HS256", None),
+            Logout::UnknownKey => ("EdDSA", Some(SECOND.0)),
+            _ => ("EdDSA", Some(FIRST.0)),
+        };
+        let mut header = serde_json::json!({ "alg": alg, "typ": "logout+jwt" });
+        if let Some(kid) = kid {
+            header["kid"] = serde_json::Value::String(kid.to_owned());
+        }
+        let encode = |value: &serde_json::Value| {
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(value).expect("JSON"))
+        };
+        let input = format!("{}.{}", encode(&header), encode(&claims));
+        let signature = match how {
+            Logout::Unsigned => Vec::new(),
+            Logout::Hmac => CoreHmacKey::new(CLIENT_SECRET)
+                .sign(&CoreJwsSigningAlgorithm::HmacSha256, input.as_bytes())
+                .expect("signed"),
+            Logout::UnknownKey => signing_key(SECOND)
+                .sign(&CoreJwsSigningAlgorithm::EdDsa, input.as_bytes())
+                .expect("signed"),
+            _ => signing_key(FIRST)
+                .sign(&CoreJwsSigningAlgorithm::EdDsa, input.as_bytes())
+                .expect("signed"),
+        };
+        let token = format!("{input}.{}", URL_SAFE_NO_PAD.encode(signature));
+        if how == Logout::Tampered {
+            // Re-encode the claims with another subject under the original signature.
+            let mut parts = token.splitn(3, '.');
+            let (head, _, mac) = (
+                parts.next().expect("header"),
+                parts.next().expect("claims"),
+                parts.next().expect("signature"),
+            );
+            claims["sub"] = serde_json::Value::String("someone-else".to_owned());
+            return format!("{head}.{}.{mac}", encode(&claims));
+        }
+        token
     }
 
     /// How many times the key set was fetched.

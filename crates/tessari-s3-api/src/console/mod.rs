@@ -16,6 +16,7 @@ mod identity;
 mod input;
 mod keys;
 mod limits;
+mod logout;
 mod media;
 mod media_failed;
 mod objects;
@@ -289,8 +290,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()
         .route("/api/v1/session", post(session::sign_in))
-        .route("/api/v1/auth/oidc/start", get(oidc::start))
-        .route("/api/v1/auth/oidc/callback", get(oidc::callback))
+        .merge(oidc::routes())
         .merge(page::routes())
         .merge(protected)
         .with_state(state)

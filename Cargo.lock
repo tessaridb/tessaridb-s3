@@ -3141,6 +3141,7 @@ dependencies = [
 name = "tessari-s3-infrastructure"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "crc-fast",
  "futures-util",
@@ -3150,6 +3151,8 @@ dependencies = [
  "rskafka",
  "rustls",
  "rustls-platform-verifier",
+ "serde",
+ "serde_json",
  "siphasher",
  "tessari-s3-constants",
  "tessari-s3-observability",

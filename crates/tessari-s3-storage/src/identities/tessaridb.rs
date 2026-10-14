@@ -4,7 +4,7 @@
 use tessari_s3_core::authz::UserName;
 use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass, Value};
 
-use super::entity::{LinkEntity, LoginEntity};
+use super::entity::{LinkEntity, LoginEntity, logout_after};
 use super::model::PendingLogin;
 use super::repository::{IdentityRepository, LinkWritten};
 use crate::Result;
@@ -132,5 +132,50 @@ impl IdentityRepository for TessariIdentities {
             )
             .await?;
         Ok(first_record(answers.into_iter().next())?.is_some())
+    }
+
+    async fn put_logout(&self, user: &UserName, at: i64) -> Result<()> {
+        self.pool
+            .run(
+                "UPSERT console_logouts:$user SET after = $at;",
+                vec![
+                    text("user", user.as_str()),
+                    ("at".to_owned(), Value::from(at)),
+                ],
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn get_logout(&self, user: &UserName) -> Result<Option<i64>> {
+        let answers = self
+            .pool
+            .run(
+                "SELECT * FROM ONLY console_logouts:$user;",
+                vec![text("user", user.as_str())],
+            )
+            .await?;
+        first_record(answers.into_iter().next())?
+            .map(|value| logout_after(&value))
+            .transpose()
+    }
+
+    async fn insert_logout_id(&self, jti: &str, keep_secs: i64) -> Result<bool> {
+        match self
+            .pool
+            .run(
+                "CREATE oidc_logout_ids:$jti = { seen: time::unix(time::now()) } \
+                 EXPIRE time::from_unix(time::unix(time::now()) + $secs);",
+                vec![
+                    text("jti", jti),
+                    ("secs".to_owned(), Value::from(keep_secs)),
+                ],
+            )
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(error) if lost_race(&error) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 }

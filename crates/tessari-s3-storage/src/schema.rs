@@ -183,6 +183,9 @@ DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string R
 ALTER TABLE oidc_logins SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_link_user ON identity_links FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS console_logouts (after int REQUIRED);
+DEFINE TABLE IF NOT EXISTS oidc_logout_ids (seen int REQUIRED);
+ALTER TABLE oidc_logout_ids SET EXPIRE;
 COMMIT;
 ";
 

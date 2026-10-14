@@ -42,4 +42,14 @@ pub(crate) trait IdentityRepository: Send + Sync {
     fn links_of(&self, user: &UserName) -> impl Future<Output = Result<Vec<LinkEntity>>> + Send;
     /// Removes the link stored as `id`; `true` when it was there.
     fn remove_link(&self, id: &str) -> impl Future<Output = Result<bool>> + Send;
+    /// Records that `user`'s console sessions ended at `at`.
+    fn put_logout(&self, user: &UserName, at: i64) -> impl Future<Output = Result<()>> + Send;
+    /// When `user`'s console sessions were last ended, if ever.
+    fn get_logout(&self, user: &UserName) -> impl Future<Output = Result<Option<i64>>> + Send;
+    /// Records the logout token `jti`, kept `keep_secs`; `false` when it is already recorded or a concurrent write won.
+    fn insert_logout_id(
+        &self,
+        jti: &str,
+        keep_secs: i64,
+    ) -> impl Future<Output = Result<bool>> + Send;
 }

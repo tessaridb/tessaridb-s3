@@ -100,6 +100,14 @@ pub(super) async fn unlink(
     let why = reason(given, true)?;
     let user = managed(&state, &principal, &name).await?;
     let removed = state.storage().identities().unlink(&user.name).await?;
+    if removed {
+        // The link is how the person got in: the sessions it opened end with it.
+        state
+            .storage()
+            .identities()
+            .end_sessions(&user.name, state.now())
+            .await?;
+    }
     record(
         &state,
         NewAction {

@@ -23,6 +23,7 @@ use tessari_s3_types::SecretKey;
 use crate::Result;
 use crate::console_config::OidcSettings;
 use crate::oidc_http::ProviderHttp;
+pub use crate::oidc_logout::LoggedOut;
 use crate::oidc_verify::verify;
 pub use crate::oidc_verify::{ALLOWED_ALGORITHMS, OidcError};
 
@@ -76,7 +77,7 @@ struct Inner {
     last_fetch: AtomicI64,
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
@@ -129,6 +130,11 @@ impl OidcClient {
         &self.inner.settings.issuer
     }
 
+    /// The provider's settings.
+    pub(crate) fn settings(&self) -> &OidcSettings {
+        &self.inner.settings
+    }
+
     fn held(&self) -> Option<Arc<CoreProviderMetadata>> {
         self.inner.held.lock().ok().and_then(|held| held.clone())
     }
@@ -136,7 +142,7 @@ impl OidcClient {
     /// The provider's discovery document and keys: what is held, unless `refresh` asks for a fetch; a fetch happens
     /// only when this caller claims it and the interval since the last claim has passed, and a failed one keeps
     /// what was held.
-    async fn discovered(
+    pub(crate) async fn discovered(
         &self,
         refresh: bool,
     ) -> std::result::Result<Arc<CoreProviderMetadata>, OidcError> {

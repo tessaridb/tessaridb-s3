@@ -33,6 +33,10 @@ pub enum OidcError {
     /// The ID token's `at_hash` is not the access token's.
     #[error("the ID token does not match the access token")]
     AccessTokenMismatch,
+    /// A back-channel logout token failed a check: `malformed`, `algorithm`, `signature`, `issuer`, `audience`,
+    /// `issued at`, `event`, `nonce`, `subject` or `jti`.
+    #[error("the logout token was refused: {0}")]
+    LogoutRefused(&'static str),
     /// The ID token's `amr` names none of the configured second factors.
     #[error("the sign-in carries no second factor")]
     NoSecondFactor,

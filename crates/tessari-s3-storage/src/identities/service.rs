@@ -120,4 +120,29 @@ impl IdentityService {
         }
         Ok(removed)
     }
+
+    /// Ends `user`'s console sessions: every one issued at or before `at` is refused from its next request.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn end_sessions(&self, user: &UserName, at: i64) -> Result<()> {
+        self.repository.put_logout(user, at).await
+    }
+
+    /// When `user`'s console sessions were last ended, if ever.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn sessions_ended(&self, user: &UserName) -> Result<Option<i64>> {
+        self.repository.get_logout(user).await
+    }
+
+    /// Takes the logout token `jti` for acting on, kept `keep_secs` so it is acted on once: `false` when it was
+    /// already taken, also by a concurrent delivery.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn take_logout(&self, jti: &str, keep_secs: i64) -> Result<bool> {
+        self.repository.insert_logout_id(jti, keep_secs).await
+    }
 }
