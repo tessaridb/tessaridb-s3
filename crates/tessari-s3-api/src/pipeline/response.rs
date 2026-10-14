@@ -82,6 +82,11 @@ pub fn error_response(error: &Error, resource: &str, request_id: &str) -> Respon
         headers.insert("x-amz-request-id", value.clone());
         headers.insert("x-amz-id-2", value);
     }
+    for (name, value) in &error.headers {
+        if let Ok(value) = HeaderValue::from_str(value) {
+            headers.insert(*name, value);
+        }
+    }
     response
 }
 

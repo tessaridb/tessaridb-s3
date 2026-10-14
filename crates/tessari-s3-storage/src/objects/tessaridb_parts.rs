@@ -30,22 +30,24 @@ fn part(value: &Value) -> Result<Part> {
     })
 }
 
-/// The parts of upload `upload` in number order, if the object record `object` still names it after they are read.
+/// The parts of upload `upload` in number order, if the record `record` of `table` (`objects` or `versions`) still
+/// names it after they are read.
 pub(super) async fn parts_of(
     pool: &MetaPool,
-    object: Value,
+    table: &'static str,
+    record: Value,
     upload: [u8; 16],
 ) -> Result<Option<Vec<Part>>> {
     let parameters = vec![
-        ("id".to_owned(), object),
+        ("id".to_owned(), record),
         ("upload".to_owned(), Value::Uuid(upload)),
     ];
     // Two plain reads, the parts FIRST: a completed upload's parts never change and go only after no object names
     // the upload, and an upload id never comes back — so the object still naming it afterwards proves the parts were
-    // whole when they were read. `LIMIT` takes a literal; this is the server's own constant.
+    // whole when they were read. `LIMIT` takes a literal and a table is grammar; both are this server's own.
     let script = format!(
         "SELECT number, data, size FROM parts WHERE upload = $upload LIMIT {MULTIPART_MAX_PARTS} \
-         USING INDEX by_upload; SELECT upload FROM ONLY objects:$id;"
+         USING INDEX by_upload; SELECT upload FROM ONLY {table}:$id;"
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();
     let records = match answers.next() {

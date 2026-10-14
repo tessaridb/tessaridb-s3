@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, heade
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
 use tessari_s3_core::objects::range::{RangeRequest, part_bytes, resolve};
-use tessari_s3_storage::objects::{Content, StoredObject};
+use tessari_s3_storage::objects::{Content, StoredObject, VersionRead};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
@@ -34,12 +34,6 @@ fn set(headers: &mut HeaderMap, name: &str, value: &str) {
 
 /// `GET` or `HEAD /{bucket}/{key}`; `head` answers the headers and no body.
 pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result<Response<Body>> {
-    if call.query.iter().any(|(name, _)| name == "versionId") {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "versionId is not implemented",
-        ));
-    }
     let part_number = call
         .query
         .iter()
@@ -59,26 +53,9 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             "Range and partNumber cannot both be specified",
         ));
     }
-    let object = match call
-        .state
-        .storage()
-        .objects()
-        .get(call.bucket()?, key)
-        .await?
-    {
-        Err(()) => {
-            return Err(Error::new(
-                ErrorCode::NoSuchBucket,
-                "the specified bucket does not exist",
-            ));
-        }
-        Ok(None) => {
-            return Err(Error::new(
-                ErrorCode::NoSuchKey,
-                "the specified key does not exist",
-            ));
-        }
-        Ok(Some(object)) => object,
+    let object = match call.query_value("versionId") {
+        Some(version) => stored_version(call, key, version).await?,
+        None => stored(call, key).await?,
     };
     let text = |name: &str| call.headers.get(name).and_then(|v| v.to_str().ok());
     let conditions = ReadConditions {
@@ -183,6 +160,60 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         set(headers, "x-amz-mp-parts-count", &sizes.len().to_string());
     }
     Ok(response)
+}
+
+fn no_such_bucket() -> Error {
+    Error::new(
+        ErrorCode::NoSuchBucket,
+        "the specified bucket does not exist",
+    )
+}
+
+/// The key's current object; a key whose newest version is a delete marker answers 404 naming it (S3 ref 08 M4).
+async fn stored(call: &Call<'_>, key: &ObjectKey) -> Result<StoredObject> {
+    let objects = call.state.storage().objects();
+    match objects.get(call.bucket()?, key).await? {
+        Err(()) => Err(no_such_bucket()),
+        Ok(Some(object)) => Ok(object),
+        Ok(None) => {
+            let missing = Error::new(ErrorCode::NoSuchKey, "the specified key does not exist");
+            Err(match objects.current_marker(call.bucket()?, key).await? {
+                Some(marker) => missing
+                    .with_header("x-amz-delete-marker", "true")
+                    .with_header("x-amz-version-id", marker),
+                None => missing,
+            })
+        }
+    }
+}
+
+/// The version `version` of the key; a delete marker cannot be read and answers 405 (S3 ref 08 M4).
+async fn stored_version(call: &Call<'_>, key: &ObjectKey, version: &str) -> Result<StoredObject> {
+    match call
+        .state
+        .storage()
+        .objects()
+        .get_version(call.bucket()?, key, version)
+        .await?
+    {
+        VersionRead::Object(object) => Ok(object),
+        VersionRead::Marker { modified } => Err(Error::new(
+            ErrorCode::MethodNotAllowed,
+            "The specified method is not allowed against this resource.",
+        )
+        .with_header("x-amz-delete-marker", "true")
+        .with_header("last-modified", modified.http_date())
+        .with_header("x-amz-version-id", version)),
+        VersionRead::Absent => Err(Error::new(
+            ErrorCode::NoSuchVersion,
+            "The specified version does not exist.",
+        )),
+        VersionRead::Malformed => Err(Error::new(
+            ErrorCode::InvalidArgument,
+            "Invalid version id specified",
+        )),
+        VersionRead::NoSuchBucket => Err(no_such_bucket()),
+    }
 }
 
 /// The headers that describe the stored object.

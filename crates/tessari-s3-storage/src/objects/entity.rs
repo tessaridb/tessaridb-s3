@@ -149,6 +149,12 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
     Ok((incarnation(fields)?, object))
 }
 
+/// A delete marker's incarnation and when it was written.
+pub(crate) fn read_marker(value: &Value) -> Result<([u8; 16], tessari_s3_types::Timestamp)> {
+    let fields = fields_of(value)?;
+    Ok((incarnation(fields)?, modified(fields)?))
+}
+
 /// A record as a listing reads it (`bucket_name, key, incarnation, size, etag, modified, checksums`).
 pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
     let fields = fields_of(value)?;

@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- GetObject and HeadObject take `versionId`: they answer that version (`null` names the null version), `NoSuchVersion`
+  for an id naming none and `InvalidArgument` for a malformed one; a version that is a delete marker answers 405 with
+  `x-amz-delete-marker` and `Last-Modified`, and a key whose newest version is a delete marker answers 404 naming the
+  marker in `x-amz-delete-marker` and `x-amz-version-id`.
 - Object reads, the object listing and the uploads listing run as plain reads instead of transactions. A multipart
   object's parts are read before the object is confirmed to still name them, so a read that overlaps an overwrite
   answers the old object or the new one whole, never a part short. Writes that change several records stay one

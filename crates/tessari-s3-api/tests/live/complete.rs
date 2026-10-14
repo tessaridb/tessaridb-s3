@@ -429,7 +429,7 @@ async fn a_declared_composite_checksum_is_the_checksum_of_the_part_checksums() {
 }
 
 /// Uploads `parts` to `path` as one multipart object.
-async fn multipart_put(state: &tessari_s3_api::ApiState, path: &str, parts: &[&[u8]]) {
+pub(crate) async fn multipart_put(state: &tessari_s3_api::ApiState, path: &str, parts: &[&[u8]]) {
     let upload = create(state, path).await;
     let mut listed = Vec::new();
     for (number, bytes) in (1_u16..).zip(parts) {

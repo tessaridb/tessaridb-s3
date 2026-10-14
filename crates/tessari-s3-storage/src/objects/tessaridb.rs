@@ -23,6 +23,10 @@ mod parts;
 mod remove;
 #[path = "tessaridb_version_delete.rs"]
 mod version_delete;
+#[path = "tessaridb_version_read.rs"]
+mod version_read;
+
+pub(crate) use version_read::Found;
 #[path = "tessaridb_versions.rs"]
 mod versions;
 #[path = "tessaridb_write.rs"]
@@ -215,7 +219,7 @@ impl ObjectRepository for TessariObjects {
         key: &ObjectKey,
         upload: [u8; 16],
     ) -> Result<Option<Vec<Part>>> {
-        parts::parts_of(&self.pool, id(bucket, key), upload).await
+        parts::parts_of(&self.pool, "objects", id(bucket, key), upload).await
     }
 
     async fn remove_if(

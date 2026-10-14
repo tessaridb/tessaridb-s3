@@ -80,7 +80,7 @@ fn of_key(answer: Option<Answer>, bucket: &BucketName, key: &ObjectKey) -> Resul
 }
 
 /// The sequence the key's null version sits at, if it has one.
-async fn null_seq(pool: &MetaPool, prefix: &[u8]) -> Result<Option<u64>> {
+pub(super) async fn null_seq(pool: &MetaPool, prefix: &[u8]) -> Result<Option<u64>> {
     let parameters = vec![("key_at".to_owned(), Value::Bytes(prefix.to_vec()))];
     let answers = pool
         .run("SELECT seq FROM ONLY version_nulls:$key_at;", parameters)

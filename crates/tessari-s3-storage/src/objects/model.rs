@@ -155,6 +155,24 @@ pub enum Deleted {
     Version(VersionRemoved),
 }
 
+/// What a read naming one version found (S3 ref 08 M4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionRead {
+    /// The version holds an object; its parts are read when it is a multipart one.
+    Object(StoredObject),
+    /// The version is a delete marker, written then.
+    Marker {
+        /// When the marker was written.
+        modified: Timestamp,
+    },
+    /// No version of the key has that id.
+    Absent,
+    /// No version this server issues is spelled so.
+    Malformed,
+    /// The bucket does not exist.
+    NoSuchBucket,
+}
+
 /// What a delete naming one version ended in (S3 ref 08 M3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionRemoved {

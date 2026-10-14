@@ -12,6 +12,8 @@ pub struct Error {
     pub code: ErrorCode,
     /// A human-readable explanation; never a secret, a signature or internal detail.
     pub message: String,
+    /// Response headers the error is answered with besides the envelope's own (a delete marker's, for one).
+    pub headers: Vec<(&'static str, String)>,
 }
 
 impl Error {
@@ -21,7 +23,15 @@ impl Error {
         Self {
             code,
             message: message.into(),
+            headers: Vec::new(),
         }
+    }
+
+    /// The same error, answered with the header `name: value` as well.
+    #[must_use]
+    pub fn with_header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
     }
 
     /// The taxonomy category of the code.
