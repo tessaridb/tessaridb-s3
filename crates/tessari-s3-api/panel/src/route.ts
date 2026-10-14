@@ -9,6 +9,7 @@ export type Route =
   | { readonly kind: "users" }
   | { readonly kind: "spaces" }
   | { readonly kind: "cluster" }
+  | { readonly kind: "renditions" }
   | { readonly kind: "objects"; readonly bucket: string; readonly prefix: string; readonly cursor: string | null; readonly key: string | null; readonly filter: string }
   | { readonly kind: "object"; readonly bucket: string; readonly key: string }
   | { readonly kind: "actions"; readonly before: number | null };
@@ -35,6 +36,8 @@ export function format(route: Route): string {
       return "#/spaces";
     case "cluster":
       return "#/cluster";
+    case "renditions":
+      return "#/renditions";
     case "objects":
       return `#/b/${encodeURIComponent(route.bucket)}${query([
         ["prefix", route.prefix === "" ? null : route.prefix],
@@ -76,6 +79,9 @@ export function parse(hash: string): Route {
     }
     if (path === "/cluster") {
       return { kind: "cluster" };
+    }
+    if (path === "/renditions") {
+      return { kind: "renditions" };
     }
     if (path === "/actions") {
       return { kind: "actions", before: position(params.get("before")) };

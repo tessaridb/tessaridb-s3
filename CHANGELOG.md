@@ -25,6 +25,8 @@ section records which TessariDB version its metadata runs on.
   linked): MP4 (H.264 High, 4:2:0, AAC, index first) and WebM (VP9, 4:2:0, Opus) at the listed height, never
   enlarged, and a poster from a representative frame encoded like an image; tasks wait in `media_videos` for a node
   with ffmpeg. A node restarted under its own name takes back the rendition tasks it held when it stopped.
+- The console's Renditions section (operators) lists the renditions that failed for good — original, version,
+  output, tries and the last error — from `GET /api/v1/media/failed`, up to 100 per queue.
 - Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or

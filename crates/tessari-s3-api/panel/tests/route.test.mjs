@@ -14,6 +14,7 @@ test("every route survives format then parse", () => {
     { kind: "users" },
     { kind: "spaces" },
     { kind: "cluster" },
+    { kind: "renditions" },
     { kind: "actions", before: null },
     { kind: "actions", before: 42 },
   ];

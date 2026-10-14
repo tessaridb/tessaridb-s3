@@ -182,6 +182,23 @@
     return record(v) && text(v["code"]) && text(v["message"]) ? { code: v["code"], message: v["message"] } : null;
   }
   var ignored = (_v) => true;
+  var renditionQueue = (value) => value === "images" || value === "videos";
+  var failedRendition = (v) => record(v) && renditionQueue(v["queue"]) && text(v["bucket"]) && text(v["key"]) && textOrNull(v["version_id"]) && text(v["output"]) && count(v["attempts"]) && textOrNull(v["error"]) ? {
+    queue: v["queue"],
+    bucket: v["bucket"],
+    key: v["key"],
+    version_id: v["version_id"],
+    output: v["output"],
+    attempts: v["attempts"],
+    error: v["error"]
+  } : null;
+  function readFailedRenditions(v) {
+    if (!record(v) || !flag(v["more"])) {
+      return null;
+    }
+    const failed2 = list(v["failed"], failedRendition);
+    return failed2 === null ? null : { failed: failed2, more: v["more"] };
+  }
 
   // src/api.ts
   //! The one way the page talks to the server: same-origin JSON under /api/v1.
@@ -343,6 +360,8 @@
         return "#/spaces";
       case "cluster":
         return "#/cluster";
+      case "renditions":
+        return "#/renditions";
       case "objects":
         return `#/b/${encodeURIComponent(route.bucket)}${query([
           ["prefix", route.prefix === "" ? null : route.prefix],
@@ -380,6 +399,9 @@
       }
       if (path2 === "/cluster") {
         return { kind: "cluster" };
+      }
+      if (path2 === "/renditions") {
+        return { kind: "renditions" };
       }
       if (path2 === "/actions") {
         return { kind: "actions", before: position(params.get("before")) };
@@ -2202,6 +2224,43 @@
     }
   }
 
+  // src/renditions.ts
+  //! Renditions that failed for good: the tasks whose five hand-outs are spent,
+  //! with the original, the output, and the last error a worker recorded. They
+  //! stay listed until the original is written again; for operators.
+  var TITLE6 = "Renditions";
+  async function renditions(screen) {
+    loading(screen, TITLE6, "failed renditions");
+    const answer = await call("GET", "/media/failed", readFailedRenditions);
+    if (!answer.ok) {
+      failed(screen, TITLE6, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const page = answer.value;
+    const rows = page.failed.map(
+      (one) => row(
+        mono(`${one.bucket}/${one.key}`),
+        one.version_id === null ? el("span", { class: "muted" }, "current") : mono(one.version_id),
+        mono(one.output),
+        el("span", { class: "numeric" }, String(one.attempts)),
+        one.error ?? el("span", { class: "muted" }, "none recorded")
+      )
+    );
+    fill(
+      screen.main,
+      head(TITLE6, "Renditions the workers stopped trying after five attempts, with the last error. Writing the original again plans it anew."),
+      el(
+        "section",
+        { class: "card flush" },
+        rows.length === 0 ? empty("No rendition has failed.") : table("Failed renditions", ["Original", "Version", "Output", "Tries", "Last error"], rows),
+        page.more ? el("p", { class: "paging" }, "Showing the first 100 of each queue.") : null
+      )
+    );
+  }
+
   // src/signin.ts
   //! Signing in with an access key — the node's root key or a key issued to a user. The secret goes to the server
   //! once; what the browser keeps is an HttpOnly session cookie it cannot read,
@@ -2248,7 +2307,7 @@
   //! Spaces: the tenants buckets and users belong to. Only operators reach this
   //! view; anyone else is told their key does not allow it. A new space takes a
   //! reason, which goes into the action record.
-  var TITLE6 = "Spaces";
+  var TITLE7 = "Spaces";
   function createForm2(screen, opener) {
     const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
     const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
@@ -2297,10 +2356,10 @@
     return form;
   }
   async function spaces(screen) {
-    loading(screen, TITLE6, "spaces");
+    loading(screen, TITLE7, "spaces");
     const answer = await call("GET", "/spaces", readSpaces);
     if (!answer.ok) {
-      failed(screen, TITLE6, answer);
+      failed(screen, TITLE7, answer);
       return;
     }
     if (!screen.live()) {
@@ -2309,7 +2368,7 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-space-form" }, icon("plus"), "New space");
     fill(
       screen.main,
-      head(TITLE6, `${answer.value.length.toLocaleString()} on this store`, opener),
+      head(TITLE7, `${answer.value.length.toLocaleString()} on this store`, opener),
       createForm2(screen, opener),
       el(
         "section",
@@ -2364,7 +2423,7 @@
   //! Creating a user is judged by the server on the user it would be, so a space
   //! admin who asks for an administrator, an operator or a cluster viewer is told
   //! the key does not allow it. Each row's actions are in `user-actions.ts`.
-  var TITLE7 = "Users";
+  var TITLE8 = "Users";
   function check(id, label) {
     const input = el("input", { id, name: id, type: "checkbox" });
     return { row: el("label", { class: "check", for: id }, input, label), input };
@@ -2447,10 +2506,10 @@
     return line;
   }
   async function users(screen) {
-    loading(screen, TITLE7, "users");
+    loading(screen, TITLE8, "users");
     const answer = await call("GET", "/users", readUsers);
     if (!answer.ok) {
-      failed(screen, TITLE7, answer);
+      failed(screen, TITLE8, answer);
       return;
     }
     if (!screen.live()) {
@@ -2459,7 +2518,7 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-user-form" }, icon("plus"), "New user");
     fill(
       screen.main,
-      head(TITLE7, `${answer.value.length.toLocaleString()} you administer`, opener),
+      head(TITLE8, `${answer.value.length.toLocaleString()} you administer`, opener),
       createForm3(screen, opener),
       el(
         "section",
@@ -2481,6 +2540,7 @@
     users: (can) => can.administer,
     spaces: (can) => can.operate,
     cluster: (can) => can.view_cluster,
+    renditions: (can) => can.operate,
     actions: (can) => can.operate
   };
   function offer(can) {
@@ -2505,6 +2565,8 @@
         return spaces(screen);
       case "cluster":
         return cluster(screen);
+      case "renditions":
+        return renditions(screen);
       case "actions":
         return actions(screen, route.before);
     }
@@ -2567,7 +2629,7 @@
     announce("Signed out.");
     showSignIn();
   });
-  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", actions: "record" };
+  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", renditions: "image", actions: "record" };
   for (const link of all("[data-section]")) {
     const name = SECTION_ICONS[link.dataset["section"] ?? ""];
     if (name !== void 0) {

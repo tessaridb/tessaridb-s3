@@ -344,3 +344,44 @@ export function readProblem(v: unknown): Problem | null {
 
 /** For answers whose body is not read (204, or a 201 whose only content is the name we sent). */
 export const ignored = (_v: unknown): true => true;
+
+/** A rendition no longer tried: its queue, original, output, hand-outs and the last error a worker recorded. */
+export interface FailedRendition {
+  readonly queue: "images" | "videos";
+  readonly bucket: string;
+  readonly key: string;
+  readonly version_id: string | null;
+  readonly output: string;
+  readonly attempts: number;
+  readonly error: string | null;
+}
+
+/** The failures, up to a page per queue; `more` when a queue holds others. */
+export interface FailedRenditions {
+  readonly failed: readonly FailedRendition[];
+  readonly more: boolean;
+}
+
+const renditionQueue = (value: unknown): value is FailedRendition["queue"] => value === "images" || value === "videos";
+
+const failedRendition = (v: unknown): FailedRendition | null =>
+  record(v) && renditionQueue(v["queue"]) && text(v["bucket"]) && text(v["key"]) && textOrNull(v["version_id"]) &&
+  text(v["output"]) && count(v["attempts"]) && textOrNull(v["error"])
+    ? {
+        queue: v["queue"],
+        bucket: v["bucket"],
+        key: v["key"],
+        version_id: v["version_id"],
+        output: v["output"],
+        attempts: v["attempts"],
+        error: v["error"],
+      }
+    : null;
+
+export function readFailedRenditions(v: unknown): FailedRenditions | null {
+  if (!record(v) || !flag(v["more"])) {
+    return null;
+  }
+  const failed = list(v["failed"], failedRendition);
+  return failed === null ? null : { failed, more: v["more"] };
+}

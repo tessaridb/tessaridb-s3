@@ -15,6 +15,7 @@ mod input;
 mod keys;
 mod limits;
 mod media;
+mod media_failed;
 mod objects;
 mod page;
 mod quotas;
@@ -217,6 +218,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         )
         .route("/api/v1/actions", get(actions::list))
         .route("/api/v1/usage", get(usage::usage))
+        .route("/api/v1/media/failed", get(media_failed::list))
         .route("/api/v1/spaces", get(spaces::list).post(spaces::create))
         .route("/api/v1/users", get(users::list).post(users::create))
         .route("/api/v1/users/{user}/disabled", put(users::set_disabled))

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use tessari_s3_core::authz::{Access, Role};
 
 use crate::access::{grant, user_with_key};
-use crate::console::send;
+use crate::console::{send, sign_in};
 use crate::console_users::{sign_in_as, states};
 use crate::{IGNORED, call_as};
 
@@ -119,4 +119,74 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
         .await
         .json();
     assert_eq!(cleared["rules"], json!([]));
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_operator_sees_the_renditions_that_failed_for_good_and_a_member_does_not() {
+    use tessari_s3_core::media::Output;
+    use tessari_s3_storage::media::{Rendition, TaskQueue};
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let media = state.storage().media();
+    media
+        .enqueue(&Rendition {
+            bucket: "pictures".to_owned(),
+            key: "a.png".to_owned(),
+            version_id: None,
+            source: [5; 16],
+            output: Output::parse("image/320/jpeg").expect("an output"),
+        })
+        .await
+        .expect("queued");
+    // Five hand-outs, the last one failing: the task stops being handed out and stays as the failure.
+    for _ in 0..4 {
+        assert_eq!(
+            media
+                .claim(TaskQueue::Images, "node-a", 1)
+                .await
+                .expect("claimed")
+                .len(),
+            1
+        );
+        media
+            .reclaim(TaskQueue::Images, "node-a")
+            .await
+            .expect("freed");
+    }
+    let last = media
+        .claim(TaskQueue::Images, "node-a", 1)
+        .await
+        .expect("claimed");
+    media
+        .retry(&last[0], "the original is not an image this server reads")
+        .await
+        .expect("failed");
+    let operator = sign_in(&console).await;
+    let listed = send(
+        &console,
+        "GET",
+        "/api/v1/media/failed",
+        Some(&operator),
+        None,
+    )
+    .await;
+    assert_eq!(listed.status, 200);
+    assert_eq!(
+        listed.json(),
+        json!({"failed": [{
+            "queue": "images", "bucket": "pictures", "key": "a.png", "version_id": null, "output": "image/320/jpeg",
+            "attempts": 5, "error": "the original is not an image this server reads"
+        }], "more": false})
+    );
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    let member = sign_in_as(&console, &ann).await.expect("ann signed in");
+    assert_eq!(
+        send(&console, "GET", "/api/v1/media/failed", Some(&member), None)
+            .await
+            .code()
+            .as_deref(),
+        Some("forbidden"),
+        "the failures span every space, so only an operator reads them"
+    );
 }

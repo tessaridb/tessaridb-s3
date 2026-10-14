@@ -316,6 +316,9 @@ pub const MEDIA_FFMPEG_TIMEOUT_SECS: u64 = 3000;
 /// The largest video original a worker copies out for ffmpeg, in bytes.
 pub const MEDIA_MAX_VIDEO_INPUT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+/// Failed renditions the console lists per queue.
+pub const CONSOLE_MEDIA_FAILED_MAX: usize = 100;
+
 /// Image workers a node runs when `TESSARIDB_S3_MEDIA_WORKERS` is not set.
 pub const DEFAULT_MEDIA_WORKERS: usize = 2;
 

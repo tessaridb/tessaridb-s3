@@ -12,6 +12,7 @@ import { ignored, readCapabilities, type Capabilities } from "./models.ts";
 import { object } from "./object.ts";
 import { objects } from "./objects.ts";
 import { parse, type Route } from "./route.ts";
+import { renditions } from "./renditions.ts";
 import type { Screen } from "./screen.ts";
 import { signIn } from "./signin.ts";
 import { icon, type IconName } from "./icons.ts";
@@ -34,6 +35,7 @@ const NEEDS: Readonly<Record<string, (can: Capabilities) => boolean>> = {
   users: (can) => can.administer,
   spaces: (can) => can.operate,
   cluster: (can) => can.view_cluster,
+  renditions: (can) => can.operate,
   actions: (can) => can.operate,
 };
 
@@ -61,6 +63,8 @@ function draw(route: Route, screen: Screen): Promise<void> {
       return spaces(screen);
     case "cluster":
       return cluster(screen);
+    case "renditions":
+      return renditions(screen);
     case "actions":
       return actions(screen, route.before);
   }
@@ -128,7 +132,7 @@ signOut.addEventListener("click", async () => {
   announce("Signed out.");
   showSignIn();
 });
-const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", actions: "record" };
+const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", renditions: "image", actions: "record" };
 for (const link of all("[data-section]")) {
   const name = SECTION_ICONS[link.dataset["section"] ?? ""];
   if (name !== undefined) {

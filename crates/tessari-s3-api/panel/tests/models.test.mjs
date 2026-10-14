@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readBuckets, readCapabilities, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
+import { readBuckets, readCapabilities, readFailedRenditions, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, drive: own });
@@ -113,4 +113,13 @@ test("a listing row carries the content type the write stored, null where none w
   assert.deepEqual(readListing({ objects: [{ ...row, content_type: null }], prefixes: [], next: null })?.objects, [{ ...row, contentType: null }]);
   assert.equal(readListing({ objects: [row], prefixes: [], next: null }), null, "the type is always sent");
   assert.equal(readListing({ objects: [{ ...row, content_type: 3 }], prefixes: [], next: null }), null);
+});
+
+test("failed renditions are read with their queue, tries and last error, and a stray queue is refused", () => {
+  const one = { queue: "videos", bucket: "films", key: "a.mp4", version_id: null, output: "video/720p/mp4", attempts: 5, error: "ffmpeg ran past its time limit" };
+  assert.deepEqual(readFailedRenditions({ failed: [one], more: true }), { failed: [one], more: true });
+  assert.deepEqual(readFailedRenditions({ failed: [{ ...one, error: null, version_id: "v1" }], more: false })?.failed[0]?.version_id, "v1");
+  assert.equal(readFailedRenditions({ failed: [{ ...one, queue: "audio" }], more: false }), null);
+  assert.equal(readFailedRenditions({ failed: [{ ...one, attempts: "5" }], more: false }), null);
+  assert.equal(readFailedRenditions({ failed: [one] }), null);
 });
