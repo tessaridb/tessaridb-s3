@@ -96,7 +96,7 @@ pub(super) async fn issue(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "issue_upload_key".to_owned(),
             target: format!("{}/{}", scope.bucket.as_str(), scope.key.as_str()),
             reason: why,

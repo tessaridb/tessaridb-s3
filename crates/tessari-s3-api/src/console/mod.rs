@@ -11,12 +11,14 @@ mod content;
 mod error;
 mod grants;
 mod guard;
+mod identity;
 mod input;
 mod keys;
 mod limits;
 mod media;
 mod media_failed;
 mod objects;
+mod oidc;
 mod page;
 mod quotas;
 mod session;
@@ -30,8 +32,10 @@ use std::sync::Arc;
 
 use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post, put};
+use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
 use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{Code, SecretKey};
 
@@ -61,14 +65,28 @@ struct Inner {
     meta_addresses: Vec<String>,
     principals: Principals,
     usage_interval_secs: u64,
+    oidc: Option<OidcClient>,
 }
 
 impl ConsoleState {
     /// State for the console `config` describes, timed by `clock`; `None` when no console is configured.
-    #[must_use]
-    pub fn new(config: &S3Config, clock: Clock, storage: Storage) -> Option<Self> {
-        let console = config.console.as_ref()?;
-        Some(Self {
+    ///
+    /// # Errors
+    /// [`tessari_s3_infrastructure::Error::InvalidConfig`] when the identity provider's client cannot be built.
+    pub fn new(
+        config: &S3Config,
+        clock: Clock,
+        storage: Storage,
+    ) -> Result<Option<Self>, tessari_s3_infrastructure::Error> {
+        let Some(console) = config.console.as_ref() else {
+            return Ok(None);
+        };
+        let oidc = console
+            .oidc
+            .as_ref()
+            .map(|settings| OidcClient::new(settings, CONSOLE_OIDC_REFRESH_MIN_SECS))
+            .transpose()?;
+        Ok(Some(Self {
             inner: Arc::new(Inner {
                 key_id: config.root_access_key.clone(),
                 secret: config.root_secret_key.clone(),
@@ -90,8 +108,14 @@ impl ConsoleState {
                 meta_addresses: config.meta.addresses.clone(),
                 principals: Principals::new(),
                 usage_interval_secs: config.usage_interval_secs,
+                oidc,
             }),
-        })
+        }))
+    }
+
+    /// The identity provider's client, when one is configured.
+    fn oidc(&self) -> Option<&OidcClient> {
+        self.inner.oidc.as_ref()
     }
 
     fn key_id(&self) -> &str {
@@ -118,6 +142,21 @@ impl ConsoleState {
         Ok(live
             .filter(|live| live.scope.is_none())
             .map(|live| (Principal::User(live.principal), live.secret)))
+    }
+
+    /// The principal of the user `name` as the store holds it now, never cached: `None` for a name that is not a
+    /// user's, or a disabled user.
+    async fn user_principal(&self, name: &str) -> Result<Option<Principal>, ConsoleError> {
+        let Some(name) = tessari_s3_core::authz::UserName::new(name) else {
+            return Ok(None);
+        };
+        Ok(self
+            .inner
+            .storage
+            .users()
+            .principal(&name)
+            .await?
+            .map(Principal::User))
     }
 
     fn secret(&self) -> &[u8] {
@@ -186,7 +225,8 @@ async fn not_found() -> ConsoleError {
     ConsoleError::not_found()
 }
 
-/// The console router: signing in and the page's assets are the routes without a session; every other route, an
+/// The console router: signing in (with a key, or through the identity provider) and the page's assets are the routes
+/// without a session; every other route, an
 /// unknown path included, is behind the session guard.
 pub fn console_router(state: ConsoleState) -> axum::Router {
     let protected = axum::Router::new()
@@ -223,6 +263,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/users", get(users::list).post(users::create))
         .route("/api/v1/users/{user}/disabled", put(users::set_disabled))
         .route(
+            "/api/v1/users/{user}/identity",
+            put(identity::link).delete(identity::unlink),
+        )
+        .route(
             "/api/v1/users/{user}/keys",
             get(keys::list).post(keys::issue),
         )
@@ -235,6 +279,8 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .layer(from_fn_with_state(state.clone(), guard::require_session));
     axum::Router::new()
         .route("/api/v1/session", post(session::sign_in))
+        .route("/api/v1/auth/oidc/start", get(oidc::start))
+        .route("/api/v1/auth/oidc/callback", get(oidc::callback))
         .merge(page::routes())
         .merge(protected)
         .with_state(state)

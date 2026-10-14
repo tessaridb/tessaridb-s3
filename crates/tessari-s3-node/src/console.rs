@@ -14,7 +14,7 @@ pub(crate) async fn surface(
 ) -> anyhow::Result<Option<impl Future<Output = std::io::Result<()>> + use<>>> {
     let (Some(console), Some(state)) = (
         &config.console,
-        ConsoleState::new(config, ApiState::system_clock(), storage.clone()),
+        ConsoleState::new(config, ApiState::system_clock(), storage.clone())?,
     ) else {
         return Ok(None);
     };

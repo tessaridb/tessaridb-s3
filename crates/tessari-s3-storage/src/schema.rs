@@ -40,6 +40,8 @@ use crate::Result;
 /// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
 /// `key_issues:<token>` remembers which key a console form's token issued, so a repeated submission answers that key;
 /// the store drops it once its window has passed.
+/// `oidc_logins:<state>` holds a console sign-in sent to the identity provider until its callback takes it (the store
+/// drops it at its expiry), and `identity_links` which user each provider identity signs in as.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
 const TABLES: &str = "\
@@ -177,6 +179,10 @@ ALTER TABLE key_issues SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS grants (\
  user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string REQUIRED);
+ALTER TABLE oidc_logins SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_link_user ON identity_links FIELDS user_name;
 COMMIT;
 ";
 

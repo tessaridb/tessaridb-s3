@@ -19,6 +19,7 @@ mod console_admin;
 mod console_explorer;
 mod console_keys;
 mod console_media;
+mod console_oidc;
 mod console_quota;
 mod console_store;
 mod console_users;
@@ -28,6 +29,7 @@ mod delete_many;
 mod erasure;
 mod erasure_heals;
 mod erasure_reads;
+mod identities;
 mod large;
 mod lifecycle;
 mod listing;
@@ -39,6 +41,12 @@ mod no_bytes;
 mod notifications;
 mod notify_delivery;
 mod objects;
+#[path = "../wire/oidc_provider.rs"]
+#[allow(
+    dead_code,
+    reason = "shared with the wire tests; each binary uses part of it"
+)]
+mod oidc_provider;
 mod quota;
 mod quota_window;
 mod reclaim;
@@ -138,6 +146,7 @@ pub(crate) async fn fresh_console_with(
     let storage = prepared(&config).await;
     let console =
         tessari_s3_api::ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
+            .expect("built")
             .expect("a console is configured");
     (
         ApiState::new(&config, ApiState::system_clock(), storage),

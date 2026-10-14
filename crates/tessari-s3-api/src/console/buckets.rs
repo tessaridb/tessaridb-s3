@@ -105,7 +105,7 @@ pub(super) async fn create(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "create_bucket".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,
@@ -154,7 +154,7 @@ pub(super) async fn delete(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "delete_bucket".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,

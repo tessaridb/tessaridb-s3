@@ -185,7 +185,7 @@ pub(super) async fn create(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "create_user".to_owned(),
             target: new.name.as_str().to_owned(),
             reason: why,
@@ -238,7 +238,7 @@ pub(super) async fn set_disabled(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: if disabled {
                 "disable_user"
             } else {

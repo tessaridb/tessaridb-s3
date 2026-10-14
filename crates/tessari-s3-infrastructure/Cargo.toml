@@ -16,6 +16,7 @@ tessaridb-client.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "process"] }
 tracing.workspace = true
 reqwest.workspace = true
+openidconnect.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 rskafka.workspace = true

@@ -29,6 +29,16 @@ impl ConsoleError {
         }
     }
 
+    /// A sign-in through the identity provider refused for any reason: one answer for all of them, so the callback
+    /// tells nobody which check failed; the reason goes to the log.
+    pub(crate) const fn sign_in_refused() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "sign_in_refused",
+            message: "the sign-in was refused; start it again",
+        }
+    }
+
     pub(crate) const fn forbidden() -> Self {
         Self {
             status: StatusCode::FORBIDDEN,

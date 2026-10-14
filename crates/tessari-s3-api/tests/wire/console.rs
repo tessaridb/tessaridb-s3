@@ -39,7 +39,9 @@ pub(super) fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState 
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
     );
-    ConsoleState::new(&config, Arc::new(move || now), storage).expect("a console is configured")
+    ConsoleState::new(&config, Arc::new(move || now), storage)
+        .expect("built")
+        .expect("a console is configured")
 }
 
 struct Answer {

@@ -5,6 +5,11 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Console sign-in through an OpenID Connect provider (`TESSARIDB_S3_CONSOLE_OIDC_*`): authorization code with PKCE,
+  the ID token verified against the provider's keys with a fixed algorithm list, a second factor required through
+  `amr`, and the identity linked to a user by an operator (`PUT`/`DELETE /api/v1/users/{user}/identity`, recorded).
+  In-flight sign-ins live in the metadata store for ten minutes and are taken once. A console session now names
+  either an access key or a user; sessions issued before this version are no longer accepted.
 - `tessaridb-s3-bench`, a load generator that measures the server from the client side. It runs PUT, GET, HEAD,
   ListObjectsV2 and DELETE for each object-size class and concurrency step, multipart uploads included. It reports
   latency percentiles, rates, failures by S3 error code and a correctness check of every GET. `summarise` combines

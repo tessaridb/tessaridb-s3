@@ -132,7 +132,7 @@ pub(super) async fn issue(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "issue_key".to_owned(),
             target: user.name.as_str().to_owned(),
             reason: why,
@@ -210,7 +210,7 @@ pub(super) async fn revoke(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "revoke_key".to_owned(),
             target: user.name.as_str().to_owned(),
             reason: why,

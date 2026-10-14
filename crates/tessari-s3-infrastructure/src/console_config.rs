@@ -22,6 +22,23 @@ pub struct ConsoleSettings {
     pub sign_ins_per_minute: usize,
     /// `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` — console requests per signed-in key per minute.
     pub requests_per_minute: usize,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_*` — the identity provider people sign in through; `None` keeps key sign-in only.
+    pub oidc: Option<OidcSettings>,
+}
+
+/// The OpenID Connect provider the console signs people in through.
+#[derive(Debug, Clone)]
+pub struct OidcSettings {
+    /// `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` — the issuer URL; discovery and keys are read from it alone.
+    pub issuer: String,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` — the console's client id at the provider.
+    pub client_id: String,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET` — its client secret (`client_secret_basic`).
+    pub client_secret: tessari_s3_types::SecretKey,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI` — the callback URL registered at the provider, exactly.
+    pub redirect_uri: String,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` — `amr` values that prove a second factor; one must be present.
+    pub mfa_amr: Vec<String>,
 }
 
 const LISTEN: &str = "TESSARIDB_S3_CONSOLE_LISTEN";
@@ -38,6 +55,7 @@ pub(crate) fn console_settings(
     let Some(listen) = get(LISTEN) else {
         if let Some(key) = [CERT, KEY, SIGN_INS, REQUESTS]
             .into_iter()
+            .chain(crate::oidc_config::ALL)
             .find(|key| get(key).is_some())
         {
             return Err(Error::InvalidConfig {
@@ -64,6 +82,7 @@ pub(crate) fn console_settings(
             .unwrap_or(DEFAULT_CONSOLE_SIGN_INS_PER_MINUTE),
         requests_per_minute: parse_positive(get(REQUESTS), REQUESTS)?
             .unwrap_or(DEFAULT_CONSOLE_REQUESTS_PER_MINUTE),
+        oidc: crate::oidc_config::oidc_settings(get)?,
     }))
 }
 

@@ -15,6 +15,7 @@ use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
+use crate::identities::{IdentityService, TessariIdentities};
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::media::{MediaService, TessariMedia};
 use crate::multipart::{MultipartService, TessariMultipart};
@@ -38,6 +39,7 @@ pub struct Storage {
     usage: UsageService,
     spaces: SpaceService,
     users: UserService,
+    identities: IdentityService,
     pool: MetaPool,
     reclaim_grace_secs: u64,
 }
@@ -58,6 +60,7 @@ impl Storage {
             actions: ActionService::new(TessariActions::new(pool.clone())),
             usage: UsageService::new(TessariUsage::new(pool.clone())),
             users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
+            identities: IdentityService::new(TessariIdentities::new(pool.clone())),
             spaces,
             objects,
             shards,
@@ -211,5 +214,11 @@ impl Storage {
     #[must_use]
     pub const fn users(&self) -> &UserService {
         &self.users
+    }
+
+    /// Console sign-ins in flight to the identity provider, and which user each provider identity is.
+    #[must_use]
+    pub const fn identities(&self) -> &IdentityService {
+        &self.identities
     }
 }

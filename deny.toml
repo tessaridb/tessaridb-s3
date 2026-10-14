@@ -9,6 +9,7 @@ yanked = "deny"
 # server. Ignored by its ID alone, so any later advisory against it still fails the check.
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "unmaintained compile-time macro under the AVIF encoder; nothing to upgrade to" },
+  { id = "RUSTSEC-2023-0071", reason = "timing side channel in RSA private-key operations; the console only verifies an identity provider's RSA signatures with its public keys and performs no RSA private-key operation" },
 ]
 
 [bans]

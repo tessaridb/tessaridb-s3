@@ -133,6 +133,10 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_CONSOLE_TLS_CERT` / `_KEY` | unset (plain) | the console over TLS: its certificate chain and private key (PEM), both or neither. Without them a secret crosses the network in the clear when an operator signs in, so keep the console on a private address; the node says so when it starts |
 | `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` | `10` | sign-in attempts accepted per client address per minute; the limit is checked before the credential |
 | `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` | `600` | console requests accepted per signed-in key per minute |
+| `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` | unset (keys only) | an OpenID Connect provider people sign in to the console through, by its issuer URL (https, or http to this machine only). Its four companions are then required or defaulted; set without the issuer they are refused |
+| `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` / `_CLIENT_SECRET` | — | the console's client at the provider; the secret stays on the server (`client_secret_basic`) |
+| `TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI` | — | the callback registered at the provider, exactly: the console's address followed by `/api/v1/auth/oidc/callback` |
+| `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` | `mfa` | comma-separated `amr` values that prove a second factor; a sign-in whose ID token carries none of them is refused |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
@@ -149,6 +153,15 @@ list a bucket a page at a time, describe an object, download it (always as an at
 ETag they saw: a changed object answers `412` and is kept. Every change and every download is recorded with the
 signed-in key and the operator's reason, required to delete; `GET /api/v1/actions` reads that record newest first.
 It is kept a year in TessariDB, which refuses to change or remove an entry.
+
+With an identity provider configured, a person signs in at `/api/v1/auth/oidc/start` instead of with a key: the
+authorization code flow with PKCE (`S256`), the console server holding every token and the browser only its session
+cookie. The return is checked in full — the state taken once, the `iss` response parameter, the code exchanged once,
+the ID token's signature (RS256, ES256 or EdDSA from the provider's published keys, never an algorithm the token or
+the provider's metadata names), issuer, audience, expiry, nonce and `at_hash`, and a second factor — and the identity
+must be linked to a user (`PUT /api/v1/users/{user}/identity` with the provider's `subject`, by whoever may manage
+that user, recorded like any change). Every refused return is the same `401`; the reason is in the node's log. The
+session holds the user, not a key, and ends at its next request once the user is disabled.
 
 The page is built from TypeScript in `crates/tessari-s3-api/panel/`; its output is committed to
 `crates/tessari-s3-api/assets/` and embedded in the binary, so building the server never needs Node. Only changing

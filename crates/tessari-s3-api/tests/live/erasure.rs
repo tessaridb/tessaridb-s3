@@ -140,6 +140,7 @@ pub(crate) async fn member() -> Member {
             ApiState::system_clock(),
             storage.clone(),
         )
+        .expect("built")
         .expect("a console is configured"),
         storage,
         planter: MetaPool::new(config.meta.clone()).expect("pool"),

@@ -2,4 +2,4 @@
 
 mod session;
 
-pub use session::{Session, SessionError, issue, verify};
+pub use session::{Session, SessionError, Subject, issue, verify};

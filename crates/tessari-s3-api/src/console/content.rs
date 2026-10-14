@@ -99,7 +99,7 @@ pub(super) async fn download(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "download_object".to_owned(),
             target: format!("{}/{}", bucket.as_str(), key.as_str()),
             reason: why,

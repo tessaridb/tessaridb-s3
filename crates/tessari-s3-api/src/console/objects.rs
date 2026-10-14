@@ -216,7 +216,7 @@ pub(super) async fn delete(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "delete_object".to_owned(),
             target: format!("{}/{}", bucket.as_str(), key.as_str()),
             reason: why,

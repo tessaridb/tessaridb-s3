@@ -49,6 +49,11 @@ futures-util = { version = "0.3", default-features = false }
 # Internal shard traffic between S3 nodes; TLS arrives with the cluster CA (W7), so no TLS backend yet.
 reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider"] }
 bytes = "1"
+# Console sign-in through an identity provider: the ID-token checks (signature by the provider's keys, iss, aud, exp,
+# nonce, at_hash), PKCE and state, without an HTTP stack of its own — the console hands it its own client.
+openidconnect = { version = "4.0.1", default-features = false }
+# Instants in the ID tokens the live tests' identity provider signs (the library's claim types take them).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # Verifies a notification destination's certificate against the platform's trust store; already under the HTTP client.

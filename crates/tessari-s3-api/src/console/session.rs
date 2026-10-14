@@ -15,7 +15,7 @@ use subtle::ConstantTimeEq;
 use tessari_s3_constants::{CONSOLE_SESSION_COOKIE, CONSOLE_SESSION_SECS};
 
 use tessari_s3_core::authz::{Action, Decision, Principal, authorize};
-use tessari_s3_core::console::Session;
+use tessari_s3_core::console::{Session, Subject};
 
 use super::ConsoleState;
 use super::error::ConsoleError;
@@ -41,7 +41,11 @@ pub(super) fn is_json(headers: &HeaderMap) -> bool {
         .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
 }
 
-fn cookie(state: &ConsoleState, value: &str, max_age: i64) -> Result<HeaderValue, ConsoleError> {
+pub(super) fn cookie(
+    state: &ConsoleState,
+    value: &str,
+    max_age: i64,
+) -> Result<HeaderValue, ConsoleError> {
     let secure = if state.secure_cookie() {
         "; Secure"
     } else {
@@ -92,7 +96,7 @@ pub(super) async fn sign_in(
     getrandom::fill(&mut nonce).map_err(|_| ConsoleError::internal())?;
     let token = tessari_s3_core::console::issue(
         state.secret(),
-        &access_key_id,
+        &Subject::Key(access_key_id.clone()),
         now,
         CONSOLE_SESSION_SECS,
         nonce,
@@ -134,7 +138,9 @@ pub(super) async fn capabilities(
         Principal::Upload(_) => false,
     };
     Json(Capabilities {
-        access_key_id: session.key_id,
+        // A person signed in through the identity provider holds no key; until the page names them its own way, this
+        // carries their `user:<name>`.
+        access_key_id: session.subject.operator(),
         operate: may(&Action::Operate),
         administer,
         view_cluster: may(&Action::ViewCluster),

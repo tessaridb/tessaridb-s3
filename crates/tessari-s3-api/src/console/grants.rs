@@ -62,7 +62,7 @@ pub(super) async fn set(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "set_grant".to_owned(),
             target: format!("{}/{}", user.name.as_str(), bucket.as_str()),
             reason: why,
@@ -106,7 +106,7 @@ pub(super) async fn remove(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "remove_grant".to_owned(),
             target: format!("{}/{}", user.name.as_str(), bucket.as_str()),
             reason: why,

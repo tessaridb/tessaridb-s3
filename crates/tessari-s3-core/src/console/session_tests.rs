@@ -1,18 +1,22 @@
-use super::{Session, SessionError, issue, verify};
+use super::{Session, SessionError, Subject, issue, verify};
 
 const SECRET: &[u8] = b"root-secret-key-0123456789abcdef";
 const NOW: i64 = 1_791_417_600;
 const HOUR: i64 = 3_600;
 const NONCE: [u8; 16] = [9; 16];
 
+fn key() -> Subject {
+    Subject::Key("AKIAEXAMPLE".to_owned())
+}
+
 fn token() -> String {
-    issue(SECRET, "AKIAEXAMPLE", NOW, HOUR, NONCE)
+    issue(SECRET, &key(), NOW, HOUR, NONCE)
 }
 
 #[test]
 fn a_session_verifies_until_it_expires_and_names_its_key() {
     let expected = Session {
-        key_id: "AKIAEXAMPLE".to_owned(),
+        subject: key(),
         expires: NOW + HOUR,
     };
     assert_eq!(verify(SECRET, &token(), NOW), Ok(expected.clone()));
@@ -61,7 +65,8 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
         "v1",
         "v1.",
         "v1..",
-        "v2.abc.def",
+        "v1.abc.def",
+        "v3.abc.def",
         "v1.!!!.???",
         "v1.abc.def.ghi",
     ] {
@@ -74,7 +79,7 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
     // A genuine signature under another version label, and with a part appended: the version and the shape are
     // checked, not only the signature.
     let good = token();
-    let relabelled = good.replacen("v1.", "v2.", 1);
+    let relabelled = good.replacen("v2.", "v3.", 1);
     assert_eq!(
         verify(SECRET, &relabelled, NOW),
         Err(SessionError::Malformed)
@@ -87,5 +92,29 @@ fn anything_that_is_not_a_token_of_this_version_is_malformed() {
 
 #[test]
 fn two_sessions_issued_in_the_same_second_differ_by_their_nonce() {
-    assert_ne!(token(), issue(SECRET, "AKIAEXAMPLE", NOW, HOUR, [8; 16]));
+    assert_ne!(token(), issue(SECRET, &key(), NOW, HOUR, [8; 16]));
+}
+
+#[test]
+fn a_session_names_whether_it_holds_a_key_or_a_person() {
+    let person = Subject::User("alice".to_owned());
+    let session = verify(SECRET, &issue(SECRET, &person, NOW, HOUR, NONCE), NOW);
+    assert_eq!(
+        session,
+        Ok(Session {
+            subject: person,
+            expires: NOW + HOUR
+        })
+    );
+    // A key and a user spelled alike are two different sessions, and each limits under its own label.
+    let alike = Subject::Key("alice".to_owned());
+    assert_ne!(
+        issue(SECRET, &alike, NOW, HOUR, NONCE),
+        issue(SECRET, &Subject::User("alice".to_owned()), NOW, HOUR, NONCE)
+    );
+    assert_eq!(alike.label(), "key:alice");
+    assert_eq!(Subject::User("alice".to_owned()).label(), "user:alice");
+    // The action record names a key as it always has, and a person so that no generated key id can be mistaken for them.
+    assert_eq!(alike.operator(), "alice");
+    assert_eq!(Subject::User("alice".to_owned()).operator(), "user:alice");
 }

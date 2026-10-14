@@ -83,7 +83,7 @@ pub(super) async fn create(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "create_space".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,

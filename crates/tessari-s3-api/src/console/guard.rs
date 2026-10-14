@@ -1,6 +1,7 @@
 //! The session guard on every protected console route: no session, a tampered one or an expired one is `401`
-//! before anything else runs; a valid one is limited per signed-in key, and its key is resolved again — through the
-//! 5-second principal cache — so a disabled key or user loses its session within that window.
+//! before anything else runs; a valid one is limited per signed-in subject and resolved again — a key through the
+//! 5-second principal cache, so a disabled key or user loses its session within that window; a person signed in
+//! through the identity provider straight from the store, so a disabled user loses it at the next request.
 
 use axum::extract::{Request, State};
 use axum::http::HeaderMap;
@@ -8,7 +9,7 @@ use axum::http::header::COOKIE;
 use axum::middleware::Next;
 use axum::response::Response;
 use tessari_s3_constants::CONSOLE_SESSION_COOKIE;
-use tessari_s3_core::console::{Session, verify};
+use tessari_s3_core::console::{Session, Subject, verify};
 
 use super::ConsoleState;
 use super::error::ConsoleError;
@@ -37,15 +38,19 @@ pub(super) async fn require_session(
         .ok_or(ConsoleError::unauthorized())?;
     if !state
         .requests()
-        .admit(&session.key_id, now)
+        .admit(&session.subject.label(), now)
         .map_err(|()| ConsoleError::internal())?
     {
         return Err(ConsoleError::rate_limited());
     }
-    let (principal, _) = state
-        .principal_for(&session.key_id)
-        .await?
-        .ok_or(ConsoleError::unauthorized())?;
+    let principal = match &session.subject {
+        Subject::Key(key_id) => state
+            .principal_for(key_id)
+            .await?
+            .map(|(principal, _)| principal),
+        Subject::User(name) => state.user_principal(name).await?,
+    }
+    .ok_or(ConsoleError::unauthorized())?;
     request.extensions_mut().insert(principal);
     request.extensions_mut().insert(session);
     Ok(next.run(request).await)

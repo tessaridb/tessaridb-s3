@@ -23,6 +23,7 @@ pub(crate) async fn states() -> (ApiState, ConsoleState, Arc<AtomicI64>) {
     let read = Arc::clone(&now);
     let clock: tessari_s3_api::Clock = Arc::new(move || read.load(Ordering::Acquire));
     let console = ConsoleState::new(&config, Arc::clone(&clock), storage.clone())
+        .expect("built")
         .expect("a console is configured");
     (ApiState::new(&config, clock, storage), console, now)
 }

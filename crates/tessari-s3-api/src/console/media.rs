@@ -128,7 +128,7 @@ pub(super) async fn set(
     record(
         &state,
         NewAction {
-            operator: session.key_id,
+            operator: session.subject.operator(),
             operation: "set_media".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,

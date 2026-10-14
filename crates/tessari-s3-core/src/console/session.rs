@@ -1,5 +1,5 @@
-//! Console sessions: what an operator holds after signing in. A token names the access key it was issued to and when
-//! it stops being accepted, signed with HMAC-SHA256 under the root secret, so any node of the cluster can verify it
+//! Console sessions: what an operator holds after signing in. A token names who it was issued to — the access key
+//! that signed in, or the S3 user an identity provider vouched for — and when it stops being accepted, signed with HMAC-SHA256 under the root secret, so any node of the cluster can verify it
 //! with no session store and changing the root secret ends every session. It is compared in constant time.
 
 use base64::Engine;
@@ -9,15 +9,66 @@ use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
 /// The version prefix; a new token format gets a new prefix, never a reinterpretation of this one.
-const VERSION: &str = "v1";
+const VERSION: &str = "v2";
 /// The first line of every message signed, so this signature can never be mistaken for another use of the secret.
-const SCHEME: &str = "TESSARI-S3-CONSOLE-SESSION-V1";
+const SCHEME: &str = "TESSARI-S3-CONSOLE-SESSION-V2";
+
+/// Who a session was issued to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Subject {
+    /// The access key id an operator signed in with: the root credential or a user's live key.
+    Key(String),
+    /// The S3 user an identity provider's sign-in was linked to.
+    User(String),
+}
+
+impl Subject {
+    /// The kind and the name in one string, distinct for a key and a user spelled alike.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Key(id) => format!("key:{id}"),
+            Self::User(name) => format!("user:{name}"),
+        }
+    }
+
+    /// How the action record names who acted: an access key by its id, as it always has; a person as `user:<name>`,
+    /// which no generated access key id can spell.
+    #[must_use]
+    pub fn operator(&self) -> String {
+        match self {
+            Self::Key(id) => id.clone(),
+            Self::User(_) => self.label(),
+        }
+    }
+
+    fn parse(kind: &str, name: &str) -> Option<Self> {
+        match kind {
+            "key" => Some(Self::Key(name.to_owned())),
+            "user" => Some(Self::User(name.to_owned())),
+            _ => None,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Key(_) => "key",
+            Self::User(_) => "user",
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Key(name) | Self::User(name) => name,
+        }
+    }
+}
 
 /// A verified console session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
-    /// The access key id the operator signed in with.
-    pub key_id: String,
+    /// Who signed in.
+    pub subject: Subject,
     /// Seconds since the epoch at which the session stops being accepted.
     pub expires: i64,
 }
@@ -48,13 +99,17 @@ fn mac(secret: &[u8], payload: &[u8]) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-/// A token for `key_id`, issued at `now` and accepted for `lifetime` seconds; `nonce` makes two tokens of one second
+/// A token for `subject`, issued at `now` and accepted for `lifetime` seconds; `nonce` makes two tokens of one second
 /// differ.
 #[must_use]
-pub fn issue(secret: &[u8], key_id: &str, now: i64, lifetime: i64, nonce: [u8; 16]) -> String {
+pub fn issue(secret: &[u8], subject: &Subject, now: i64, lifetime: i64, nonce: [u8; 16]) -> String {
     let expires = now.saturating_add(lifetime);
     let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-    let payload = format!("{key_id}\n{now}\n{expires}\n{nonce}");
+    let payload = format!(
+        "{}\n{}\n{now}\n{expires}\n{nonce}",
+        subject.kind(),
+        subject.name()
+    );
     format!(
         "{VERSION}.{}.{}",
         URL_SAFE_NO_PAD.encode(payload.as_bytes()),
@@ -89,7 +144,8 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     }
     let text = String::from_utf8(payload).map_err(|_| SessionError::Malformed)?;
     let mut fields = text.split('\n');
-    let (Some(key_id), Some(_issued), Some(expires), Some(_nonce), None) = (
+    let (Some(kind), Some(name), Some(_issued), Some(expires), Some(_nonce), None) = (
+        fields.next(),
         fields.next(),
         fields.next(),
         fields.next(),
@@ -98,16 +154,14 @@ pub fn verify(secret: &[u8], token: &str, now: i64) -> Result<Session, SessionEr
     ) else {
         return Err(SessionError::Malformed);
     };
+    let subject = Subject::parse(kind, name).ok_or(SessionError::Malformed)?;
     let expires = expires
         .parse::<i64>()
         .map_err(|_| SessionError::Malformed)?;
     if now >= expires {
         return Err(SessionError::Expired);
     }
-    Ok(Session {
-        key_id: key_id.to_owned(),
-        expires,
-    })
+    Ok(Session { subject, expires })
 }
 
 #[cfg(test)]

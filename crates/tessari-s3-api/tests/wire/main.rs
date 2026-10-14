@@ -7,6 +7,8 @@ mod console;
 mod console_page;
 mod erasure;
 mod internal;
+mod oidc;
+mod oidc_provider;
 mod operations;
 mod peers;
 mod peers_tls;
