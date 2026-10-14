@@ -180,7 +180,7 @@ impl LifecycleService {
     ) -> Result<bool> {
         match self
             .objects
-            .delete_version(bucket, key, &version.version_id)
+            .expire_version(bucket, key, &version.version_id)
             .await?
         {
             VersionRemoved::Done { marker } => {

@@ -13,7 +13,7 @@ const RULES: &str = "<LifecycleConfiguration xmlns=\"http://s3.amazonaws.com/doc
 <AbortIncompleteMultipartUpload><DaysAfterInitiation>3</DaysAfterInitiation></AbortIncompleteMultipartUpload></Rule>\
 </LifecycleConfiguration>";
 
-async fn lifecycle(state: &tessari_s3_api::ApiState, method: &str, body: &str) -> Seen {
+pub(crate) async fn lifecycle(state: &tessari_s3_api::ApiState, method: &str, body: &str) -> Seen {
     call(
         state,
         method,
@@ -113,7 +113,7 @@ async fn what_this_server_does_not_do_is_refused_and_a_bad_rule_is_named() {
 }
 
 /// An instant `days` days after now, as the lifecycle pass is told the time.
-fn days_ahead(days: i64) -> tessari_s3_types::Timestamp {
+pub(crate) fn days_ahead(days: i64) -> tessari_s3_types::Timestamp {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("after the epoch");

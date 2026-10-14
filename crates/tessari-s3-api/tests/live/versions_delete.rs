@@ -16,7 +16,11 @@ fn delete_marker(seen: &Seen) -> bool {
         .is_some_and(|value| value.as_bytes() == b"true")
 }
 
-async fn delete_version(state: &tessari_s3_api::ApiState, path: &str, version: &str) -> Seen {
+pub(crate) async fn delete_version(
+    state: &tessari_s3_api::ApiState,
+    path: &str,
+    version: &str,
+) -> Seen {
     call(
         state,
         "DELETE",

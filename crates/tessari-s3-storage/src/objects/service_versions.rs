@@ -7,7 +7,7 @@ use tessari_s3_constants::VERSION_WRITE_ATTEMPTS;
 use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::{BucketName, ObjectKey};
 
-use super::super::repository::{Head, NewVersion, ObjectRepository, VersionPlan};
+use super::super::repository::{Head, NewVersion, ObjectRepository, Removal, VersionPlan};
 use super::super::tessaridb::TessariObjects;
 use super::super::version_id::{NULL, named};
 use crate::{Error, Result};
@@ -52,6 +52,7 @@ pub(super) fn plan(head: &Head, delete: bool) -> Result<VersionPlan> {
         label,
         notify: head.notifies,
         current: head.current,
+        removal: Removal::Request,
     })
 }
 

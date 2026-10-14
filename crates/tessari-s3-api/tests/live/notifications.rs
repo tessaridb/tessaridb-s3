@@ -244,3 +244,85 @@ async fn a_removal_follows_the_configuration_at_the_time_of_the_removal() {
         vec!["s3:ObjectCreated:Put".to_owned()]
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_version_or_marker_removed_by_id_records_one_permanent_removal() {
+    use crate::versions_delete::delete_version;
+    use crate::versions_kept::{put, set_versioning, version_header};
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/kept", vec![], b"").await.status, 200);
+    set_versioning(&state, "kept", "Enabled").await;
+    configure(&planter, "kept").await;
+    let one = version_header(&put(&state, "/kept/k", b"one").await).expect("an id");
+    let two = version_header(&put(&state, "/kept/k", b"two").await).expect("an id");
+    // A noncurrent version, then the current one — the key's last — each removed for good.
+    assert_eq!(delete_version(&state, "/kept/k", &one).await.status, 204);
+    assert_eq!(delete_version(&state, "/kept/k", &two).await.status, 204);
+    // A marker over `three`, removed by its id: `three` is current again, and that is no new object.
+    put(&state, "/kept/k", b"three").await;
+    let deleted = call(&state, "DELETE", "/kept/k", vec![], b"").await;
+    assert_eq!(deleted.status, 204);
+    let marker = version_header(&deleted).expect("the marker's id");
+    assert_eq!(delete_version(&state, "/kept/k", &marker).await.status, 204);
+    assert_eq!(
+        recorded(&planter, "k").await,
+        vec![
+            "s3:ObjectCreated:Put".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+            "s3:ObjectRemoved:Delete".to_owned(),
+            "s3:ObjectRemoved:Delete".to_owned(),
+            "s3:ObjectRemoved:Delete".to_owned(),
+            "s3:ObjectRemoved:DeleteMarkerCreated".to_owned(),
+        ],
+        "three puts, the marker the delete added, and one permanent removal per version id"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn what_lifecycle_removes_is_named_a_lifecycle_expiration() {
+    use crate::lifecycle::{days_ahead, lifecycle};
+    use crate::versions_kept::{put, set_versioning};
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/cycle", vec![], b"").await.status, 200);
+    set_versioning(&state, "cycle", "Enabled").await;
+    configure(&planter, "cycle").await;
+    put(&state, "/cycle/logs/a", b"first").await;
+    put(&state, "/cycle/logs/a", b"second").await;
+    let rules = "<LifecycleConfiguration><Rule><ID>logs</ID><Filter><Prefix>logs/</Prefix></Filter>\
+        <Status>Enabled</Status><Expiration><Days>1</Days></Expiration>\
+        <NoncurrentVersionExpiration><NoncurrentDays>1</NoncurrentDays></NoncurrentVersionExpiration>\
+        </Rule></LifecycleConfiguration>";
+    assert_eq!(lifecycle(&state, "PUT", rules).await.status, 200);
+    let passes = state.storage().lifecycle();
+    let now = days_ahead(3);
+    // Pass 1 removes the noncurrent `first` and expires `second` behind a marker.
+    passes.pass(now, 100, 0).await.expect("pass 1");
+    assert_eq!(
+        recorded(&planter, "logs/a").await,
+        vec![
+            "s3:LifecycleExpiration:Delete".to_owned(),
+            "s3:LifecycleExpiration:DeleteMarkerCreated".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+        ]
+    );
+    // Passes 2 and 3 remove `second`, now noncurrent, then the marker left alone.
+    passes.pass(now, 100, 0).await.expect("pass 2");
+    passes.pass(now, 100, 0).await.expect("pass 3");
+    assert_eq!(
+        recorded(&planter, "logs/a").await,
+        vec![
+            "s3:LifecycleExpiration:Delete".to_owned(),
+            "s3:LifecycleExpiration:Delete".to_owned(),
+            "s3:LifecycleExpiration:Delete".to_owned(),
+            "s3:LifecycleExpiration:DeleteMarkerCreated".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+            "s3:ObjectCreated:Put".to_owned(),
+        ]
+    );
+}

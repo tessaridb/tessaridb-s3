@@ -28,7 +28,8 @@ use crate::Result;
 /// `object_events` is the notification outbox, a topic: a write or removal stamps the object record with whether its
 /// bucket notifies (`notify`) and what wrote it (`op`), and the `object_created` / `object_removed` events append one
 /// message per change in the change's own commit, named after the change's data (never a generated identity, which
-/// would make concurrent writers contend). Its position is the event's sequencer.
+/// would make concurrent writers contend). A version removed by its id is stamped with its message's name and event
+/// in the removal's fence, and `version_removed` appends it. Its position is the event's sequencer.
 /// `lifecycle_runs` holds one record per bucket with lifecycle rules, written in the commit that writes them and due
 /// again an interval after each pass; a claim hands a bucket to one node at a time.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
@@ -124,8 +125,14 @@ DEFINE EVENT OR REPLACE object_removed ON objects FOR DELETE WHEN $before.notify
 THEN { LET $removed_from = $before.bucket_name; LET $state = (SELECT versioning FROM ONLY buckets:$removed_from); \
 LET $named = string::concat('r-', type::string($before.data ?? $before.upload)); \
 CREATE object_events:$named = { bucket_name: $before.bucket_name, key: $before.key, \
-event: IF $state.versioning != NONE THEN 's3:ObjectRemoved:DeleteMarkerCreated' ELSE 's3:ObjectRemoved:Delete' END, \
-at: time::now() }; };
+event: string::concat(string::concat('s3:', $before.op ?? 'ObjectRemoved'), \
+IF $state.versioning != NONE THEN ':DeleteMarkerCreated' ELSE ':Delete' END), at: time::now() }; };
+DEFINE FIELD IF NOT EXISTS removal ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS removal_event ON versions TYPE string;
+DEFINE EVENT OR REPLACE version_removed ON versions FOR DELETE WHEN $before.removal != NONE \
+THEN { LET $named = $before.removal; \
+CREATE object_events:$named = { bucket_name: $before.bucket_name, key: $before.key, event: $before.removal_event, \
+version_id: $before.version_id, at: time::now() }; };
 DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;

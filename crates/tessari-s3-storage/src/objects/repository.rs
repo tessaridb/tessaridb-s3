@@ -72,6 +72,27 @@ pub(crate) struct VersionPlan {
     pub(crate) notify: bool,
     /// Whether the key has a current object record to stamp before a removal.
     pub(crate) current: bool,
+    /// What a removal is done for, which names its event.
+    pub(crate) removal: Removal,
+}
+
+/// What removes an object or a version: a request, or the bucket's lifecycle rules (S3 ref 11 M5 event names).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Removal {
+    /// A DeleteObject or DeleteObjects request.
+    Request,
+    /// A lifecycle expiration.
+    Lifecycle,
+}
+
+impl Removal {
+    /// The event family the removal is named under.
+    pub(crate) const fn family(self) -> &'static str {
+        match self {
+            Self::Request => "ObjectRemoved",
+            Self::Lifecycle => "LifecycleExpiration",
+        }
+    }
 }
 
 /// A bucket's incarnation and the record at one key, read at one snapshot.

@@ -5,6 +5,7 @@
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::repository::Removal;
 use super::super::version_id::{NULL, Naming, key_prefix, record_id};
 use super::{TessariObjects, id, is_lost_or_refused};
 use crate::answers::first_record;
@@ -37,6 +38,8 @@ pub(crate) struct Target {
     pub(crate) marker: bool,
     /// What becomes current, when the target is the key's newest version.
     successor: Option<Successor>,
+    /// Whether the bucket notifies, read with the target.
+    notify: bool,
 }
 
 type Fields = std::collections::BTreeMap<String, Value>;
@@ -114,10 +117,15 @@ impl TessariObjects {
                 Value::Bytes(record_id(&prefix, target_seq)),
             ),
             ("prefix".to_owned(), Value::Bytes(prefix)),
+            (
+                "bucket".to_owned(),
+                Value::String(bucket.as_str().to_owned()),
+            ),
         ];
         let script = format!(
             "BEGIN; SELECT {FIELDS} FROM ONLY versions:$target; \
-             SELECT {FIELDS} FROM versions AFTER versions:$prefix LIMIT 2; COMMIT;"
+             SELECT {FIELDS} FROM versions AFTER versions:$prefix LIMIT 2; \
+             SELECT notify FROM ONLY buckets:$bucket; COMMIT;"
         );
         let mut answers = self.pool.run(&script, parameters).await?.into_iter();
         let _begin = answers.next();
@@ -129,6 +137,8 @@ impl TessariObjects {
             return Ok(None);
         }
         let mut newest = of_key(answers.next(), bucket, key)?.into_iter();
+        let notify = matches!(first_record(answers.next())?, Some(Value::Object(fields))
+            if !matches!(fields.get("notify"), None | Some(Value::None)));
         let successor = match newest.next() {
             Some(first) if seq(&first)? == target_seq => Some(match newest.next() {
                 Some(next) if !is_marker(&next) => {
@@ -146,6 +156,7 @@ impl TessariObjects {
             marker: is_marker(&target),
             version_id: version_id.to_owned(),
             successor,
+            notify,
         }))
     }
 
@@ -156,6 +167,7 @@ impl TessariObjects {
         bucket: &BucketName,
         key: &ObjectKey,
         target: &Target,
+        removal: Removal,
     ) -> Result<bool> {
         let prefix = key_prefix(bucket.as_str(), key.as_str());
         let mut parameters = vec![
@@ -168,8 +180,23 @@ impl TessariObjects {
             ("null".to_owned(), Value::String(NULL.to_owned())),
         ];
         // Sequences are reused once the newest version goes, so the record is removed only while it is the one read.
-        let mut script = String::from(
-            "BEGIN; UPDATE versions:$target SET version_id = $vid WHERE version_id = $vid; \
+        // Where the bucket notifies, the fence also stamps the message the store's `version_removed` event appends:
+        // its own name (never a generated identity, which concurrent removals would contend on) and its event.
+        let stamp = if target.notify {
+            parameters.push((
+                "removal".to_owned(),
+                Value::String(format!("v-{}", uuid::Uuid::new_v4())),
+            ));
+            parameters.push((
+                "removal_event".to_owned(),
+                Value::String(format!("s3:{}:Delete", removal.family())),
+            ));
+            ", removal = $removal, removal_event = $removal_event"
+        } else {
+            ""
+        };
+        let mut script = format!(
+            "BEGIN; UPDATE versions:$target SET version_id = $vid{stamp} WHERE version_id = $vid; \
              DELETE versions:$target; ",
         );
         if target.version_id == NULL {
@@ -180,10 +207,12 @@ impl TessariObjects {
             // Not the newest: the current object stays as it is.
             (None, _) => {}
             // The current object is this version (a never-versioned object carries no id: its version is `null`) —
-            // fenced on that, then replaced by the next newest or removed.
+            // fenced on that, then replaced by the next newest or removed. The removal is the version's own event, so
+            // the fence clears `notify` and the object's `object_removed` stays silent.
             (Some(successor), false) => {
                 script.push_str(
-                    "UPDATE objects:$id SET version_id = $vid WHERE (version_id ?? $null) = $vid; ",
+                    "UPDATE objects:$id SET version_id = $vid, notify = false \
+                     WHERE (version_id ?? $null) = $vid; ",
                 );
                 match successor {
                     Successor::Object(restored) => {

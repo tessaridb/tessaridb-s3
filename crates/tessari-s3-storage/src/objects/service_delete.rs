@@ -5,7 +5,7 @@ use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, VERSION_WRITE_ATTEMPTS};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::super::model::{Deleted, Removed, RemovedIf, VersionRemoved};
-use super::super::repository::{Guard, ObjectRepository, Snapshot};
+use super::super::repository::{Guard, ObjectRepository, Removal, Snapshot};
 use super::super::tessaridb::TessariObjects;
 use super::super::version_id::parse;
 use super::{ObjectService, versions};
@@ -17,6 +17,7 @@ async fn remove_named(
     bucket: &BucketName,
     key: &ObjectKey,
     version_id: &str,
+    removal: Removal,
 ) -> Result<VersionRemoved> {
     let Some(named) = parse(version_id) else {
         return Ok(VersionRemoved::Malformed);
@@ -28,7 +29,10 @@ async fn remove_named(
         else {
             return Ok(VersionRemoved::Absent);
         };
-        if repository.remove_version(bucket, key, &target).await? {
+        if repository
+            .remove_version(bucket, key, &target, removal)
+            .await?
+        {
             return Ok(VersionRemoved::Done {
                 marker: target.marker,
             });
@@ -60,9 +64,11 @@ impl ObjectService {
             let bucket = bucket.clone();
             async move {
                 match version {
-                    Some(version) => remove_named(&repository, &bucket, &key, &version)
-                        .await
-                        .map(Deleted::Version),
+                    Some(version) => {
+                        remove_named(&repository, &bucket, &key, &version, Removal::Request)
+                            .await
+                            .map(Deleted::Version)
+                    }
                     None => versions::remove_key(&repository, &bucket, &key, incarnation)
                         .await
                         .map(|marker| Deleted::Current { marker }),
@@ -99,13 +105,39 @@ impl ObjectService {
         key: &ObjectKey,
         version_id: &str,
     ) -> Result<VersionRemoved> {
+        self.remove_version_for(bucket, key, version_id, Removal::Request)
+            .await
+    }
+
+    /// Permanently removes the version of `bucket/key` whose id is `version_id` because the bucket's lifecycle rules
+    /// expire it, as [`Self::delete_version`] does for a request.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage; [`Error::Contended`] when every attempt lost to another writer.
+    pub async fn expire_version(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        version_id: &str,
+    ) -> Result<VersionRemoved> {
+        self.remove_version_for(bucket, key, version_id, Removal::Lifecycle)
+            .await
+    }
+
+    async fn remove_version_for(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        version_id: &str,
+        removal: Removal,
+    ) -> Result<VersionRemoved> {
         if parse(version_id).is_none() {
             return Ok(VersionRemoved::Malformed);
         }
         if self.repository.incarnation(bucket).await?.is_none() {
             return Ok(VersionRemoved::NoSuchBucket);
         }
-        remove_named(&self.repository, bucket, key, version_id).await
+        remove_named(&self.repository, bucket, key, version_id, removal).await
     }
 
     /// Removes the object at `bucket/key` only while its ETag is `etag` — the check and the delete are one step.
@@ -169,7 +201,8 @@ impl ObjectService {
             return Ok(false);
         };
         for _ in 0..VERSION_WRITE_ATTEMPTS {
-            let plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
+            let mut plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
+            plan.removal = Removal::Lifecycle;
             if self
                 .repository
                 .remove_if(bucket, key, incarnation, etag, Some(modified), &plan)

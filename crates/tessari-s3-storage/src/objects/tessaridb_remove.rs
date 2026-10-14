@@ -47,11 +47,16 @@ pub(super) async fn remove(
         }
         None => "",
     };
-    // The removal stamps whether the bucket notifies NOW on the record it deletes, which the store's `object_removed`
-    // event reads; a key with no current record has nothing to stamp (an update of a missing record refuses).
+    // The removal stamps whether the bucket notifies NOW, and what removes it, on the record it deletes, which the
+    // store's `object_removed` event reads; a key with no current record has nothing to stamp (an update of a missing
+    // record refuses).
     let stamp = if plan.current {
         parameters.push(("notify".to_owned(), Value::Bool(plan.notify)));
-        "UPDATE objects:$id SET notify = $notify; "
+        parameters.push((
+            "op".to_owned(),
+            Value::String(plan.removal.family().to_owned()),
+        ));
+        "UPDATE objects:$id SET notify = $notify, op = $op; "
     } else {
         ""
     };
