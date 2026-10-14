@@ -8,7 +8,7 @@ use crate::complete::multipart_put;
 use crate::{IGNORED, call, call_with, fresh};
 
 /// The event names in the outbox for `key`, sorted.
-async fn recorded(planter: &MetaPool, key: &str) -> Vec<String> {
+pub(crate) async fn recorded(planter: &MetaPool, key: &str) -> Vec<String> {
     let answers = planter
         .run(
             "SELECT event FROM object_events WHERE key = $key;",
@@ -327,7 +327,7 @@ async fn what_lifecycle_removes_is_named_a_lifecycle_expiration() {
     );
 }
 
-async fn notification(
+pub(crate) async fn notification(
     state: &tessari_s3_api::ApiState,
     method: &str,
     bucket: &str,
@@ -343,7 +343,7 @@ async fn notification(
     .await
 }
 
-const CONFIGURATION: &str = "<NotificationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
+pub(crate) const CONFIGURATION: &str = "<NotificationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">\
     <QueueConfiguration><Id>created-logs</Id><Queue>arn:tessaridb:sqs:::hooks</Queue>\
     <Event>s3:ObjectCreated:*</Event><Filter><S3Key><FilterRule><Name>prefix</Name><Value>logs/</Value></FilterRule>\
     <FilterRule><Name>Suffix</Name><Value>.txt</Value></FilterRule></S3Key></Filter></QueueConfiguration>\

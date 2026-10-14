@@ -17,6 +17,7 @@ use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::multipart::{MultipartService, TessariMultipart};
+use crate::notifications::{NotificationService, TessariNotifications};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
 use crate::shards::ShardService;
@@ -163,6 +164,15 @@ impl Storage {
             self.buckets.clone(),
             self.objects.clone(),
             self.multipart.clone(),
+        )
+    }
+
+    /// Delivery of bucket event notifications to the operator's declared destinations.
+    #[must_use]
+    pub fn notifications(&self) -> NotificationService {
+        NotificationService::new(
+            TessariNotifications::new(self.pool.clone()),
+            self.buckets.clone(),
         )
     }
 

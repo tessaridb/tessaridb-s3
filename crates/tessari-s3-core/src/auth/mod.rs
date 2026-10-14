@@ -17,7 +17,7 @@ mod verified;
 pub use canonical::SignedRequest;
 pub use chunk::{ChunkChain, parse_chunk_header};
 pub use chunked::{ChunkedDecoder, Trailer};
-pub use encode::percent_decode;
+pub use encode::{percent_decode, uri_encode};
 pub use error::{AuthError, AuthResult};
 pub use header::{AuthorizationHeader, verify_header};
 pub use payload::{PayloadVerifier, parse_payload_hash, verify_payload_digest};

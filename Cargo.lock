@@ -1476,6 +1476,7 @@ dependencies = [
  "subtle",
  "tessari-s3-constants",
  "tessari-s3-core",
+ "tessari-s3-daemons",
  "tessari-s3-infrastructure",
  "tessari-s3-observability",
  "tessari-s3-storage",
@@ -1516,6 +1517,10 @@ dependencies = [
 name = "tessari-s3-daemons"
 version = "0.0.0"
 dependencies = [
+ "bytes",
+ "futures-util",
+ "serde",
+ "serde_json",
  "tessari-s3-constants",
  "tessari-s3-core",
  "tessari-s3-infrastructure",
@@ -1535,6 +1540,7 @@ dependencies = [
  "futures-util",
  "reqwest",
  "rustls",
+ "rustls-platform-verifier",
  "tessari-s3-constants",
  "tessari-s3-observability",
  "tessari-s3-types",

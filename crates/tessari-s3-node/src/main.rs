@@ -13,10 +13,12 @@ use std::time::Duration;
 
 use std::sync::Arc;
 use tessari_s3_api::{ApiState, router};
-use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
-use tessari_s3_daemons::{Healer, LifecycleWorker, Reclaimer, UploadReaper, UsageScanner, run};
+use tessari_s3_daemons::{
+    Healer, LifecycleWorker, NotifyWorker, Reclaimer, UploadReaper, UsageScanner, run,
+};
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -95,6 +97,40 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(config.reclaim_interval_secs),
     );
     daemons.spawn(run(Arc::new(lifecycle), stop_rx.clone()));
+    // Each declared destination reads the event topic through its own group, on every node: the group's record
+    // takes the nodes in turns, so an event goes to one of them at a time.
+    let notifications = storage.notifications();
+    notifications
+        .define(
+            config
+                .notify_targets
+                .iter()
+                .map(|target| target.id.as_str()),
+        )
+        .await?;
+    if !config.notify_targets.is_empty() {
+        let client = tessari_s3_infrastructure::WebhookClient::new()?;
+        for target in &config.notify_targets {
+            match &target.endpoint {
+                NotifyEndpoint::Webhook(url) => {
+                    let worker = NotifyWorker::new(
+                        notifications.clone(),
+                        target.id.clone(),
+                        url.clone(),
+                        config.region.clone(),
+                        client.clone(),
+                    );
+                    daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
+                }
+                NotifyEndpoint::Kafka { .. } => {
+                    tracing::warn!(
+                        target = target.id.as_str(),
+                        "Kafka delivery is not built yet; its events are kept in the topic"
+                    );
+                }
+            }
+        }
+    }
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),

@@ -106,6 +106,20 @@ pub fn server_config(tls: &InternalTls) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
+/// A caller of a public endpoint — a notification destination — trusting the authorities the platform trusts.
+///
+/// # Errors
+/// [`Error::InvalidConfig`] when no protocol version is available or the platform's trust store cannot be used.
+pub fn public_client_config() -> Result<ClientConfig> {
+    use rustls_platform_verifier::BuilderVerifierExt as _;
+    Ok(ClientConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .map_err(|_| invalid(CERT, "no protocol version both sides speak"))?
+        .with_platform_verifier()
+        .map_err(|_| invalid(CERT, "the platform's trust store cannot be used"))?
+        .with_no_client_auth())
+}
+
 /// A caller in the clear: no authority is trusted, so nothing can be reached over TLS with it. It exists because
 /// the HTTP client needs a TLS stack with a provider even when it speaks only plain HTTP.
 ///

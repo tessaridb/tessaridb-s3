@@ -14,10 +14,15 @@ tessari-s3-constants.workspace = true
 tessari-s3-infrastructure.workspace = true
 tessari-s3-observability.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+bytes.workspace = true
 tokio = { workspace = true, features = ["time", "sync", "macros"] }
 tracing.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tokio = { workspace = true, features = ["time", "sync", "macros", "rt", "test-util"] }
 
 [lints]

@@ -32,6 +32,7 @@ getrandom.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
+tessari-s3-daemons.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time"] }
 hmac.workspace = true
 sha2.workspace = true

@@ -10,6 +10,7 @@ pub mod erasure;
 mod error;
 pub mod lifecycle;
 pub mod multipart;
+pub mod notifications;
 pub mod objects;
 mod params;
 pub mod peers;

@@ -1,4 +1,4 @@
-use super::{NotificationError, Rule, arn, target_of, validate};
+use super::{NotificationError, Rule, arn, matches, target_of, validate};
 
 fn rule(id: &str, events: &[&str], prefix: &str, suffix: &str) -> Rule {
     Rule {
@@ -119,4 +119,42 @@ fn rules_sharing_an_event_on_overlapping_keys_are_refused() {
         rule("two", &["s3:ObjectCreated:Put"], "images/", ""),
     ];
     assert_eq!(validate(&apart, declared), Ok(()));
+}
+
+#[test]
+fn a_rule_matches_its_events_and_keys_only() {
+    let images = rule(
+        "images",
+        &["s3:ObjectCreated:*", "s3:ObjectRemoved:Delete"],
+        "images/",
+        ".jpg",
+    );
+    assert!(matches(&images, "s3:ObjectCreated:Put", "images/a.jpg"));
+    assert!(matches(
+        &images,
+        "s3:ObjectCreated:CompleteMultipartUpload",
+        "images/b.jpg"
+    ));
+    assert!(matches(&images, "s3:ObjectRemoved:Delete", "images/c.jpg"));
+    // Control arms: another event of a named family, another family, a key outside the prefix or the suffix.
+    assert!(!matches(
+        &images,
+        "s3:ObjectRemoved:DeleteMarkerCreated",
+        "images/c.jpg"
+    ));
+    assert!(!matches(
+        &images,
+        "s3:LifecycleExpiration:Delete",
+        "images/c.jpg"
+    ));
+    assert!(!matches(&images, "s3:ObjectCreated:Put", "docs/a.jpg"));
+    assert!(!matches(&images, "s3:ObjectCreated:Put", "images/a.png"));
+    // A wildcard covers its own family only; an unfiltered rule covers every key.
+    let everything = rule("all", &["s3:ObjectRemoved:*"], "", "");
+    assert!(matches(
+        &everything,
+        "s3:ObjectRemoved:DeleteMarkerCreated",
+        "any/key"
+    ));
+    assert!(!matches(&everything, "s3:ObjectCreated:Put", "any/key"));
 }

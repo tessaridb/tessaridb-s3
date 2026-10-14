@@ -92,6 +92,14 @@ fn overlap(one: &Rule, other: &Rule) -> bool {
     events && prefixes && suffixes
 }
 
+/// Whether `rule` reports `event` (a full event name such as `s3:ObjectCreated:Put`) for `key`.
+#[must_use]
+pub fn matches(rule: &Rule, event: &str, key: &str) -> bool {
+    key.starts_with(&rule.prefix)
+        && key.ends_with(&rule.suffix)
+        && rule.events.iter().any(|named| events_meet(named, event))
+}
+
 /// Checks `rules` before they are stored; `declared` answers whether a target id is one the operator declared. An
 /// empty configuration is valid: it turns notifications off.
 ///

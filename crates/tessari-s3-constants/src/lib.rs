@@ -257,6 +257,34 @@ pub const LIFECYCLE_BATCH: usize = 100;
 /// next day boundary, so an hour late is the most an action waits.
 pub const LIFECYCLE_INTERVAL_SECS: u64 = 3600;
 
+/// Seconds a delivery worker holds an event before the group hands it out again — longer than one delivery may take.
+pub const NOTIFY_ACK_DEADLINE_SECS: u64 = 60;
+
+/// Hand-outs of one event before it is given up and kept in the `object_events_dead` topic.
+pub const NOTIFY_DELIVERIES: u32 = 8;
+
+/// Events a destination's group holds in flight at once.
+pub const NOTIFY_IN_FLIGHT: usize = 64;
+
+/// Events one delivery run reads at most.
+pub const NOTIFY_BATCH: usize = 64;
+
+/// Deliveries one run sends at once to its destination.
+pub const NOTIFY_CONCURRENCY: usize = 8;
+
+/// Seconds a delivery may take before it counts as failed.
+pub const NOTIFY_DELIVERY_TIMEOUT_SECS: u64 = 10;
+
+/// Seconds before a failed delivery is tried again after its first hand-out; doubled per hand-out, at most
+/// [`NOTIFY_RETRY_MAX_SECS`].
+pub const NOTIFY_RETRY_STEP_SECS: u64 = 2;
+
+/// Longest wait between two tries of one delivery.
+pub const NOTIFY_RETRY_MAX_SECS: u64 = 300;
+
+/// Seconds between delivery runs when the last found nothing.
+pub const NOTIFY_POLL_SECS: u64 = 1;
+
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 

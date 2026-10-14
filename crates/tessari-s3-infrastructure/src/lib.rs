@@ -11,9 +11,11 @@ mod notify_config;
 pub mod peer;
 pub mod tessaridb;
 pub mod tls;
+mod webhook;
 
 pub use config::{ClusterSettings, S3Config};
 pub use console_config::ConsoleSettings;
 pub use error::{Error, Result};
 pub use notify_config::{NotifyEndpoint, NotifyTarget};
 pub use tls::InternalTls;
+pub use webhook::WebhookClient;
