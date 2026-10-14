@@ -155,6 +155,48 @@ pub enum Deleted {
     Version(VersionRemoved),
 }
 
+/// What a listed version is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionKind {
+    /// A version holding an object.
+    Object {
+        /// Size in bytes.
+        size: u64,
+        /// The quoted ETag.
+        etag: String,
+    },
+    /// A delete marker.
+    Marker,
+    /// Only a place in the listing: the version a client's version-id-marker names. Never on a page.
+    Place,
+}
+
+/// One entry of a ListObjectVersions page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedVersion {
+    /// The version's record id: its place in the listing.
+    pub at: Vec<u8>,
+    /// The version id (`null` for the null version).
+    pub version_id: String,
+    /// Whether it is its key's newest version.
+    pub latest: bool,
+    /// When it was written.
+    pub modified: Timestamp,
+    /// What it is.
+    pub kind: VersionKind,
+}
+
+/// What a ListObjectVersions request found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionsListed {
+    /// One page.
+    Page(tessari_s3_core::objects::upload_listing::UploadPage<ListedVersion>),
+    /// The version-id-marker is spelled as no version this server issues.
+    MalformedMarker,
+    /// The bucket does not exist.
+    NoSuchBucket,
+}
+
 /// What a read naming one version found (S3 ref 08 M4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionRead {

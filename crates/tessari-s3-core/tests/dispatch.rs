@@ -239,6 +239,7 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "HeadObject",
         "ListBuckets",
         "ListMultipartUploads",
+        "ListObjectVersions",
         "ListObjects",
         "ListObjectsV2",
         "ListParts",

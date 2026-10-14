@@ -14,6 +14,9 @@ use crate::pipeline::response::xml_response;
 use crate::{Error, Result};
 
 mod document;
+mod versions;
+
+pub(crate) use versions::list_versions;
 
 pub(crate) use document::listed_name;
 use document::{Listing, Version};

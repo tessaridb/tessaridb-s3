@@ -23,6 +23,8 @@ mod data;
 mod delete;
 #[path = "list.rs"]
 mod list;
+#[path = "service_version_list.rs"]
+mod version_list;
 #[path = "service_version_read.rs"]
 mod version_read;
 #[path = "service_versions.rs"]

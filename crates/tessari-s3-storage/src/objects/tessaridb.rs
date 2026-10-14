@@ -23,6 +23,8 @@ mod parts;
 mod remove;
 #[path = "tessaridb_version_delete.rs"]
 mod version_delete;
+#[path = "tessaridb_version_list.rs"]
+mod version_list;
 #[path = "tessaridb_version_read.rs"]
 mod version_read;
 

@@ -53,6 +53,7 @@ mod versioning;
 mod versions_convert;
 mod versions_delete;
 mod versions_kept;
+mod versions_list;
 mod versions_read;
 
 use axum::body::{Body, to_bytes};

@@ -70,6 +70,7 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::GetBucketVersioning
         | Operation::ListObjects
         | Operation::ListObjectsV2
+        | Operation::ListObjectVersions
         | Operation::ListMultipartUploads => on(Need::ReadBucket),
         Operation::ListParts => uploading(Need::ReadBucket),
         Operation::GetObject | Operation::HeadObject | Operation::GetObjectTagging => {

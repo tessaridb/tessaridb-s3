@@ -133,3 +133,10 @@ impl TessariObjects {
         Ok(Some((incarnation, id.clone())))
     }
 }
+
+impl TessariObjects {
+    /// The sequence of the null version of the key whose id prefix is `prefix`, if it has one.
+    pub(crate) async fn null_version_seq(&self, prefix: &[u8]) -> Result<Option<u64>> {
+        null_seq(&self.pool, prefix).await
+    }
+}

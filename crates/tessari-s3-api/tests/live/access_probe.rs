@@ -84,6 +84,12 @@ fn table(upload: &str) -> Vec<Probe> {
             &[("list-type", Some("2"))],
         ),
         probe(
+            Operation::ListObjectVersions,
+            "GET",
+            "/ann-photos",
+            &[("versions", None)],
+        ),
+        probe(
             Operation::ListMultipartUploads,
             "GET",
             "/ann-photos",

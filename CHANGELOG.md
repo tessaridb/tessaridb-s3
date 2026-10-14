@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- ListObjectVersions: every version and delete marker of a bucket, keys in UTF-8 byte order and each key's versions
+  newest first with `IsLatest`, paged by `key-marker` and `version-id-marker` (`NextKeyMarker` and
+  `NextVersionIdMarker` on a truncated page), rolled up at a delimiter, `encoding-type=url` supported. A
+  `version-id-marker` without a `key-marker`, or one spelled as no version id, is refused `InvalidArgument`.
 - GetObject and HeadObject take `versionId`: they answer that version (`null` names the null version), `NoSuchVersion`
   for an id naming none and `InvalidArgument` for a malformed one; a version that is a delete marker answers 405 with
   `x-amz-delete-marker` and `Last-Modified`, and a key whose newest version is a delete marker answers 404 naming the
