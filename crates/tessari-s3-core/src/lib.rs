@@ -9,6 +9,7 @@ pub mod dispatch;
 pub mod erasure;
 mod error;
 pub mod internal;
+pub mod lifecycle;
 pub mod multipart;
 pub mod objects;
 pub mod quota;

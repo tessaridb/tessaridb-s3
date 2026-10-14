@@ -40,6 +40,9 @@ fn probe(
     }
 }
 
+const LIFECYCLE_BODY: &[u8] =
+    b"<LifecycleConfiguration><Rule><ID>r</ID><Filter></Filter><Status>Enabled</Status>\
+<Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>";
 const VERSIONING_BODY: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
@@ -76,6 +79,27 @@ fn table(upload: &str) -> Vec<Probe> {
                 &[("versioning", None)],
             )
         },
+        Probe {
+            body: LIFECYCLE_BODY,
+            ..probe(
+                Operation::PutBucketLifecycleConfiguration,
+                "PUT",
+                "/ann-photos",
+                &[("lifecycle", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketLifecycleConfiguration,
+            "GET",
+            "/ann-photos",
+            &[("lifecycle", None)],
+        ),
+        probe(
+            Operation::DeleteBucketLifecycle,
+            "DELETE",
+            "/ann-photos",
+            &[("lifecycle", None)],
+        ),
         probe(Operation::ListObjects, "GET", "/ann-photos", &[]),
         probe(
             Operation::ListObjectsV2,

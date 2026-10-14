@@ -5,7 +5,7 @@ use tessari_s3_infrastructure::tessaridb::{Number, Value};
 use crate::{Error, Result};
 
 /// The stored fields of one bucket.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BucketEntity {
     /// The bucket's name, held as a field so it is read back typed rather than parsed out of a record id.
     pub name: String,
@@ -25,6 +25,8 @@ pub struct BucketEntity {
     pub max_objects: Option<i64>,
     /// `'Enabled'` or `'Suspended'`; absent while the bucket was never versioned.
     pub versioning: Option<String>,
+    /// The lifecycle rules as stored; absent while none are set.
+    pub lifecycle: Option<Vec<Value>>,
 }
 
 impl BucketEntity {
@@ -70,6 +72,11 @@ impl BucketEntity {
             Some(Value::String(state)) => Some(state.clone()),
             Some(_) => return Err(malformed("versioning")),
         };
+        let lifecycle = match fields.get("lifecycle") {
+            None | Some(Value::None) => None,
+            Some(Value::Array(rules)) => Some(rules.clone()),
+            Some(_) => return Err(malformed("lifecycle")),
+        };
         let limit = |field: &'static str| match fields.get(field) {
             None | Some(Value::None) => Ok(None),
             Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
@@ -85,6 +92,7 @@ impl BucketEntity {
             max_bytes: limit("max_bytes")?,
             max_objects: limit("max_objects")?,
             versioning,
+            lifecycle,
         })
     }
 }

@@ -28,6 +28,8 @@ pub struct Bucket {
     pub quota: Quota,
     /// Its versioning state; `None` while it was never versioned.
     pub versioning: Option<Versioning>,
+    /// Its lifecycle rules; `None` while none are set.
+    pub lifecycle: Option<Vec<tessari_s3_core::lifecycle::Rule>>,
 }
 
 impl Bucket {
@@ -87,6 +89,11 @@ impl TryFrom<BucketEntity> for Bucket {
             creator: entity.creator,
             quota,
             versioning,
+            lifecycle: entity
+                .lifecycle
+                .as_ref()
+                .map(|rules| super::lifecycle::from_values(rules))
+                .transpose()?,
         })
     }
 }

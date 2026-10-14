@@ -1,6 +1,7 @@
 //! The `buckets` domain: bucket records in TessariDB.
 
 mod entity;
+mod lifecycle;
 mod model;
 mod repository;
 mod service;

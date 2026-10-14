@@ -42,6 +42,49 @@ impl Timestamp {
         format!("{weekday}, {day:02} {month_name} {year:04} {hour:02}:{minute:02}:{second:02} GMT")
     }
 
+    /// Parses `2009-10-12T17:50:30Z` or `2009-10-12T17:50:30.000Z` (UTC, whole seconds or milliseconds); anything
+    /// else is `None`.
+    #[must_use]
+    pub fn parse_iso8601(text: &str) -> Option<Self> {
+        let text = text.trim().strip_suffix('Z')?;
+        let (clock, millis) = match text.split_once('.') {
+            Some((clock, fraction))
+                if fraction.len() == 3 && fraction.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                (clock, fraction.parse::<u32>().ok()?)
+            }
+            Some(_) => return None,
+            None => (text, 0),
+        };
+        let (date, time) = clock.split_once('T')?;
+        let number = |t: &str| -> Option<i64> {
+            t.bytes()
+                .all(|b| b.is_ascii_digit())
+                .then(|| t.parse().ok())?
+        };
+        let mut ymd = date.split('-').map(number);
+        let (year, month, day) = (ymd.next()??, ymd.next()??, ymd.next()??);
+        let mut hms = time.split(':').map(number);
+        let (hour, minute, second) = (hms.next()??, hms.next()??, hms.next()??);
+        let valid = (1..=12).contains(&month)
+            && (1..=31).contains(&day)
+            && (0..24).contains(&hour)
+            && (0..60).contains(&minute)
+            && (0..60).contains(&second);
+        if !valid || ymd.next().is_some() || hms.next().is_some() {
+            return None;
+        }
+        let seconds = days_from_civil(year, month, day)
+            .checked_mul(86_400)?
+            .checked_add(hour.checked_mul(3_600)?)?
+            .checked_add(minute.checked_mul(60)?)?
+            .checked_add(second)?;
+        Some(Self {
+            seconds,
+            nanos: millis.checked_mul(1_000_000)?,
+        })
+    }
+
     /// Parses an IMF-fixdate (`Mon, 12 Oct 2009 17:50:30 GMT`), the form HTTP requires senders to use; anything else
     /// is `None`, and a conditional header carrying it is ignored as RFC 9110 says.
     #[must_use]
@@ -163,6 +206,25 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::Timestamp;
+
+    #[test]
+    fn an_iso8601_instant_reads_back_with_or_without_milliseconds() {
+        let instant = Timestamp {
+            seconds: 1_255_369_830,
+            nanos: 0,
+        };
+        assert_eq!(
+            Timestamp::parse_iso8601("2009-10-12T17:50:30Z"),
+            Some(instant)
+        );
+        assert_eq!(
+            Timestamp::parse_iso8601("2009-10-12T17:50:30.000Z"),
+            Some(instant)
+        );
+        assert_eq!(Timestamp::parse_iso8601("2009-10-12 17:50:30Z"), None);
+        assert_eq!(Timestamp::parse_iso8601("2009-13-12T17:50:30Z"), None);
+        assert_eq!(Timestamp::parse_iso8601("2009-10-12T17:50:30"), None);
+    }
 
     #[test]
     fn known_instants_render_in_both_forms() {

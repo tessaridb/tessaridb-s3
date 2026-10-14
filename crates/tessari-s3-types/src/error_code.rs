@@ -32,6 +32,8 @@ pub enum ErrorCode {
     NoSuchUpload,
     /// The version a request names does not exist.
     NoSuchVersion,
+    /// The bucket has no lifecycle configuration.
+    NoSuchLifecycleConfiguration,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -109,6 +111,7 @@ impl ErrorCode {
             Self::NoSuchKey => "NoSuchKey",
             Self::NoSuchUpload => "NoSuchUpload",
             Self::NoSuchVersion => "NoSuchVersion",
+            Self::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
             Self::InvalidPart => "InvalidPart",
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
@@ -163,7 +166,10 @@ impl ErrorCode {
             | Self::MaxMessageLengthExceeded => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
-            Self::NoSuchKey | Self::NoSuchUpload | Self::NoSuchVersion => 404,
+            Self::NoSuchKey
+            | Self::NoSuchUpload
+            | Self::NoSuchVersion
+            | Self::NoSuchLifecycleConfiguration => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::InvalidRange | Self::InvalidPartNumber => 416,
@@ -208,6 +214,11 @@ mod tests {
             (ErrorCode::NoSuchKey, "NoSuchKey", 404),
             (ErrorCode::NoSuchUpload, "NoSuchUpload", 404),
             (ErrorCode::NoSuchVersion, "NoSuchVersion", 404),
+            (
+                ErrorCode::NoSuchLifecycleConfiguration,
+                "NoSuchLifecycleConfiguration",
+                404,
+            ),
             (ErrorCode::InvalidPart, "InvalidPart", 400),
             (ErrorCode::InvalidPartOrder, "InvalidPartOrder", 400),
             (ErrorCode::EntityTooSmall, "EntityTooSmall", 400),

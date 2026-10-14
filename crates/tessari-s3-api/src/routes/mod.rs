@@ -10,6 +10,7 @@ use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
 pub mod buckets;
+mod lifecycle;
 pub mod listing;
 pub mod multipart;
 pub mod objects;
@@ -33,6 +34,9 @@ pub(crate) async fn route(
         Operation::GetBucketLocation => buckets::location(call).await,
         Operation::GetBucketVersioning => versioning::get(call).await,
         Operation::PutBucketVersioning => versioning::put(call, body).await,
+        Operation::GetBucketLifecycleConfiguration => lifecycle::get(call).await,
+        Operation::PutBucketLifecycleConfiguration => lifecycle::put(call, body).await,
+        Operation::DeleteBucketLifecycle => lifecycle::delete(call).await,
         Operation::ListObjects => listing::list_v1(call).await,
         Operation::ListObjectsV2 => listing::list_v2(call).await,
         Operation::ListObjectVersions => listing::list_versions(call).await,

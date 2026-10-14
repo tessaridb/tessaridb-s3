@@ -55,7 +55,7 @@ impl BucketService {
         creator: Option<&str>,
     ) -> Result<Created> {
         match self.repository.insert(name, region, space, creator).await? {
-            Inserted::Created(entity) => Ok(Created::Created(Bucket::try_from(entity)?)),
+            Inserted::Created(entity) => Ok(Created::Created(Bucket::try_from(*entity)?)),
             Inserted::Exists => Ok(Created::Exists),
         }
     }
@@ -105,6 +105,25 @@ impl BucketService {
             return Ok(false);
         }
         self.repository.set_versioning(name, state.as_str()).await?;
+        Ok(true)
+    }
+
+    /// Sets `name`'s lifecycle rules (already validated), or removes them with `None`; `false` when there is no such
+    /// bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_lifecycle(
+        &self,
+        name: &BucketName,
+        rules: Option<&[tessari_s3_core::lifecycle::Rule]>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_lifecycle(name, rules.map(super::lifecycle::to_value))
+            .await?;
         Ok(true)
     }
 

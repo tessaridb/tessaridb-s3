@@ -3,16 +3,17 @@
 use std::future::Future;
 
 use tessari_s3_core::authz::{SpaceName, Visible};
+use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::BucketName;
 
 use super::entity::BucketEntity;
 use crate::Result;
 
 /// The outcome of inserting a bucket record.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Inserted {
     /// The record was written.
-    Created(BucketEntity),
+    Created(Box<BucketEntity>),
     /// A record of that name already exists.
     Exists,
 }
@@ -43,6 +44,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         &self,
         name: &BucketName,
         state: &'static str,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Sets `name`'s lifecycle rules, or removes them when `rules` is `None`.
+    fn set_lifecycle(
+        &self,
+        name: &BucketName,
+        rules: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;

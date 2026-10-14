@@ -28,6 +28,7 @@ mod erasure;
 mod erasure_heals;
 mod erasure_reads;
 mod large;
+mod lifecycle;
 mod listing;
 mod meta_pool;
 mod metadata;

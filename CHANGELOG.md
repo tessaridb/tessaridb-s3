@@ -5,6 +5,11 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Bucket lifecycle configuration: PutBucketLifecycleConfiguration, GetBucketLifecycleConfiguration
+  (`NoSuchLifecycleConfiguration` when none) and DeleteBucketLifecycle. Rules filter by prefix and say Expiration
+  (`Days`, `Date` at midnight UTC, or `ExpiredObjectDeleteMarker`), `NoncurrentVersionExpiration` (with
+  `NewerNoncurrentVersions`) and `AbortIncompleteMultipartUpload`; transitions and tag or size filters are refused
+  `NotImplemented` rather than accepted and ignored. The rules are stored; applying them comes next.
 - ListObjectVersions: every version and delete marker of a bucket, keys in UTF-8 byte order and each key's versions
   newest first with `IsLatest`, paged by `key-marker` and `version-id-marker` (`NextKeyMarker` and
   `NextVersionIdMarker` on a truncated page), rolled up at a delimiter, `encoding-type=url` supported. A

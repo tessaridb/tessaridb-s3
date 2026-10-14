@@ -62,7 +62,9 @@ impl BucketRepository for TessariBuckets {
                       incarnation: rand::uuid(), space_name: $space, creator: $creator } RETURN AFTER;";
         match self.pool.run(script, parameters).await {
             Ok(answers) => match single(answers)? {
-                Some(value) => Ok(Inserted::Created(BucketEntity::from_value(&value)?)),
+                Some(value) => Ok(Inserted::Created(Box::new(BucketEntity::from_value(
+                    &value,
+                )?))),
                 None => Err(Error::Malformed {
                     record: "bucket",
                     reason: "CREATE answered no record",
@@ -89,6 +91,19 @@ impl BucketRepository for TessariBuckets {
         self.pool
             .run("UPDATE buckets:$name SET versioning = $state;", parameters)
             .await?;
+        Ok(())
+    }
+
+    async fn set_lifecycle(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        let script = match rules {
+            Some(rules) => {
+                parameters.push(("rules".to_owned(), rules));
+                "UPDATE buckets:$name SET lifecycle = $rules;"
+            }
+            None => "UPDATE buckets:$name SET lifecycle = NONE;",
+        };
+        self.pool.run(script, parameters).await?;
         Ok(())
     }
 
