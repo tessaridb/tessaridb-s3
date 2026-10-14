@@ -49,6 +49,8 @@ pub struct NewObject {
     pub checksums: BTreeMap<String, String>,
     /// The object's bytes or the data file holding them.
     pub content: Content,
+    /// Whether CopyObject made it — the change a notification names (`s3:ObjectCreated:Copy` rather than `Put`).
+    pub copied: bool,
 }
 
 /// A stored object.

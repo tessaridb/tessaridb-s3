@@ -106,6 +106,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         Directive::Replace => (headers.system, headers.metadata),
     };
     let copied = NewObject {
+        copied: true,
         size: object.size,
         etag: format!("\"{}\"", digests.md5_hex),
         headers: system,

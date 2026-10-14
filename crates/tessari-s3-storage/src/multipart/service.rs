@@ -222,6 +222,7 @@ impl MultipartService {
             })
             .collect();
         let object = NewObject {
+            copied: false,
             size: assembled.size,
             etag: assembled.etag.clone(),
             headers: declared.headers,

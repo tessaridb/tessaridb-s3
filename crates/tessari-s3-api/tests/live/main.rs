@@ -34,6 +34,7 @@ mod meta_pool;
 mod metadata;
 mod multipart;
 mod no_bytes;
+mod notifications;
 mod objects;
 mod quota;
 mod quota_window;

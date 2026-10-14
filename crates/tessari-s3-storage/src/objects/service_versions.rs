@@ -50,6 +50,8 @@ pub(super) fn plan(head: &Head, delete: bool) -> Result<VersionPlan> {
         drop_null,
         create,
         label,
+        notify: head.notifies,
+        current: head.current,
     })
 }
 
@@ -87,6 +89,8 @@ mod tests {
             state,
             newest,
             null,
+            notifies: false,
+            current: false,
         }
     }
 

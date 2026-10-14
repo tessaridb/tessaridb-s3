@@ -40,6 +40,10 @@ pub(crate) struct Head {
     pub(crate) newest: Option<u64>,
     /// The sequence of the key's null version.
     pub(crate) null: Option<u64>,
+    /// Whether the bucket has a notification configuration: a change then leaves its event (`object_events`).
+    pub(crate) notifies: bool,
+    /// Whether the key has a current object record.
+    pub(crate) current: bool,
 }
 
 /// The version a write or a delete adds.
@@ -63,6 +67,11 @@ pub(crate) struct VersionPlan {
     pub(crate) create: Option<NewVersion>,
     /// The version id the current object answers with; `None` while the bucket was never versioned.
     pub(crate) label: Option<String>,
+    /// Whether the bucket notifies: stamped on the record the change writes or removes, which is what lets the store's
+    /// own events decide whether the change leaves an `object_events` record.
+    pub(crate) notify: bool,
+    /// Whether the key has a current object record to stamp before a removal.
+    pub(crate) current: bool,
 }
 
 /// A bucket's incarnation and the record at one key, read at one snapshot.

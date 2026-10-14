@@ -75,6 +75,7 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
     // The upload outlived the grace period: the reclaimer takes its file before the object commits.
     assert_eq!(objects.reclaim(0, 1000).await.expect("reclaim").removed, 1);
     let object = NewObject {
+        copied: false,
         size: uploaded.size,
         etag: format!("\"{}\"", uploaded.digests.md5_hex),
         headers: BTreeMap::new(),

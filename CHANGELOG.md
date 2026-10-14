@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
+  CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
+  change's own commit, written by the metadata store's own events. A refused write records nothing. The
+  configuration API and delivery come next.
 - The reclamation grace is the metadata database's parameter `$reclaim_grace` instead of an `s3_settings` record,
   and the events that queue replaced data are defined `OR REPLACE`, so every start brings a store from an earlier
   build to this build's events without detecting and dropping the old ones. An existing `s3_settings` record is left

@@ -43,12 +43,21 @@ pub(super) async fn write(
     ];
     // `modified` is the store's clock at commit (`$now`, shared with the version record), merged into the bound
     // record with the version id the object answers with, once its bucket has been versioned.
+    // `notify` and `op` are what the store's `object_created` event decides on: whether the bucket notifies, and which
+    // operation the change is.
+    let op = match (&object.content, object.copied) {
+        (Content::Parts(_), _) => "CompleteMultipartUpload",
+        (Content::Data(_), true) => "Copy",
+        (Content::Data(_), false) => "Put",
+    };
+    parameters.push(("notify".to_owned(), Value::Bool(plan.notify)));
+    parameters.push(("op".to_owned(), Value::String(op.to_owned())));
     let stamp = match &plan.label {
         Some(label) => {
             parameters.push(("label".to_owned(), Value::String(label.clone())));
-            "{ modified: $now, version_id: $label }"
+            "{ modified: $now, version_id: $label, notify: $notify, op: $op }"
         }
-        None => "{ modified: $now }",
+        None => "{ modified: $now, notify: $notify, op: $op }",
     };
     let statement = match guard {
         Guard::None => {

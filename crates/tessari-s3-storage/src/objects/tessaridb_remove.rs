@@ -47,10 +47,18 @@ pub(super) async fn remove(
         }
         None => "",
     };
+    // The removal stamps whether the bucket notifies NOW on the record it deletes, which the store's `object_removed`
+    // event reads; a key with no current record has nothing to stamp (an update of a missing record refuses).
+    let stamp = if plan.current {
+        parameters.push(("notify".to_owned(), Value::Bool(plan.notify)));
+        "UPDATE objects:$id SET notify = $notify; "
+    } else {
+        ""
+    };
     let changes = versions::statements(bucket, key, incarnation, plan, false)?;
     parameters.extend(changes.parameters);
     let script = format!(
-        "BEGIN; LET $now = time::now(); {guard}DELETE objects:$id; {}COMMIT;",
+        "BEGIN; LET $now = time::now(); {guard}{stamp}DELETE objects:$id; {}COMMIT;",
         changes.script
     );
     match pool.run(&script, parameters).await {

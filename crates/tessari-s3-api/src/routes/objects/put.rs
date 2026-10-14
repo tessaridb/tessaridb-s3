@@ -147,6 +147,7 @@ async fn commit(
     let etag = format!("\"{}\"", digests.md5_hex);
     let declared_checksum = headers.integrity.checksum.is_some();
     let object = NewObject {
+        copied: false,
         size,
         etag: etag.clone(),
         headers: headers.system,

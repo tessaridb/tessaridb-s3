@@ -55,17 +55,24 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
             "prefix".to_owned(),
             Value::Bytes(key_prefix(bucket.as_str(), key.as_str())),
         ),
+        (
+            "object".to_owned(),
+            Value::String(format!("{}/{}", bucket.as_str(), key.as_str())),
+        ),
     ];
     // The record after the key's prefix is its newest version — or the first version of a later key, which the
     // bucket and key fields tell apart. The null version's sequence is kept at the key's own address in
     // `version_nulls`: an index cannot answer inside a transaction once anything in the store has committed since it
     // began, and this read must hold under concurrent writers.
-    let script = "BEGIN; SELECT versioning FROM ONLY buckets:$bucket; \
+    let script = "BEGIN; SELECT versioning, notify FROM ONLY buckets:$bucket; \
                   SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
-                  SELECT seq FROM ONLY version_nulls:$prefix; COMMIT;";
+                  SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;";
     let mut answers = pool.run(script, parameters).await?.into_iter();
     let _begin = answers.next();
-    let state = match first_record(answers.next())? {
+    let bucket_record = first_record(answers.next())?;
+    let notifies = matches!(&bucket_record, Some(Value::Object(fields))
+        if !matches!(fields.get("notify"), None | Some(Value::None)));
+    let state = match bucket_record {
         Some(Value::Object(fields)) => match fields.get("versioning") {
             None | Some(Value::None) => None,
             Some(Value::String(state)) => {
@@ -85,10 +92,13 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
         _ => None,
     };
     let null = seq_field(first_record(answers.next())?)?;
+    let current = first_record(answers.next())?.is_some();
     Ok(Head {
         state,
         newest,
         null,
+        notifies,
+        current,
     })
 }
 

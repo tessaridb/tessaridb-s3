@@ -25,6 +25,10 @@ use crate::Result;
 /// one node healing or reclaiming an id. What operators do through the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
+/// `object_events` is the notification outbox, a topic: a write or removal stamps the object record with whether its
+/// bucket notifies (`notify`) and what wrote it (`op`), and the `object_created` / `object_removed` events append one
+/// message per change in the change's own commit, named after the change's data (never a generated identity, which
+/// would make concurrent writers contend). Its position is the event's sequencer.
 /// `lifecycle_runs` holds one record per bucket with lifecycle rules, written in the commit that writes them and due
 /// again an interval after each pass; a claim hands a bucket to one node at a time.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
@@ -47,6 +51,7 @@ DEFINE FIELD IF NOT EXISTS max_bytes ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS max_objects ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE FIELD IF NOT EXISTS lifecycle ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
@@ -106,6 +111,21 @@ DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS data ON heal_queue TYPE uuid REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON heal_queue TYPE datetime REQUIRED;
 DEFINE SPACE IF NOT EXISTS heal_claims;
+DEFINE FIELD IF NOT EXISTS notify ON objects TYPE bool;
+DEFINE FIELD IF NOT EXISTS op ON objects TYPE string;
+DEFINE TOPIC IF NOT EXISTS object_events RETAIN 7d;
+DEFINE EVENT OR REPLACE object_created ON objects FOR CREATE, UPDATE \
+WHEN $after.notify = true AND $after.op != NONE AND ($after.data ?? $after.upload) != ($before.data ?? $before.upload) \
+THEN { LET $named = string::concat('c-', type::string($after.data ?? $after.upload)); \
+CREATE object_events:$named = { bucket_name: $after.bucket_name, key: $after.key, \
+event: string::concat('s3:ObjectCreated:', $after.op), version_id: $after.version_id, size: $after.size, \
+etag: $after.etag, at: $after.modified }; };
+DEFINE EVENT OR REPLACE object_removed ON objects FOR DELETE WHEN $before.notify = true \
+THEN { LET $removed_from = $before.bucket_name; LET $state = (SELECT versioning FROM ONLY buckets:$removed_from); \
+LET $named = string::concat('r-', type::string($before.data ?? $before.upload)); \
+CREATE object_events:$named = { bucket_name: $before.bucket_name, key: $before.key, \
+event: IF $state.versioning != NONE THEN 's3:ObjectRemoved:DeleteMarkerCreated' ELSE 's3:ObjectRemoved:Delete' END, \
+at: time::now() }; };
 DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;
