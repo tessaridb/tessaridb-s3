@@ -169,6 +169,11 @@ pub(crate) fn live_config(
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
         // The live suite's own root key for sealing user access-key secrets; it seals nothing outside the test node.
         ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
+        // The one destination bucket notifications may name; nothing in the suite delivers to it.
+        (
+            "TESSARIDB_S3_NOTIFY_TARGETS",
+            "hooks=webhook:http://127.0.0.1:9/hooks".to_owned(),
+        ),
     ];
     if let Some(replication) = replication {
         vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));

@@ -40,6 +40,7 @@ struct Inner {
     clock: Clock,
     storage: Storage,
     principals: Principals,
+    notify_targets: Vec<String>,
 }
 
 impl ApiState {
@@ -69,8 +70,21 @@ impl ApiState {
                 clock,
                 storage,
                 principals: Principals::new(),
+                notify_targets: config
+                    .notify_targets
+                    .iter()
+                    .map(|target| target.id.clone())
+                    .collect(),
             }),
         }
+    }
+
+    /// Whether the operator declared a notification destination with this id.
+    pub(crate) fn declares_target(&self, id: &str) -> bool {
+        self.inner
+            .notify_targets
+            .iter()
+            .any(|declared| declared == id)
     }
 
     /// The system clock.

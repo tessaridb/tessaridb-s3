@@ -13,9 +13,11 @@ pub mod buckets;
 mod lifecycle;
 pub mod listing;
 pub mod multipart;
+mod notification;
 pub mod objects;
 mod quota;
 mod versioning;
+mod xml_tree;
 
 /// Runs the handler for `operation`.
 ///
@@ -37,6 +39,8 @@ pub(crate) async fn route(
         Operation::GetBucketLifecycleConfiguration => lifecycle::get(call).await,
         Operation::PutBucketLifecycleConfiguration => lifecycle::put(call, body).await,
         Operation::DeleteBucketLifecycle => lifecycle::delete(call).await,
+        Operation::GetBucketNotificationConfiguration => notification::get(call).await,
+        Operation::PutBucketNotificationConfiguration => notification::put(call, body).await,
         Operation::ListObjects => listing::list_v1(call).await,
         Operation::ListObjectsV2 => listing::list_v2(call).await,
         Operation::ListObjectVersions => listing::list_versions(call).await,

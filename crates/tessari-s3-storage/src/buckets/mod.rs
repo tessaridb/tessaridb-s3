@@ -3,6 +3,7 @@
 mod entity;
 mod lifecycle;
 mod model;
+mod notification;
 mod repository;
 mod service;
 mod tessaridb;

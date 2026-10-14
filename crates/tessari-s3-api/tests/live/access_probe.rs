@@ -43,6 +43,9 @@ fn probe(
 const LIFECYCLE_BODY: &[u8] =
     b"<LifecycleConfiguration><Rule><ID>r</ID><Filter></Filter><Status>Enabled</Status>\
 <Expiration><Days>1</Days></Expiration></Rule></LifecycleConfiguration>";
+const NOTIFICATION_BODY: &[u8] = b"<NotificationConfiguration><QueueConfiguration>\
+<Queue>arn:tessaridb:sqs:::hooks</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration>\
+</NotificationConfiguration>";
 const VERSIONING_BODY: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
@@ -93,6 +96,21 @@ fn table(upload: &str) -> Vec<Probe> {
             "GET",
             "/ann-photos",
             &[("lifecycle", None)],
+        ),
+        Probe {
+            body: NOTIFICATION_BODY,
+            ..probe(
+                Operation::PutBucketNotificationConfiguration,
+                "PUT",
+                "/ann-photos",
+                &[("notification", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketNotificationConfiguration,
+            "GET",
+            "/ann-photos",
+            &[("notification", None)],
         ),
         probe(
             Operation::DeleteBucketLifecycle,

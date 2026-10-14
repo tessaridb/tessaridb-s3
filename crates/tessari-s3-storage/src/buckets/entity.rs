@@ -27,6 +27,8 @@ pub struct BucketEntity {
     pub versioning: Option<String>,
     /// The lifecycle rules as stored; absent while none are set.
     pub lifecycle: Option<Vec<Value>>,
+    /// The notification configuration as stored; absent while none is set.
+    pub notify: Option<Value>,
 }
 
 impl BucketEntity {
@@ -77,6 +79,11 @@ impl BucketEntity {
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("lifecycle")),
         };
+        let notify = match fields.get("notify") {
+            None | Some(Value::None) => None,
+            Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
+            Some(_) => return Err(malformed("notify")),
+        };
         let limit = |field: &'static str| match fields.get(field) {
             None | Some(Value::None) => Ok(None),
             Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
@@ -93,6 +100,7 @@ impl BucketEntity {
             max_objects: limit("max_objects")?,
             versioning,
             lifecycle,
+            notify,
         })
     }
 }

@@ -2,24 +2,15 @@
 //! names by local name, so the S3 namespace is optional; a DTD, an entity other than the five predefined ones, nesting
 //! deeper than the shape allows, or text XML 1.0 cannot carry is malformed — and the tree is then read as the shape.
 
-use quick_xml::Reader;
-use quick_xml::escape::resolve_predefined_entity;
-use quick_xml::events::Event;
 use tessari_s3_core::lifecycle::{Expiration, Noncurrent, Rule};
 use tessari_s3_types::{ErrorCode, Timestamp};
 
+use super::super::xml_tree::{Node, malformed, single, tree};
 use crate::Error;
 
 /// The deepest element the documented shape has — configuration › rule › filter › and › tag › key — so a filter this
 /// server refuses is still read far enough to be named.
 const MAX_DEPTH: usize = 6;
-
-fn malformed() -> Error {
-    Error::new(
-        ErrorCode::MalformedXml,
-        "the XML body is not well formed or not the expected shape",
-    )
-}
 
 fn not_offered(what: &str) -> Error {
     Error::new(
@@ -28,87 +19,12 @@ fn not_offered(what: &str) -> Error {
     )
 }
 
-struct Node {
-    name: String,
-    text: String,
-    children: Vec<Node>,
-}
-
-fn tree(document: &[u8]) -> Result<Node, Error> {
-    let mut reader = Reader::from_reader(document);
-    let mut open: Vec<Node> = Vec::new();
-    loop {
-        match reader.read_event().map_err(|_| malformed())? {
-            Event::DocType(_) => return Err(malformed()),
-            Event::Start(start) => {
-                if open.len() >= MAX_DEPTH {
-                    return Err(malformed());
-                }
-                let name = start.local_name().as_ref().to_owned();
-                open.push(Node {
-                    name,
-                    text: String::new(),
-                    children: Vec::new(),
-                });
-            }
-            Event::Empty(empty) => {
-                let name = empty.local_name().as_ref().to_owned();
-                let node = Node {
-                    name,
-                    text: String::new(),
-                    children: Vec::new(),
-                };
-                match open.last_mut() {
-                    Some(parent) => parent.children.push(node),
-                    None => return Ok(node),
-                }
-            }
-            Event::Text(content) => match open.last_mut() {
-                Some(node) => node.text.push_str(&content.xml10_content()),
-                None if content.xml10_content().trim().is_empty() => {}
-                None => return Err(malformed()),
-            },
-            Event::CData(content) => {
-                open.last_mut()
-                    .ok_or_else(malformed)?
-                    .text
-                    .push_str(&content.xml10_content());
-            }
-            Event::GeneralRef(reference) => {
-                let resolved = match reference.resolve_char_ref().map_err(|_| malformed())? {
-                    Some(character) => character,
-                    None => resolve_predefined_entity(&reference.xml10_content())
-                        .and_then(|entity| entity.chars().next())
-                        .ok_or_else(malformed)?,
-                };
-                open.last_mut().ok_or_else(malformed)?.text.push(resolved);
-            }
-            Event::End(_) => {
-                let node = open.pop().ok_or_else(malformed)?;
-                match open.last_mut() {
-                    Some(parent) => parent.children.push(node),
-                    None => return Ok(node),
-                }
-            }
-            Event::Eof => return Err(malformed()),
-            _ => {}
-        }
-    }
-}
-
 fn whole(node: &Node) -> Result<u32, Error> {
     let text = node.text.trim();
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return Err(malformed());
     }
     text.parse().map_err(|_| malformed())
-}
-
-fn single<'a>(seen: &mut Option<&'a Node>, node: &'a Node) -> Result<(), Error> {
-    if seen.replace(node).is_some() {
-        return Err(malformed());
-    }
-    Ok(())
 }
 
 fn filter(node: &Node) -> Result<String, Error> {
@@ -237,7 +153,7 @@ fn rule(node: &Node) -> Result<Rule, Error> {
 /// `MalformedXML` for a document that is not the shape; `NotImplemented` for a transition or a tag or size filter;
 /// `InvalidArgument` for an expiration date that is not at midnight UTC.
 pub(super) fn parse(document: &[u8]) -> Result<Vec<Rule>, Error> {
-    let root = tree(document)?;
+    let root = tree(document, MAX_DEPTH)?;
     if root.name != "LifecycleConfiguration" {
         return Err(malformed());
     }

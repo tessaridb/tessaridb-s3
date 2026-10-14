@@ -11,6 +11,7 @@ mod error;
 pub mod internal;
 pub mod lifecycle;
 pub mod multipart;
+pub mod notification;
 pub mod objects;
 pub mod quota;
 #[cfg(test)]

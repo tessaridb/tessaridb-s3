@@ -14,7 +14,7 @@ use crate::Result;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Created {
     /// The bucket now exists.
-    Created(Bucket),
+    Created(Box<Bucket>),
     /// A bucket of that name already exists, in some space: bucket names are global.
     Exists,
 }
@@ -55,7 +55,7 @@ impl BucketService {
         creator: Option<&str>,
     ) -> Result<Created> {
         match self.repository.insert(name, region, space, creator).await? {
-            Inserted::Created(entity) => Ok(Created::Created(Bucket::try_from(*entity)?)),
+            Inserted::Created(entity) => Ok(Created::Created(Box::new(Bucket::try_from(*entity)?))),
             Inserted::Exists => Ok(Created::Exists),
         }
     }
@@ -123,6 +123,26 @@ impl BucketService {
         }
         self.repository
             .set_lifecycle(name, rules.map(super::lifecycle::to_value))
+            .await?;
+        Ok(true)
+    }
+
+    /// Sets `name`'s notification rules (already validated); no rules turns notifications off. `false` when there is
+    /// no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_notification(
+        &self,
+        name: &BucketName,
+        rules: &[tessari_s3_core::notification::Rule],
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        let configuration = (!rules.is_empty()).then(|| super::notification::to_value(rules));
+        self.repository
+            .set_notification(name, configuration)
             .await?;
         Ok(true)
     }

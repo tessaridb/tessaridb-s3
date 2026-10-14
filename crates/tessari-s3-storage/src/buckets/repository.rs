@@ -53,6 +53,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         rules: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s notification configuration, or removes it when `configuration` is `None`.
+    fn set_notification(
+        &self,
+        name: &BucketName,
+        configuration: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;
     /// Whether any object record lies in `name`'s range.
     fn holds_objects(&self, name: &BucketName) -> impl Future<Output = Result<bool>> + Send;

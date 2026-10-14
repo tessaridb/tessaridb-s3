@@ -9,8 +9,10 @@ section records which TessariDB version its metadata runs on.
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or
   delete marker removed by its id records one `ObjectRemoved:Delete`, and what lifecycle rules remove is named
-  `LifecycleExpiration:Delete` or `LifecycleExpiration:DeleteMarkerCreated`. The configuration API and delivery come
-  next.
+  `LifecycleExpiration:Delete` or `LifecycleExpiration:DeleteMarkerCreated`. Delivery comes next.
+- GetBucketNotificationConfiguration and PutBucketNotificationConfiguration: QueueConfiguration rules naming a
+  destination the operator declared in `TESSARIDB_S3_NOTIFY_TARGETS` by `arn:tessaridb:sqs:::<id>`, with event and
+  prefix/suffix filters; undeclared destinations, unsupported events and overlapping rules are refused.
 - The reclamation grace is the metadata database's parameter `$reclaim_grace` instead of an `s3_settings` record,
   and the events that queue replaced data are defined `OR REPLACE`, so every start brings a store from an earlier
   build to this build's events without detecting and dropping the old ones. An existing `s3_settings` record is left

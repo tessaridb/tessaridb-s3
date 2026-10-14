@@ -30,6 +30,8 @@ pub struct Bucket {
     pub versioning: Option<Versioning>,
     /// Its lifecycle rules; `None` while none are set.
     pub lifecycle: Option<Vec<tessari_s3_core::lifecycle::Rule>>,
+    /// Its notification rules; `None` while none are set.
+    pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
 }
 
 impl Bucket {
@@ -93,6 +95,11 @@ impl TryFrom<BucketEntity> for Bucket {
                 .lifecycle
                 .as_ref()
                 .map(|rules| super::lifecycle::from_values(rules))
+                .transpose()?,
+            notification: entity
+                .notify
+                .as_ref()
+                .map(super::notification::from_value)
                 .transpose()?,
         })
     }

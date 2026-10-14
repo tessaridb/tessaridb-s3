@@ -66,11 +66,13 @@ pub const fn required(operation: Operation) -> Option<Required> {
         Operation::DeleteBucket => on(Need::DeleteBucket),
         Operation::PutBucketVersioning
         | Operation::PutBucketLifecycleConfiguration
+        | Operation::PutBucketNotificationConfiguration
         | Operation::DeleteBucketLifecycle => on(Need::ConfigureBucket),
         Operation::HeadBucket
         | Operation::GetBucketLocation
         | Operation::GetBucketVersioning
         | Operation::GetBucketLifecycleConfiguration
+        | Operation::GetBucketNotificationConfiguration
         | Operation::ListObjects
         | Operation::ListObjectsV2
         | Operation::ListObjectVersions

@@ -111,6 +111,23 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
+    async fn set_notification(
+        &self,
+        name: &BucketName,
+        configuration: Option<Value>,
+    ) -> Result<()> {
+        let mut parameters = name_param(name);
+        let script = match configuration {
+            Some(configuration) => {
+                parameters.push(("configuration".to_owned(), configuration));
+                "UPDATE buckets:$name SET notify = $configuration;"
+            }
+            None => "UPDATE buckets:$name SET notify = NONE;",
+        };
+        self.pool.run(script, parameters).await?;
+        Ok(())
+    }
+
     async fn set_limits(
         &self,
         name: &BucketName,
