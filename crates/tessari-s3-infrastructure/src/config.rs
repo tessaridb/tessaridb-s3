@@ -4,9 +4,10 @@
 use std::net::SocketAddr;
 
 use tessari_s3_constants::{
-    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_RECLAIM_GRACE_SECS,
+    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_MEDIA_WORKERS, DEFAULT_RECLAIM_GRACE_SECS,
     DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
-    DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS, MIN_SECRET_KEY_LEN,
+    DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS, MAX_MEDIA_WORKERS,
+    MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::{Code, NodeId, SecretKey};
 
@@ -46,6 +47,8 @@ pub struct S3Config {
     pub upload_max_age_secs: u64,
     /// `TESSARIDB_S3_USAGE_INTERVAL_SECS` — time between passes measuring each bucket's objects and bytes (positive).
     pub usage_interval_secs: u64,
+    /// `TESSARIDB_S3_MEDIA_WORKERS` — image renditions made at once on this node (0 to 64; 0 makes none here).
+    pub media_workers: usize,
     /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
     pub cluster: Option<ClusterSettings>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
@@ -184,6 +187,18 @@ impl S3Config {
                     reason: "too large",
                 })
             })?,
+            media_workers: match get("TESSARIDB_S3_MEDIA_WORKERS") {
+                None => DEFAULT_MEDIA_WORKERS,
+                Some(text) => text
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|workers| *workers <= MAX_MEDIA_WORKERS)
+                    .ok_or(Error::InvalidConfig {
+                        key: "TESSARIDB_S3_MEDIA_WORKERS",
+                        reason: "not a whole number from 0 to 64",
+                    })?,
+            },
             data_dir: get("TESSARIDB_S3_DATA_DIR")
                 .map(|dir| std::path::PathBuf::from(dir.trim()))
                 .ok_or(Error::MissingConfig {

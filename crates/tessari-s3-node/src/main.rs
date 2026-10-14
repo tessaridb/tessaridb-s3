@@ -18,7 +18,8 @@ use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
-    Destination, Healer, LifecycleWorker, NotifyWorker, Reclaimer, UploadReaper, UsageScanner, run,
+    Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, NotifyWorker, Reclaimer,
+    UploadReaper, UsageScanner, run,
 };
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
@@ -139,6 +140,20 @@ async fn main() -> anyhow::Result<()> {
             );
             daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
         }
+    }
+    // Every node plans the renditions of the objects the media group hands it and renders image tasks from the shared
+    // queue; the consumer name says which node holds a task.
+    let media = storage.media();
+    media.define().await?;
+    let planner = MediaPlanner::new(media.clone(), storage.objects().clone());
+    daemons.spawn(run(Arc::new(planner), stop_rx.clone()));
+    let consumer = config.cluster.as_ref().map_or_else(
+        || "single".to_owned(),
+        |cluster| cluster.node.as_str().to_owned(),
+    );
+    for _ in 0..config.media_workers {
+        let worker = ImageWorker::new(media.clone(), storage.objects().clone(), consumer.clone());
+        daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
     }
     let scanner = UsageScanner::new(
         storage.usage().clone(),

@@ -55,7 +55,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 # Kafka destinations for bucket notifications: a tokio-native client, without compression codecs (no C libraries).
 rskafka = { version = "0.6", default-features = false }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "avif"] }
+webp = { version = "0.3", default-features = false }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "tokio", "service"] }
 zeroize = { version = "1", features = ["derive"] }

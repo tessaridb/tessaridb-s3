@@ -46,6 +46,12 @@ private = { ignore = true }
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
 
+# The fuzzing harness of the AV1 encoder behind AVIF renditions: a dependency only under `cfg(fuzzing)`, so it is never
+# compiled into this server. NCSA is a permissive, BSD-style licence with no copyleft; allowed for this one crate.
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

@@ -38,6 +38,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "tim
 hmac.workspace = true
 sha2.workspace = true
 rcgen.workspace = true
+image.workspace = true
 
 [lints]
 workspace = true

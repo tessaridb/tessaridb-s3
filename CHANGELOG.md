@@ -14,7 +14,13 @@ section records which TessariDB version its metadata runs on.
   it, refusing a rule set that names an output its content types cannot give, an output off the lists, an output
   named twice, a repeated ID, a prefix under `.renditions/` or more than 100 rules, with nothing stored; each change is recorded. A bucket's row in
   the console has a Media action for them. A bucket with media rules records its changes like a bucket with a
-  notification configuration. Renditions are not made yet.
+  notification configuration.
+- Image renditions: each object created where a bucket's media rules take it gets its image outputs as JPEG, PNG,
+  WebP or AVIF, fitted into the size and never enlarged, written beside it under `<key>.renditions/`. Every node
+  plans the objects the `media` group hands it into tasks in the metadata store's `media_images` queue (once per
+  version and output) and renders tasks from it with `TESSARIDB_S3_MEDIA_WORKERS` workers (default 2, `0` for none);
+  a failed task is tried again after a growing wait and stays listed after five tries. An original over 64 MiB or
+  50 megapixels gets none. Video and poster outputs are not made yet.
 - Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or

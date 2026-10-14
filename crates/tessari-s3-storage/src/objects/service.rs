@@ -15,6 +15,8 @@ use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
 use crate::{Error, Result};
 
+#[path = "service_bytes.rs"]
+mod bytes;
 #[path = "service_convert.rs"]
 mod convert;
 #[path = "service_data.rs"]

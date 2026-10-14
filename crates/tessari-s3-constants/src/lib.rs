@@ -309,6 +309,12 @@ pub const MEDIA_RETRY_MAX_SECS: u64 = 600;
 /// `media_images` and `media_videos`.
 pub const MEDIA_TASK_ATTEMPTS: i64 = 5;
 
+/// Image workers a node runs when `TESSARIDB_S3_MEDIA_WORKERS` is not set.
+pub const DEFAULT_MEDIA_WORKERS: usize = 2;
+
+/// The most image workers `TESSARIDB_S3_MEDIA_WORKERS` may ask for.
+pub const MAX_MEDIA_WORKERS: usize = 64;
+
 /// Seconds between a media worker's reads when nothing was handed out.
 pub const MEDIA_POLL_SECS: u64 = 1;
 
@@ -321,6 +327,15 @@ pub const MEDIA_MAX_PIXELS: u64 = 50_000_000;
 
 /// The JPEG quality image renditions are written at.
 pub const MEDIA_JPEG_QUALITY: u8 = 82;
+
+/// The quality WebP image renditions are written at.
+pub const MEDIA_WEBP_QUALITY: u8 = 85;
+
+/// The quality AVIF image renditions are written at.
+pub const MEDIA_AVIF_QUALITY: u8 = 80;
+
+/// The AV1 encoder's speed for AVIF renditions, 1 (slowest, smallest) to 10 (fastest).
+pub const MEDIA_AVIF_SPEED: u8 = 8;
 
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;

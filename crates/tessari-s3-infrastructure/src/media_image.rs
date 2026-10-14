@@ -1,18 +1,37 @@
-//! Image renditions: an original decoded once, under a size and a pixel bound checked before decoding, and written as
-//! JPEG fitted into each requested box — never enlarged. Pure and synchronous: a caller on the async runtime runs it
-//! through `spawn_blocking`.
+//! Image renditions: an original decoded once, under a size and a pixel bound checked before decoding, and written in
+//! each requested encoding fitted into each requested box — never enlarged. Pure and synchronous: a caller on the async
+//! runtime runs it through `spawn_blocking`.
 
+use std::borrow::Cow;
 use std::io::Cursor;
 
+use image::codecs::avif::AvifEncoder;
 use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
-use image::{ImageReader, Limits};
-use tessari_s3_constants::{MEDIA_JPEG_QUALITY, MEDIA_MAX_INPUT_BYTES, MEDIA_MAX_PIXELS};
+use image::{DynamicImage, ExtendedColorType, ImageEncoder, ImageReader, Limits};
+use tessari_s3_constants::{
+    MEDIA_AVIF_QUALITY, MEDIA_AVIF_SPEED, MEDIA_JPEG_QUALITY, MEDIA_MAX_INPUT_BYTES,
+    MEDIA_MAX_PIXELS, MEDIA_WEBP_QUALITY,
+};
 
-/// One rendition: JPEG bytes and the size they show.
+/// The file format a rendition is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding {
+    /// JPEG, lossy, no transparency.
+    Jpeg,
+    /// PNG, lossless.
+    Png,
+    /// WebP, lossy.
+    Webp,
+    /// AVIF, lossy.
+    Avif,
+}
+
+/// One rendition: the file and the size it shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendition {
-    /// The JPEG file.
+    /// The encoded file.
     pub bytes: Vec<u8>,
     /// Its width in pixels.
     pub width: u32,
@@ -37,12 +56,13 @@ pub enum RenderError {
     Encode,
 }
 
-/// The original `input` fitted into each square box of `boxes` pixels, in that order.
+/// The original `input` fitted into the square box of each output's side in pixels and written in its encoding, in
+/// that order.
 ///
 /// # Errors
 /// [`RenderError`] when the original is too large, declares too many pixels, cannot be read, or a rendition cannot be
 /// encoded.
-pub fn render_jpegs(input: &[u8], boxes: &[u32]) -> Result<Vec<Rendition>, RenderError> {
+pub fn render(input: &[u8], outputs: &[(u32, Encoding)]) -> Result<Vec<Rendition>, RenderError> {
     if u64::try_from(input.len()).map_or(true, |length| length > MEDIA_MAX_INPUT_BYTES) {
         return Err(RenderError::TooLarge);
     }
@@ -64,27 +84,52 @@ pub fn render_jpegs(input: &[u8], boxes: &[u32]) -> Result<Vec<Rendition>, Rende
     limits.max_image_height = Some(height);
     decoder.limits(limits);
     let original = decoder.decode().map_err(|_| RenderError::Unreadable)?;
-    boxes
+    outputs
         .iter()
-        .map(|side| {
+        .map(|(side, encoding)| {
+            // Borrowed when it already fits: an original is up to the pixel bound, and a copy per output is not free.
             let fitted = if original.width() <= *side && original.height() <= *side {
-                original.to_rgb8()
+                Cow::Borrowed(&original)
             } else {
-                original
-                    .resize(*side, *side, FilterType::Lanczos3)
-                    .to_rgb8()
+                Cow::Owned(original.resize(*side, *side, FilterType::Lanczos3))
             };
-            let mut bytes = Vec::new();
-            JpegEncoder::new_with_quality(&mut bytes, MEDIA_JPEG_QUALITY)
-                .encode_image(&fitted)
-                .map_err(|_| RenderError::Encode)?;
             Ok(Rendition {
-                bytes,
+                bytes: encode(&fitted, *encoding)?,
                 width: fitted.width(),
                 height: fitted.height(),
             })
         })
         .collect()
+}
+
+/// `image` written in `encoding`; JPEG drops transparency, the others keep it.
+fn encode(image: &DynamicImage, encoding: Encoding) -> Result<Vec<u8>, RenderError> {
+    let mut bytes = Vec::new();
+    match encoding {
+        Encoding::Jpeg => JpegEncoder::new_with_quality(&mut bytes, MEDIA_JPEG_QUALITY)
+            .encode_image(&image.to_rgb8())
+            .map_err(|_| RenderError::Encode)?,
+        Encoding::Png => {
+            let rgba = image.to_rgba8();
+            PngEncoder::new(&mut bytes)
+                .write_image(&rgba, rgba.width(), rgba.height(), ExtendedColorType::Rgba8)
+                .map_err(|_| RenderError::Encode)?;
+        }
+        Encoding::Webp => {
+            let rgba = image.to_rgba8();
+            let written = webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height())
+                .encode_simple(false, f32::from(MEDIA_WEBP_QUALITY))
+                .map_err(|_| RenderError::Encode)?;
+            bytes.extend_from_slice(&written);
+        }
+        Encoding::Avif => {
+            let rgba = image.to_rgba8();
+            AvifEncoder::new_with_speed_quality(&mut bytes, MEDIA_AVIF_SPEED, MEDIA_AVIF_QUALITY)
+                .write_image(&rgba, rgba.width(), rgba.height(), ExtendedColorType::Rgba8)
+                .map_err(|_| RenderError::Encode)?;
+        }
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

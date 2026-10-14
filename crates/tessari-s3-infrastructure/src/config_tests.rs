@@ -311,3 +311,27 @@ fn several_metadata_nodes_need_their_replication_said() {
         );
     }
 }
+
+#[test]
+fn two_image_workers_run_unless_configured_and_zero_renders_nothing() {
+    assert_eq!(load(&CREDENTIALS).expect("loads").media_workers, 2);
+    for (given, workers) in [("0", 0), ("8", 8)] {
+        let mut vars = CREDENTIALS.to_vec();
+        vars.push(("TESSARIDB_S3_MEDIA_WORKERS", given));
+        assert_eq!(load(&vars).expect("loads").media_workers, workers);
+    }
+    for bad in ["-1", "many", "65"] {
+        let mut refused = CREDENTIALS.to_vec();
+        refused.push(("TESSARIDB_S3_MEDIA_WORKERS", bad));
+        assert!(
+            matches!(
+                load(&refused).map(|_| ()),
+                Err(Error::InvalidConfig {
+                    key: "TESSARIDB_S3_MEDIA_WORKERS",
+                    ..
+                })
+            ),
+            "{bad}"
+        );
+    }
+}
