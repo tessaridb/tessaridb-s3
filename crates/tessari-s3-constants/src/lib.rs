@@ -305,6 +305,10 @@ pub const MEDIA_RETRY_STEP_SECS: u64 = 10;
 /// The longest wait before a failed object is tried again.
 pub const MEDIA_RETRY_MAX_SECS: u64 = 600;
 
+/// Hand-outs of one rendition task before it stays in its queue as given up — the `ATTEMPTS` the schema declares on
+/// `media_images` and `media_videos`.
+pub const MEDIA_TASK_ATTEMPTS: i64 = 5;
+
 /// Seconds between a media worker's reads when nothing was handed out.
 pub const MEDIA_POLL_SECS: u64 = 1;
 

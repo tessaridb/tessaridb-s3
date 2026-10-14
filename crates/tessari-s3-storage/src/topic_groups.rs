@@ -32,17 +32,21 @@ pub(crate) struct Group(String);
 
 impl Group {
     pub(crate) fn named(prefix: &str, name: &str) -> Result<Self> {
-        let checked = (1..=64).contains(&name.len())
-            && name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
-        if !checked {
+        if !is_plain_name(name) {
             return Err(malformed(
                 "a group name is 1 to 64 letters, digits, '-' or '_'",
             ));
         }
         Ok(Self(format!("'{prefix}{name}'")))
     }
+}
+
+/// Whether `name` is 1 to 64 letters, digits, `-` or `_` — the only names this crate quotes into a statement.
+pub(crate) fn is_plain_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
 /// How a group holds its messages: the deadline, the hand-outs before the dead letter, how many at once.

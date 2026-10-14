@@ -20,7 +20,7 @@ const CREATED: &str = "s3:ObjectCreated:";
 /// Media job operations.
 #[derive(Clone)]
 pub struct MediaService {
-    repository: TessariMedia,
+    pub(super) repository: TessariMedia,
     buckets: BucketService,
 }
 

@@ -114,3 +114,112 @@ async fn the_media_group_hands_out_only_objects_created_where_a_rule_takes_them(
         "what was settled is not handed out again"
     );
 }
+
+/// The `field` values of every record in `queue`, as the planter reads them.
+async fn in_queue(planter: &MetaPool, queue: &str, field: &str) -> Vec<Value> {
+    let answers = planter
+        .run(&format!("SELECT {field} FROM {queue};"), Vec::new())
+        .await
+        .expect("queue read");
+    match answers.into_iter().next() {
+        Some(Answer::Records { records, .. }) => records
+            .into_iter()
+            .map(|(_, record)| match record {
+                Value::Object(mut fields) => fields.remove(field).unwrap_or(Value::None),
+                other => panic!("not a record: {other:?}"),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn renditions_wait_once_in_their_encoder_s_queue_and_are_held_retried_and_given_up() {
+    use tessari_s3_core::media::Output;
+    use tessari_s3_storage::media::{Rendition, TaskQueue};
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    let media = state.storage().media();
+    let rendition = |output: &str| Rendition {
+        bucket: "pictures".to_owned(),
+        key: "a.mov".to_owned(),
+        version_id: None,
+        source: [7; 16],
+        output: Output::parse(output).expect("an output"),
+    };
+    let (thumb, poster, spent) = (
+        rendition("image/320/jpeg"),
+        rendition("poster/640/webp"),
+        rendition("image/640/png"),
+    );
+    for queued in [&thumb, &thumb, &poster] {
+        media.enqueue(queued).await.expect("queued");
+    }
+    // Each output waits once, in the queue of the encoder it needs.
+    let images = media
+        .claim(TaskQueue::Images, "node-a", 10)
+        .await
+        .expect("images claimed");
+    let videos = media
+        .claim(TaskQueue::Videos, "node-a", 10)
+        .await
+        .expect("videos claimed");
+    let made = |tasks: &[tessari_s3_storage::media::Task]| {
+        tasks
+            .iter()
+            .map(|task| task.rendition.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(made(&images), vec![thumb.clone()]);
+    assert_eq!(made(&videos), vec![poster.clone()]);
+    assert_eq!(images[0].attempts, 1);
+    assert_eq!(images[0].consumer.as_deref(), Some("node-a"));
+    assert!(
+        media
+            .claim(TaskQueue::Images, "node-b", 10)
+            .await
+            .expect("claimed")
+            .is_empty(),
+        "a held task goes to one consumer"
+    );
+    // A failure is recorded and the task waits before anyone takes it again.
+    media
+        .retry(&images[0], "decoder refused")
+        .await
+        .expect("retried");
+    assert_eq!(
+        in_queue(&planter, "media_images", "error").await,
+        vec![Value::String("decoder refused".to_owned())]
+    );
+    assert!(
+        media
+            .claim(TaskQueue::Images, "node-b", 10)
+            .await
+            .expect("claimed")
+            .is_empty(),
+        "a retried task waits"
+    );
+    // A written rendition leaves its queue.
+    media.rendered(&videos[0]).await.expect("settled");
+    assert!(
+        in_queue(&planter, "media_videos", "output")
+            .await
+            .is_empty()
+    );
+    // Five hand-outs spend a task, and it stays visible as given up.
+    media.enqueue(&spent).await.expect("queued");
+    let named = "07070707-0707-0707-0707-070707070707-image-640-png";
+    for _ in 0..5 {
+        planter
+            .run(
+                "CLAIM media_images:$name; RELEASE media_images:$name;",
+                vec![("name".to_owned(), Value::String(named.to_owned()))],
+            )
+            .await
+            .expect("handed out");
+    }
+    let given_up = media.given_up(TaskQueue::Images, 10).await.expect("listed");
+    assert_eq!(made(&given_up), vec![spent]);
+    assert_eq!(given_up[0].attempts, 5);
+}

@@ -10,7 +10,7 @@ use crate::topic_groups::{self, Group, Holding, MessageEntity};
 /// The media group over a metadata pool.
 #[derive(Clone)]
 pub struct TessariMedia {
-    pool: MetaPool,
+    pub(super) pool: MetaPool,
 }
 
 impl TessariMedia {

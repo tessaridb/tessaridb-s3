@@ -119,6 +119,22 @@ DEFINE TOPIC IF NOT EXISTS object_events RETAIN 7d;
 DEFINE TOPIC IF NOT EXISTS object_events_dead RETAIN 30d;
 DEFINE TOPIC IF NOT EXISTS s3_notifications RETAIN 7d;
 DEFINE TOPIC IF NOT EXISTS media_failed RETAIN 30d;
+DEFINE QUEUE IF NOT EXISTS media_images TIMEOUT 300s ATTEMPTS 5 SCHEMAFULL NOT BEFORE retry_at DEDUPLICATE 7d;
+DEFINE QUEUE IF NOT EXISTS media_videos TIMEOUT 3600s ATTEMPTS 5 SCHEMAFULL NOT BEFORE retry_at DEDUPLICATE 7d;
+DEFINE FIELD IF NOT EXISTS bucket_name ON media_images TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS key ON media_images TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS version_id ON media_images TYPE string;
+DEFINE FIELD IF NOT EXISTS source ON media_images TYPE uuid REQUIRED;
+DEFINE FIELD IF NOT EXISTS output ON media_images TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS retry_at ON media_images TYPE datetime REQUIRED;
+DEFINE FIELD IF NOT EXISTS error ON media_images TYPE string;
+DEFINE FIELD IF NOT EXISTS bucket_name ON media_videos TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS key ON media_videos TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS version_id ON media_videos TYPE string;
+DEFINE FIELD IF NOT EXISTS source ON media_videos TYPE uuid REQUIRED;
+DEFINE FIELD IF NOT EXISTS output ON media_videos TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS retry_at ON media_videos TYPE datetime REQUIRED;
+DEFINE FIELD IF NOT EXISTS error ON media_videos TYPE string;
 DEFINE EVENT OR REPLACE object_created ON objects FOR CREATE, UPDATE \
 WHEN $after.notify = true AND $after.op != NONE AND ($after.data ?? $after.upload) != ($before.data ?? $before.upload) \
 THEN { LET $named = string::concat('c-', type::string($after.data ?? $after.upload)); \
