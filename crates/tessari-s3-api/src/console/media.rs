@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
-use tessari_s3_core::media::{MediaError, Preset, Rule, validate};
+use tessari_s3_core::media::{MediaError, Output, Rule, validate};
 use tessari_s3_storage::actions::NewAction;
 
 use super::ConsoleState;
@@ -51,6 +51,7 @@ fn refused(error: &MediaError) -> ConsoleError {
             "an output cannot be made from every content type its rule takes"
         }
         MediaError::DuplicateId => "media rule IDs must be unique",
+        MediaError::RepeatedOutput => "a media rule names each output once",
         MediaError::RenditionPrefix => {
             "a media rule cannot take keys under a '.renditions/' segment"
         }
@@ -77,11 +78,7 @@ pub(super) async fn get(
         .unwrap_or_default()
         .into_iter()
         .map(|rule| MediaRule {
-            outputs: rule
-                .outputs
-                .iter()
-                .map(|preset| preset.name().to_owned())
-                .collect(),
+            outputs: rule.outputs.iter().map(|output| output.name()).collect(),
             id: rule.id,
             content_types: rule.content_types,
             prefix: rule.prefix,
@@ -112,9 +109,9 @@ pub(super) async fn set(
                 .outputs
                 .iter()
                 .map(|output| {
-                    Preset::parse(output).ok_or(ConsoleError::invalid(
+                    Output::parse(output).ok_or(ConsoleError::invalid(
                         "invalid_media",
-                        "an output is one of thumb, web, 720p or poster",
+                        "an output is image, video or poster, a listed size and a listed format",
                     ))
                 })
                 .collect::<Result<Vec<_>, _>>()?;

@@ -30,7 +30,7 @@ async fn with_media(planter: &MetaPool, bucket: &str) {
     planter
         .run(
             "UPDATE buckets:$name SET media = [{ id: 'photos', content_types: ['image/*'], prefix: '', \
-             outputs: ['thumb'] }];",
+             outputs: ['image/320/jpeg'] }];",
             vec![("name".to_owned(), Value::String(bucket.to_owned()))],
         )
         .await

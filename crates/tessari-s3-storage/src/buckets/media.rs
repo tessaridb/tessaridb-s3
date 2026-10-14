@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use tessari_s3_core::media::{Preset, Rule};
+use tessari_s3_core::media::{Output, Rule};
 use tessari_s3_infrastructure::tessaridb::Value;
 
 use crate::{Error, Result};
@@ -25,11 +25,8 @@ pub(crate) fn to_value(rules: &[Rule]) -> Value {
         rules
             .iter()
             .map(|rule| {
-                let outputs: Vec<String> = rule
-                    .outputs
-                    .iter()
-                    .map(|preset| preset.name().to_owned())
-                    .collect();
+                let outputs: Vec<String> =
+                    rule.outputs.iter().map(|output| output.name()).collect();
                 Value::Object(BTreeMap::from([
                     ("id".to_owned(), Value::String(rule.id.clone())),
                     ("content_types".to_owned(), texts(&rule.content_types)),
@@ -68,7 +65,7 @@ pub(crate) fn from_values(rules: &[Value]) -> Result<Vec<Rule>> {
             };
             let outputs = strings(fields.get("outputs"), "a media rule's outputs")?
                 .iter()
-                .map(|name| Preset::parse(name).ok_or(malformed("a media rule's preset")))
+                .map(|name| Output::parse(name).ok_or(malformed("a media rule's output")))
                 .collect::<Result<Vec<_>>>()?;
             Ok(Rule {
                 id: text("id")?,

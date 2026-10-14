@@ -43,8 +43,8 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
     assert_eq!(none.json()["rules"], json!([]));
 
     let rules = json!({"rules": [
-        {"id": "photos", "content_types": ["image/*"], "prefix": "photos/", "outputs": ["thumb", "web"]},
-        {"id": "clips", "content_types": ["video/mp4"], "prefix": "", "outputs": ["720p", "poster"]}
+        {"id": "photos", "content_types": ["image/*"], "prefix": "photos/", "outputs": ["image/320/jpeg", "image/1920/webp"]},
+        {"id": "clips", "content_types": ["video/mp4"], "prefix": "", "outputs": ["video/720p/mp4", "poster/640/jpeg"]}
     ]});
     assert_eq!(
         send(&console, "GET", MEDIA, Some(&bob_token), None)
@@ -79,11 +79,11 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
 
     for (body, code) in [
         (
-            json!({"rules": [{"id": "a", "content_types": ["image/png"], "prefix": "", "outputs": ["720p"]}]}),
+            json!({"rules": [{"id": "a", "content_types": ["image/png"], "prefix": "", "outputs": ["video/720p/mp4"]}]}),
             "invalid_media",
         ),
         (
-            json!({"rules": [{"id": "a", "content_types": ["image/png"], "prefix": "", "outputs": ["gif"]}]}),
+            json!({"rules": [{"id": "a", "content_types": ["image/png"], "prefix": "", "outputs": ["image/1280/gif"]}]}),
             "invalid_media",
         ),
         (json!({"rules": [], "space": "beta"}), "bad_request"),

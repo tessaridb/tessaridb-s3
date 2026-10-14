@@ -1136,21 +1136,32 @@
 
   // src/media-model.ts
   //! A bucket's media rules as the console sends and answers them: which uploads
-  //! (content types under a key prefix) get which renditions. The server checks a
-  //! rule set as a whole; this page only reads the answer and shapes the form.
-  var OUTPUTS = [
-    { name: "thumb", label: "Thumbnail", kind: "image" },
-    { name: "web", label: "Web image", kind: "image" },
-    { name: "720p", label: "720p video", kind: "video" },
-    { name: "poster", label: "Video poster", kind: "video" }
-  ];
-  var isOutput = (value) => OUTPUTS.some((output) => output.name === value);
+  //! (content types under a key prefix) get which renditions. An output is
+  //! `kind/size/format`, each picked from the server's lists; the server checks a
+  //! rule set as a whole, this page only reads the answer and shapes the form.
+  var IMAGE_SIZES = ["150", "320", "640", "768", "1024", "1280", "1440", "1920", "2560", "3840"];
+  var STILL_FORMATS = ["jpeg", "png", "webp", "avif"];
+  var KINDS = {
+    image: { label: "Image", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "image" },
+    video: { label: "Video", sizes: ["360p", "480p", "720p", "1080p", "1440p", "2160p"], formats: ["mp4", "webm"], from: "video" },
+    poster: { label: "Poster frame", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "video" }
+  };
+  var isKind = (value) => Object.hasOwn(KINDS, value);
+  function outputOf(name) {
+    const [kind, size2, format2, extra] = name.split("/");
+    if (kind === void 0 || size2 === void 0 || format2 === void 0 || extra !== void 0 || !isKind(kind)) {
+      return null;
+    }
+    const lists = KINDS[kind];
+    return lists.sizes.includes(size2) && lists.formats.includes(format2) ? { kind, size: size2, format: format2 } : null;
+  }
+  var spell = (output) => `${output.kind}/${output.size}/${output.format}`;
   function rule(v) {
     if (!record(v) || !text(v["id"]) || !text(v["prefix"])) {
       return null;
     }
     const types = list(v["content_types"], (entry) => text(entry) ? entry : null);
-    const outputs = list(v["outputs"], (entry) => isOutput(entry) ? entry : null);
+    const outputs = list(v["outputs"], (entry) => text(entry) && outputOf(entry) !== null ? entry : null);
     return types === null || outputs === null ? null : { id: v["id"], content_types: types, prefix: v["prefix"], outputs };
   }
   function readMediaRules(v) {
@@ -1164,17 +1175,63 @@
   //! one the signed-in key is. The rules are sent whole, so a repeated save
   //! changes nothing; saving none turns media processing off.
   var made = 0;
+  function outputRow(id, spelled, remove) {
+    const fallback = { kind: "image", size: "1280", format: "webp" };
+    const start = (spelled === null ? null : outputOf(spelled)) ?? fallback;
+    const choice = (suffix, label) => el("select", { id: `${id}-${suffix}`, "aria-label": label });
+    const kind = choice("kind", "Kind");
+    const size2 = choice("size", "Size");
+    const format2 = choice("format", "Format");
+    kind.append(...Object.entries(KINDS).map(([name, lists]) => el("option", { value: name }, lists.label)));
+    const offer2 = (select, values, keep) => {
+      select.replaceChildren(...values.map((value) => el("option", { value }, value)));
+      select.value = values.includes(keep) ? keep : values[0] ?? "";
+    };
+    const follow = () => {
+      if (!isKind(kind.value)) {
+        return;
+      }
+      const lists = KINDS[kind.value];
+      offer2(size2, lists.sizes, size2.value);
+      offer2(format2, lists.formats, format2.value);
+    };
+    kind.value = start.kind;
+    offer2(size2, KINDS[start.kind].sizes, start.size);
+    offer2(format2, KINDS[start.kind].formats, start.format);
+    kind.addEventListener("change", follow);
+    const drop = el("button", { type: "button", class: "quiet", "aria-label": "Remove output" }, "Remove");
+    const row2 = el("div", { class: "actions" }, kind, size2, format2, drop);
+    drop.addEventListener("click", () => remove(row2));
+    return { row: row2, read: () => `${kind.value}/${size2.value}/${format2.value}` };
+  }
   function ruleEditor(base, rule2, remove) {
     made += 1;
     const id = `${base}-${made}`;
     const name = field(`${id}-id`, "Rule ID", { spellcheck: "false", autocomplete: "off", required: "" });
     const types = field(`${id}-types`, "Content types", { spellcheck: "false", autocomplete: "off", required: "" }, "Comma-separated, such as image/* or video/mp4.");
     const prefix = field(`${id}-prefix`, "Key prefix", { spellcheck: "false", autocomplete: "off" }, "Empty: every key in the bucket.");
-    const boxes = OUTPUTS.map((output) => {
-      const box3 = el("input", { id: `${id}-${output.name}`, type: "checkbox", value: output.name });
-      box3.checked = rule2?.outputs.includes(output.name) ?? false;
-      return { output, box: box3 };
+    const rows = [];
+    const outputs = el("div", {});
+    const removeOutput = (row2) => {
+      const index = rows.findIndex((entry) => entry.row === row2);
+      if (index >= 0) {
+        rows.splice(index, 1);
+      }
+      row2.remove();
+      addOutput.focus();
+    };
+    const appendOutput = (spelled) => {
+      made += 1;
+      const entry = outputRow(`${id}-out-${made}`, spelled, removeOutput);
+      rows.push(entry);
+      outputs.append(entry.row);
+    };
+    const addOutput = el("button", { type: "button", class: "quiet" }, "Add output");
+    addOutput.addEventListener("click", () => {
+      appendOutput(null);
+      rows.at(-1)?.row.querySelector("select")?.focus();
     });
+    (rule2?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg" })]).forEach(appendOutput);
     name.input.value = rule2?.id ?? "";
     types.input.value = rule2?.content_types.join(", ") ?? "";
     prefix.input.value = rule2?.prefix ?? "";
@@ -1186,7 +1243,7 @@
       name.row,
       types.row,
       prefix.row,
-      el("fieldset", { class: "checks" }, el("legend", {}, "Outputs"), ...boxes.map(({ output, box: check2 }) => el("label", { class: "check", for: check2.id }, check2, output.label))),
+      el("fieldset", { class: "checks" }, el("legend", {}, "Outputs: kind, size, format"), outputs, addOutput),
       el("div", { class: "actions" }, drop)
     );
     const editor = {
@@ -1195,7 +1252,7 @@
         id: name.input.value.trim(),
         content_types: typesOf(types.input.value),
         prefix: prefix.input.value,
-        outputs: boxes.filter(({ box: check2 }) => check2.checked).map(({ output }) => output.name)
+        outputs: rows.map((entry) => entry.read())
       })
     };
     drop.addEventListener("click", () => remove(editor));
@@ -1209,7 +1266,7 @@
       "form",
       { class: "confirm", novalidate: "", "aria-labelledby": `${base}-title` },
       el("p", { id: `${base}-title` }, el("strong", {}, "Media: "), mono(bucket2.name)),
-      el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Without rules nothing is processed."),
+      el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Image sizes are the long side in pixels, video sizes the shorter side. Without rules nothing is processed."),
       body,
       said
     );
