@@ -26,6 +26,8 @@ pub struct Meta {
     pub replication: Option<String>,
     /// A directory holding `cert.pem`, `key.pem` and `ca.pem` for the internal surface; `None` keeps it plain.
     pub internal_tls: Option<PathBuf>,
+    /// `TESSARIDB_S3_NOTIFY_TARGETS` for every node; `None` declares no destination.
+    pub notify_targets: Option<String>,
 }
 
 /// A certificate authority minted for one cluster and the certificate it issues for `127.0.0.1`, which every local
@@ -136,6 +138,9 @@ fn environment(
         ] {
             vars.push((key.to_owned(), dir.join(file).display().to_string()));
         }
+    }
+    if let Some(targets) = &meta.notify_targets {
+        vars.push(("TESSARIDB_S3_NOTIFY_TARGETS".to_owned(), targets.clone()));
     }
     if let Some(replication) = &meta.replication {
         vars.push((

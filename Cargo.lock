@@ -1562,6 +1562,7 @@ dependencies = [
  "hmac",
  "rcgen",
  "reqwest",
+ "serde_json",
  "sha2",
  "tessari-s3-api",
  "tessari-s3-daemons",

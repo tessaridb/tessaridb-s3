@@ -17,6 +17,7 @@ mod disk;
 mod docker;
 mod faults;
 mod meta;
+mod notify;
 mod requests;
 mod s3;
 
@@ -40,6 +41,7 @@ fn meta_from_env() -> Meta {
         password: need("TESSARIDB_S3_TEST_META_PASSWORD"),
         replication: None,
         internal_tls: None,
+        notify_targets: None,
     }
 }
 
@@ -164,4 +166,10 @@ async fn small_objects_survive_a_node_killed_partway_through_a_run_of_writes() {
         assert_eq!(status, 200, "k{seed}");
         assert!(read == small(seed), "k{seed} reads back whole");
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn notifications_in_flight_when_every_node_dies_are_delivered_after_they_return() {
+    notify::a_delivery_cut_off_by_killed_nodes_is_made_after_they_return(meta_from_env()).await;
 }
