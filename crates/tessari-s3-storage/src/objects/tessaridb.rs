@@ -52,10 +52,11 @@ fn id(bucket: &BucketName, key: &ObjectKey) -> Value {
     Value::String(format!("{}/{}", bucket.as_str(), key.as_str()))
 }
 
-/// A refusal that means the statement's own condition or target failed: `conflict` (the compare-and-set) or
-/// `invalid` (no record to update). Retry and outage classes are not this.
+/// A refusal that means the statement's own condition or target failed: the compare-and-set, a record already there,
+/// or no record to update — all `conflict` from TessariDB 0.33.4. An `invalid` refusal (a broken event, a schema the
+/// write does not fit) is a fault of this server and is never read as a condition; retry and outage are not this.
 fn is_condition_refusal(error: &MetaError) -> bool {
-    error.is_class(RefusalClass::Conflict) || error.is_class(RefusalClass::Invalid)
+    error.is_class(RefusalClass::Conflict)
 }
 
 /// A refusal of a write that changes a key's versions: its own condition, or a writer of the same key that committed

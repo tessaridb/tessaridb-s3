@@ -231,12 +231,8 @@ impl MultipartRepository for TessariMultipart {
                       UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; DELETE reclaims:$data; COMMIT;";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
-            Err(error)
-                if error.is_class(RefusalClass::Conflict)
-                    || error.is_class(RefusalClass::Invalid) =>
-            {
-                Ok(false)
-            }
+            // The upload is gone (`conflict`); anything else is a fault, not an answer.
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
             Err(error) => Err(error.into()),
         }
     }

@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- A write the metadata store refuses for a reason that is no condition of the request — a broken event, a record
+  that does not fit the schema — answers `500 InternalError` instead of `503 ServiceUnavailable` (or `412`): only a
+  `conflict` refusal is read as a failed condition or a lost race.
 - The metadata store needs TessariDB `0.33.4-beta` or later (was `0.33.2-beta`): every row count is bound into
   its statement instead of written into the text, and a deferred reclaim, heal or lifecycle run is handed back with
   `RELEASE … NOT BEFORE` in one write.

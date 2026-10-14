@@ -20,8 +20,9 @@ impl TessariLifecycle {
     }
 }
 
-/// A refusal that means the record moved or went: its compare-and-set condition, or a record no longer there.
-fn moved_or_gone(error: &MetaError) -> bool {
+/// A release of a record no longer there: the rules were deleted meanwhile (`RELEASE` of a missing record answers
+/// `invalid`, an update of one `conflict`).
+fn gone(error: &MetaError) -> bool {
     error.is_class(RefusalClass::Conflict) || error.is_class(RefusalClass::Invalid)
 }
 
@@ -70,7 +71,7 @@ impl LifecycleRepository for TessariLifecycle {
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(()),
             // The rules were deleted while the bucket was worked: nothing is left to hand back.
-            Err(error) if moved_or_gone(&error) => Ok(()),
+            Err(error) if gone(&error) => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
@@ -91,7 +92,8 @@ impl LifecycleRepository for TessariLifecycle {
                       DELETE lifecycle_runs:$bucket; COMMIT;";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
-            Err(error) if moved_or_gone(&error) => Ok(false),
+            // The claimed `due` no longer holds (`conflict`): the rules were written again.
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
             Err(error) => Err(error.into()),
         }
     }

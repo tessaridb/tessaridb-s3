@@ -407,3 +407,31 @@ async fn an_objects_tag_set_is_empty_because_nothing_can_write_one() {
         version.body
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_write_refused_by_a_broken_event_is_a_server_error_not_a_failed_condition() {
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    bucket(&state, "broken").await;
+    // An event whose body writes into a table that is not there: the store refuses every write it fires on, for a
+    // reason that is no condition the request asked for (class `invalid`).
+    planter
+        .run(
+            "DEFINE EVENT IF NOT EXISTS broken ON objects FOR CREATE, UPDATE THEN { CREATE no_such_table = { n: 1 }; };",
+            Vec::new(),
+        )
+        .await
+        .expect("event defined");
+    let put = call(&state, "PUT", "/broken/k", vec![], b"bytes").await;
+    assert_eq!(
+        put.status, 500,
+        "a broken event is a fault of this server: {}",
+        put.body
+    );
+    assert!(
+        put.body.contains("<Code>InternalError</Code>"),
+        "{}",
+        put.body
+    );
+}
