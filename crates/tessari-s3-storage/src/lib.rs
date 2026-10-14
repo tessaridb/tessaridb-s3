@@ -7,6 +7,7 @@ pub mod cluster;
 pub mod data;
 pub mod erasure;
 mod error;
+pub mod lifecycle;
 pub mod multipart;
 pub mod objects;
 pub mod peers;

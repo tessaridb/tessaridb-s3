@@ -246,6 +246,13 @@ pub const RECLAIM_BATCH: usize = 1000;
 /// again, so it leaves the head of the queue.
 pub const RECLAIM_RETRY_SECS: u64 = 15;
 
+/// Buckets one lifecycle pass claims at most.
+pub const LIFECYCLE_BATCH: usize = 100;
+
+/// Seconds after a lifecycle pass before the same bucket is due again. A rule's period is whole days rounded to the
+/// next day boundary, so an hour late is the most an action waits.
+pub const LIFECYCLE_INTERVAL_SECS: u64 = 3600;
+
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 

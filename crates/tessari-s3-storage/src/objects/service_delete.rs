@@ -126,7 +126,7 @@ impl ObjectService {
             let plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
             if self
                 .repository
-                .remove_if(bucket, key, incarnation, etag, &plan)
+                .remove_if(bucket, key, incarnation, etag, None, &plan)
                 .await?
             {
                 return Ok(RemovedIf::Done);
@@ -150,5 +150,46 @@ impl ObjectService {
             Some((record, _)) if record == incarnation => Ok(RemovedIf::PreconditionFailed),
             _ => Ok(RemovedIf::NoSuchKey),
         }
+    }
+
+    /// Expires the current object at `bucket/key` (S3 ref 08 M7) only while it is still the one written at `modified`
+    /// with ETag `etag` — the check and the delete are one step — leaving a delete marker where the bucket keeps
+    /// versions. `false` when the key moved on or is gone: nothing was removed.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage; [`Error::Contended`] when every attempt lost to a version writer.
+    pub async fn expire_current(
+        &self,
+        bucket: &BucketName,
+        key: &ObjectKey,
+        etag: &str,
+        modified: tessari_s3_types::Timestamp,
+    ) -> Result<bool> {
+        let Some(incarnation) = self.repository.incarnation(bucket).await? else {
+            return Ok(false);
+        };
+        for _ in 0..VERSION_WRITE_ATTEMPTS {
+            let plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
+            if self
+                .repository
+                .remove_if(bucket, key, incarnation, etag, Some(modified), &plan)
+                .await?
+            {
+                return Ok(true);
+            }
+            // Refused: try again only while the same object is current — a newer write keeps it from expiring.
+            let still =
+                self.repository
+                    .read(bucket, key)
+                    .await?
+                    .object
+                    .is_some_and(|(record, stored)| {
+                        record == incarnation && stored.etag == etag && stored.modified == modified
+                    });
+            if !still {
+                return Ok(false);
+            }
+        }
+        Err(Error::Contended)
     }
 }

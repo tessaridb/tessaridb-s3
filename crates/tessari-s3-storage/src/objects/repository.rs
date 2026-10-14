@@ -162,14 +162,16 @@ pub(crate) trait ObjectRepository: Send + Sync {
         key: &ObjectKey,
         upload: [u8; 16],
     ) -> impl Future<Output = Result<Option<Vec<Part>>>> + Send;
-    /// Removes the record at `bucket/key` only while it is of `incarnation` and its ETag is `etag`, with the version
-    /// records `versions` names, as ONE transaction; `false` when that did not hold or there was no record.
+    /// Removes the record at `bucket/key` only while it is of `incarnation`, its ETag is `etag` and — when given — it
+    /// was written at `modified`, with the version records `versions` names, as ONE transaction; `false` when that did
+    /// not hold or there was no record.
     fn remove_if(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
         incarnation: [u8; 16],
         etag: &str,
+        modified: Option<tessari_s3_types::Timestamp>,
         versions: &VersionPlan,
     ) -> impl Future<Output = Result<bool>> + Send;
     /// Removes the record at `bucket/key`, if any, with the version records `versions` names, as ONE transaction;

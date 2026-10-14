@@ -99,9 +99,13 @@ impl BucketRepository for TessariBuckets {
         let script = match rules {
             Some(rules) => {
                 parameters.push(("rules".to_owned(), rules));
-                "UPDATE buckets:$name SET lifecycle = $rules;"
+                // The bucket joins the lifecycle queue, due at once, in the same commit as its rules.
+                "BEGIN; UPDATE buckets:$name SET lifecycle = $rules; \
+                 UPSERT lifecycle_runs:$name SET name = $name, due = time::now(); COMMIT;"
             }
-            None => "UPDATE buckets:$name SET lifecycle = NONE;",
+            None => {
+                "BEGIN; UPDATE buckets:$name SET lifecycle = NONE; DELETE lifecycle_runs:$name; COMMIT;"
+            }
         };
         self.pool.run(script, parameters).await?;
         Ok(())

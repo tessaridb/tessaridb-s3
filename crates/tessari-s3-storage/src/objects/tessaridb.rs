@@ -230,9 +230,10 @@ impl ObjectRepository for TessariObjects {
         key: &ObjectKey,
         incarnation: [u8; 16],
         etag: &str,
+        modified: Option<tessari_s3_types::Timestamp>,
         versions: &VersionPlan,
     ) -> Result<bool> {
-        let guard = Some(etag);
+        let guard = Some((etag, modified));
         remove::remove(&self.pool, bucket, key, incarnation, guard, versions).await
     }
 

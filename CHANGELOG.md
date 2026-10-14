@@ -5,13 +5,19 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Lifecycle rules are applied. Every node runs a lifecycle pass; each bucket with rules sits in a queue in TessariDB
+  that hands it to one node at a time, and is due again an hour after each pass. A pass expires the current version
+  (a delete marker in a versioned bucket) once its `Days` or `Date` is reached, removes noncurrent versions past
+  `NoncurrentDays` beyond the newest `NewerNoncurrentVersions`, removes a delete marker left as its key's only
+  version, and aborts multipart uploads older than `DaysAfterInitiation`. A period ends at the next midnight UTC after
+  its days are up. An object rewritten after the pass judged it is not expired, even with the same bytes.
 - The compose file and the process tests run TessariDB `0.34.0-beta`; the whole live suite passes against it.
   The metadata store still needs `0.33.2-beta` or later.
 - Bucket lifecycle configuration: PutBucketLifecycleConfiguration, GetBucketLifecycleConfiguration
   (`NoSuchLifecycleConfiguration` when none) and DeleteBucketLifecycle. Rules filter by prefix and say Expiration
   (`Days`, `Date` at midnight UTC, or `ExpiredObjectDeleteMarker`), `NoncurrentVersionExpiration` (with
   `NewerNoncurrentVersions`) and `AbortIncompleteMultipartUpload`; transitions and tag or size filters are refused
-  `NotImplemented` rather than accepted and ignored. The rules are stored; applying them comes next.
+  `NotImplemented` rather than accepted and ignored.
 - ListObjectVersions: every version and delete marker of a bucket, keys in UTF-8 byte order and each key's versions
   newest first with `IsLatest`, paged by `key-marker` and `version-id-marker` (`NextKeyMarker` and
   `NextVersionIdMarker` on a truncated page), rolled up at a delimiter, `encoding-type=url` supported. A

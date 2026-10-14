@@ -15,6 +15,7 @@ use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
+use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
@@ -152,6 +153,17 @@ impl Storage {
     #[must_use]
     pub const fn shards(&self) -> &ShardService {
         &self.shards
+    }
+
+    /// The lifecycle engine, over this node's bucket, object and multipart services.
+    #[must_use]
+    pub fn lifecycle(&self) -> LifecycleService {
+        LifecycleService::new(
+            TessariLifecycle::new(self.pool.clone()),
+            self.buckets.clone(),
+            self.objects.clone(),
+            self.multipart.clone(),
+        )
     }
 
     /// Bucket operations.

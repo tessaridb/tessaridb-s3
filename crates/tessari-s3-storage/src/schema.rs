@@ -27,6 +27,8 @@ use crate::Result;
 /// one node healing or reclaiming an id. What operators do through the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
+/// `lifecycle_runs` holds one record per bucket with lifecycle rules, written in the commit that writes them and due
+/// again an interval after each pass; a claim hands a bucket to one node at a time.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
 /// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
 /// `spaces`, `users` (one space each), `access_keys` (the secret sealed, never plain) and `grants` (a user's access to
@@ -110,6 +112,9 @@ DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS data ON heal_queue TYPE uuid REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON heal_queue TYPE datetime REQUIRED;
 DEFINE SPACE IF NOT EXISTS heal_claims;
+DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
+DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;
 DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 DEFINE TABLE IF NOT EXISTS bucket_usage (taken datetime REQUIRED, buckets array REQUIRED);
 DEFINE SPACE IF NOT EXISTS usage_claims;

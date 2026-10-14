@@ -16,7 +16,7 @@ use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
-use tessari_s3_daemons::{Healer, Reclaimer, UploadReaper, UsageScanner, run};
+use tessari_s3_daemons::{Healer, LifecycleWorker, Reclaimer, UploadReaper, UsageScanner, run};
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -89,6 +89,12 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(config.reclaim_interval_secs),
     );
     daemons.spawn(run(Arc::new(reaper), stop_rx.clone()));
+    // Due buckets are looked for as often as uploads are reaped; the queue decides which are due.
+    let lifecycle = LifecycleWorker::new(
+        storage.lifecycle(),
+        Duration::from_secs(config.reclaim_interval_secs),
+    );
+    daemons.spawn(run(Arc::new(lifecycle), stop_rx.clone()));
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),
