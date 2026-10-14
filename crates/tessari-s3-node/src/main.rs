@@ -16,6 +16,7 @@ use tessari_s3_api::{ApiState, router};
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
+use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
     Destination, Healer, LifecycleWorker, NotifyWorker, Reclaimer, UploadReaper, UsageScanner, run,
 };
@@ -99,15 +100,25 @@ async fn main() -> anyhow::Result<()> {
     daemons.spawn(run(Arc::new(lifecycle), stop_rx.clone()));
     // Each declared destination reads the event topic through its own group, on every node: the group's record
     // takes the nodes in turns, so an event goes to one of them at a time.
+    // The database's own topic is the default destination and always delivered to; declared ones are alternatives.
     let notifications = storage.notifications();
     notifications
         .define(
-            config
-                .notify_targets
-                .iter()
-                .map(|target| target.id.as_str()),
+            std::iter::once(DATABASE_TARGET).chain(
+                config
+                    .notify_targets
+                    .iter()
+                    .map(|target| target.id.as_str()),
+            ),
         )
         .await?;
+    let default_worker = NotifyWorker::new(
+        notifications.clone(),
+        DATABASE_TARGET.to_owned(),
+        Destination::Topic(notifications.clone()),
+        config.region.clone(),
+    );
+    daemons.spawn(run(Arc::new(default_worker), stop_rx.clone()));
     if !config.notify_targets.is_empty() {
         let client = tessari_s3_infrastructure::WebhookClient::new()?;
         for target in &config.notify_targets {

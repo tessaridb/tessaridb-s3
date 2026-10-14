@@ -79,12 +79,15 @@ impl ApiState {
         }
     }
 
-    /// Whether the operator declared a notification destination with this id.
+    /// Whether a notification destination with this id exists: the database's own topic, or one the operator
+    /// declared.
     pub(crate) fn declares_target(&self, id: &str) -> bool {
-        self.inner
-            .notify_targets
-            .iter()
-            .any(|declared| declared == id)
+        id == tessari_s3_core::notification::DATABASE_TARGET
+            || self
+                .inner
+                .notify_targets
+                .iter()
+                .any(|declared| declared == id)
     }
 
     /// The system clock.

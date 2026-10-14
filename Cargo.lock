@@ -1778,6 +1778,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tessari-s3-api",
+ "tessari-s3-core",
  "tessari-s3-daemons",
  "tessari-s3-infrastructure",
  "tessari-s3-observability",

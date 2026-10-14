@@ -10,9 +10,10 @@ section records which TessariDB version its metadata runs on.
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or
   delete marker removed by its id records one `ObjectRemoved:Delete`, and what lifecycle rules remove is named
   `LifecycleExpiration:Delete` or `LifecycleExpiration:DeleteMarkerCreated`.
-- Webhook delivery of bucket notifications: every node reads each declared destination's events through its own
-  group on the topic and posts each matching one as an S3 event record; a refused delivery is retried after a
-  growing wait and kept in `object_events_dead` after 8 tries. Redirects are not followed. Kafka delivery comes next.
+- Delivery of bucket notifications: by default into the metadata store's own `s3_notifications` topic
+  (`arn:tessaridb:sqs:::tessaridb`, no setting needed, each event once); as alternatives, to a declared Kafka topic
+  (keyed by `bucket/key`) or webhook (redirects not followed). Every node reads each destination's events through
+  its own group; a refused delivery is retried after a growing wait and kept in `object_events_dead` after 8 tries.
 - GetBucketNotificationConfiguration and PutBucketNotificationConfiguration: QueueConfiguration rules naming a
   destination the operator declared in `TESSARIDB_S3_NOTIFY_TARGETS` by `arn:tessaridb:sqs:::<id>`, with event and
   prefix/suffix filters; undeclared destinations, unsupported events and overlapping rules are refused.

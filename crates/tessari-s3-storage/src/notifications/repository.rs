@@ -15,6 +15,8 @@ pub(crate) trait NotificationRepository: Send + Sync {
         target: &str,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<MessageEntity>>> + Send;
+    /// Appends `body` (JSON) to `s3_notifications` as `n-<position>`; an append already made is left as it is.
+    fn publish(&self, position: u64, body: &str) -> impl Future<Output = Result<()>> + Send;
     /// Settles `positions` for good.
     fn ack(&self, target: &str, positions: &[u64]) -> impl Future<Output = Result<()>> + Send;
     /// Hands `positions` out again no sooner than `delay_secs` from now.

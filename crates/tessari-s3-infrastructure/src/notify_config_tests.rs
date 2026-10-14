@@ -79,3 +79,11 @@ fn a_malformed_target_is_refused_by_what_is_wrong() {
         "a kafka target is <host:port>[,<host:port>…]/<topic>"
     );
 }
+
+#[test]
+fn the_database_topic_s_id_is_not_an_operator_s_to_declare() {
+    assert_eq!(
+        refused("tessaridb=webhook:https://e.example"),
+        "'tessaridb' names the database's own topic and cannot be declared"
+    );
+}

@@ -251,3 +251,95 @@ async fn a_kafka_destination_receives_each_matching_event_keyed_by_its_object() 
         ]
     );
 }
+
+/// The `s3_notifications` messages, as (message name, key, event name), sorted.
+async fn in_the_topic(
+    planter: &tessari_s3_infrastructure::tessaridb::MetaPool,
+) -> Vec<(String, String, String)> {
+    use tessari_s3_infrastructure::tessaridb::{Answer, Value};
+    let answers = planter
+        .run(
+            "SELECT * FROM s3_notifications;",
+            Vec::<(String, Value)>::new(),
+        )
+        .await
+        .expect("topic read");
+    let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+        return Vec::new();
+    };
+    let mut seen: Vec<(String, String, String)> = records
+        .into_iter()
+        .map(|(id, record)| {
+            let Value::Object(fields) = record else {
+                panic!("a message object")
+            };
+            let Some(Value::Array(list)) = fields.get("Records") else {
+                panic!("Records: {fields:?}")
+            };
+            let Some(Value::Object(first)) = list.first() else {
+                panic!("one record")
+            };
+            let name = match first.get("eventName") {
+                Some(Value::String(name)) => name.clone(),
+                other => panic!("{other:?}"),
+            };
+            let Some(Value::Object(s3)) = first.get("s3") else {
+                panic!("s3")
+            };
+            let Some(Value::Object(object)) = s3.get("object") else {
+                panic!("object")
+            };
+            let key = match object.get("key") {
+                Some(Value::String(key)) => key.clone(),
+                other => panic!("{other:?}"),
+            };
+            (format!("{id:?}"), key, name)
+        })
+        .collect();
+    seen.sort();
+    seen
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn by_default_notifications_go_to_the_databases_own_topic_once_each() {
+    use tessari_s3_core::notification::DATABASE_TARGET;
+    let _why = IGNORED;
+    let (state, planter) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/kept", vec![], b"").await.status, 200);
+    // No destination is declared for this: the database's own topic is always there.
+    let configuration = "<NotificationConfiguration><QueueConfiguration><Id>all</Id>\
+        <Queue>arn:tessaridb:sqs:::tessaridb</Queue><Event>s3:ObjectCreated:*</Event>\
+        <Event>s3:ObjectRemoved:*</Event></QueueConfiguration></NotificationConfiguration>";
+    let put = notification(&state, "PUT", "kept", configuration).await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    let notifications = state.storage().notifications();
+    notifications
+        .define([DATABASE_TARGET])
+        .await
+        .expect("group defined");
+    let worker = NotifyWorker::new(
+        notifications.clone(),
+        DATABASE_TARGET.to_owned(),
+        Destination::Topic(notifications.clone()),
+        "us-east-1".to_owned(),
+    );
+    call(&state, "PUT", "/kept/a", vec![], b"a").await;
+    call(&state, "DELETE", "/kept/a", vec![], b"").await;
+    worker.run_once().await.expect("a run");
+    let first = in_the_topic(&planter).await;
+    assert_eq!(
+        first
+            .iter()
+            .map(|(_, key, name)| (key.as_str(), name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("a", "ObjectCreated:Put"), ("a", "ObjectRemoved:Delete")]
+    );
+    // A redelivery of an event already appended leaves the topic as it was.
+    notifications
+        .publish(1, "{\"Records\":[]}")
+        .await
+        .expect("a repeat is not an error");
+    worker.run_once().await.expect("a second run");
+    assert_eq!(in_the_topic(&planter).await, first, "each event once");
+}

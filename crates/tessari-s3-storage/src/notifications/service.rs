@@ -150,6 +150,15 @@ impl NotificationService {
         Ok(due)
     }
 
+    /// Appends `body` (an S3 event notification, JSON) for the event at `position` to the `s3_notifications` topic
+    /// under the name `n-<position>`; a second append for one event leaves the first, so the topic holds each once.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn publish(&self, position: u64, body: &str) -> Result<()> {
+        self.repository.publish(position, body).await
+    }
+
     /// Settles the events at `positions`, delivered.
     ///
     /// # Errors

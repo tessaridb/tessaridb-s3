@@ -19,6 +19,10 @@ pub struct Rule {
     pub suffix: String,
 }
 
+/// The destination every server has without any setting: the `s3_notifications` topic in its own metadata store.
+/// A configuration names it `arn:tessaridb:sqs:::tessaridb`; operator-declared destinations are alternatives to it.
+pub const DATABASE_TARGET: &str = "tessaridb";
+
 /// The prefix of this server's destination ARNs; the target id follows it.
 pub const ARN_PREFIX: &str = "arn:tessaridb:sqs:::";
 

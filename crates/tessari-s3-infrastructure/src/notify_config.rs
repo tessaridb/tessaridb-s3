@@ -70,6 +70,12 @@ fn target(entry: &str) -> Result<NotifyTarget> {
             "a target id is 1 to 64 letters, digits, '-' or '_'",
         ));
     }
+    // The same name as the core crate's `notification::DATABASE_TARGET`, which this crate does not depend on.
+    if id == "tessaridb" {
+        return Err(invalid(
+            "'tessaridb' names the database's own topic and cannot be declared",
+        ));
+    }
     let endpoint = match kind.trim() {
         "webhook" => webhook(endpoint.trim())?,
         "kafka" => kafka(endpoint.trim())?,

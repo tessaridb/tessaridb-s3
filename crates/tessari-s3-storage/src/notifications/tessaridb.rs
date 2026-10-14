@@ -2,7 +2,7 @@
 //! so it is built only from a target id this module checks first — narrower than the store's own lexer.
 
 use tessari_s3_constants::{NOTIFY_ACK_DEADLINE_SECS, NOTIFY_DELIVERIES, NOTIFY_IN_FLIGHT};
-use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 
 use super::entity::MessageEntity;
 use super::repository::NotificationRepository;
@@ -101,6 +101,26 @@ impl NotificationRepository for TessariNotifications {
                 })
             })
             .collect()
+    }
+
+    async fn publish(&self, position: u64, body: &str) -> Result<()> {
+        let parameters = vec![
+            ("name".to_owned(), Value::String(format!("n-{position}"))),
+            ("body".to_owned(), Value::String(body.to_owned())),
+        ];
+        match self
+            .pool
+            .run(
+                "CREATE s3_notifications:$name = json::parse($body);",
+                parameters,
+            )
+            .await
+        {
+            Ok(_) => Ok(()),
+            // Named by the event: a create that collides is the earlier delivery of this same event.
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn ack(&self, target: &str, settled: &[u64]) -> Result<()> {

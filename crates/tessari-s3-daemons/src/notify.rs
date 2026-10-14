@@ -27,6 +27,8 @@ pub enum Destination {
     },
     /// Produced to a Kafka topic, keyed by `bucket/key`.
     Kafka(KafkaProducer),
+    /// Appended to the metadata store's own `s3_notifications` topic — the default destination.
+    Topic(NotificationService),
 }
 
 impl Destination {
@@ -39,6 +41,18 @@ impl Destination {
                 producer
                     .send(&key, body, (event.at.seconds, event.at.nanos))
                     .await
+            }
+            Self::Topic(notifications) => {
+                let Ok(text) = std::str::from_utf8(&body) else {
+                    return false;
+                };
+                match notifications.publish(due.event.position, text).await {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(%error, "a notification could not be appended to s3_notifications");
+                        false
+                    }
+                }
             }
         }
     }
