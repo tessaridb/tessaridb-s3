@@ -218,14 +218,13 @@ impl UserRepository for TessariUsers {
 
     async fn keys_of(&self, user: &UserName, limit: usize) -> Result<Vec<KeyListedEntity>> {
         // The projection names no secret, so a listing never fetches one.
-        let script = format!(
-            "SELECT disabled, created, scope_bucket, scope_key, expires FROM access_keys \
-             WHERE user_name = $user LIMIT {limit} USING INDEX by_key_user;"
-        );
-        let answers = self
-            .pool
-            .run(&script, vec![text("user", user.as_str())])
-            .await?;
+        let script = "SELECT disabled, created, scope_bucket, scope_key, expires FROM access_keys \
+             WHERE user_name = $user LIMIT $limit USING INDEX by_key_user;";
+        let parameters = vec![
+            text("user", user.as_str()),
+            ("limit".to_owned(), crate::params::count(limit)),
+        ];
+        let answers = self.pool.run(script, parameters).await?;
         match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records
                 .iter()

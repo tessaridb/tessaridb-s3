@@ -1,8 +1,6 @@
 //! The `lifecycle_runs` queue in TessariDB.
 
-use tessari_s3_infrastructure::tessaridb::{
-    Answer, MetaError, MetaPool, Number, RefusalClass, Value,
-};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 
 use super::entity::RunEntity;
 use super::repository::LifecycleRepository;
@@ -66,15 +64,9 @@ impl LifecycleRepository for TessariLifecycle {
     async fn release(&self, bucket: &str, interval_secs: u64) -> Result<()> {
         let parameters = vec![
             ("bucket".to_owned(), Value::String(bucket.to_owned())),
-            (
-                "interval".to_owned(),
-                Value::Number(Number::Integer(
-                    i64::try_from(interval_secs).unwrap_or(i64::MAX),
-                )),
-            ),
+            ("interval".to_owned(), crate::params::seconds(interval_secs)),
         ];
-        let script = "BEGIN; UPDATE lifecycle_runs:$bucket SET due = time::from_unix(time::unix(time::now()) + $interval); \
-                      RELEASE lifecycle_runs:$bucket; COMMIT;";
+        let script = "RELEASE lifecycle_runs:$bucket NOT BEFORE duration::from_secs($interval);";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(()),
             // The rules were deleted while the bucket was worked: nothing is left to hand back.

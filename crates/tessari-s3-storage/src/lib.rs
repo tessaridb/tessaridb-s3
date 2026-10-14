@@ -10,6 +10,7 @@ mod error;
 pub mod lifecycle;
 pub mod multipart;
 pub mod objects;
+mod params;
 pub mod peers;
 mod schema;
 mod schema_queues;

@@ -102,14 +102,12 @@ impl TessariObjects {
                 Value::String(bucket.as_str().to_owned()),
             ),
             ("after".to_owned(), Value::Bytes(after)),
+            ("limit".to_owned(), crate::params::count(limit)),
         ];
-        // `LIMIT` takes a literal; the limit is this server's own integer, never a caller's value.
-        let script = format!(
-            "SELECT incarnation FROM ONLY buckets:$bucket; \
+        let script = "SELECT incarnation FROM ONLY buckets:$bucket; \
              SELECT bucket_name, key, incarnation, seq, version_id, marker, modified, size, etag FROM versions \
-             AFTER versions:$after LIMIT {limit};"
-        );
-        let mut answers = self.pool.run(&script, parameters).await?.into_iter();
+             AFTER versions:$after LIMIT $limit;";
+        let mut answers = self.pool.run(script, parameters).await?.into_iter();
         let incarnation = incarnation_of(first_record(answers.next())?)?;
         let walked = match answers.next() {
             Some(Answer::Records { records, .. }) => records,

@@ -92,20 +92,27 @@ impl ShardSetRepository for TessariShardSets {
     }
 
     async fn retry_heal(&self, id: [u8; 16]) -> Result<()> {
-        // The retry delay is this server's own constant, formatted to digits only.
-        let script = format!(
-            "BEGIN; UPDATE heal_queue:$data SET due = time::from_unix(time::unix(time::now()) + {HEAL_RETRY_SECS}); \
-             RELEASE heal_queue:$data; COMMIT;"
-        );
-        self.pool.run(&script, data(id)).await?;
+        let mut parameters = data(id);
+        parameters.push(("retry".to_owned(), crate::params::seconds(HEAL_RETRY_SECS)));
+        self.pool
+            .run(
+                "RELEASE heal_queue:$data NOT BEFORE duration::from_secs($retry);",
+                parameters,
+            )
+            .await?;
         Ok(())
     }
 
     async fn listed(&self, limit: usize) -> Result<Vec<([u8; 16], i64)>> {
-        // `LIMIT` takes a literal (0.33.1 refuses a parameter there); the limit is this server's own integer, never a
-        // caller's value, and an integer formats to digits only.
-        let script = format!("SELECT data, attempts FROM heal_queue LIMIT {limit};");
-        heal_records(self.pool.run(&script, Vec::new()).await?)
+        let parameters = vec![("limit".to_owned(), crate::params::count(limit))];
+        heal_records(
+            self.pool
+                .run(
+                    "SELECT data, attempts FROM heal_queue LIMIT $limit;",
+                    parameters,
+                )
+                .await?,
+        )
     }
 
     async fn healed(&self, id: [u8; 16]) -> Result<()> {

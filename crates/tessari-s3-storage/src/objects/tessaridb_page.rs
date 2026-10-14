@@ -29,10 +29,10 @@ pub(super) async fn page(
             Value::String(bucket.as_str().to_owned()),
         ),
         ("after".to_owned(), in_bucket(after)),
+        ("limit".to_owned(), crate::params::count(limit)),
     ];
     // `AFTER` with no `ORDER BY` walks record ids from the anchor, which need not exist (a key deleted since the
-    // page that named it), and is exclusive — so a start AT a key reads that record by id first. `LIMIT` takes a
-    // literal on 0.33.1; the limit is this server's own integer, never a caller's value.
+    // page that named it), and is exclusive — so a start AT a key reads that record by id first.
     let exact = match at {
         Some(key) => {
             parameters.push(("at".to_owned(), in_bucket(key)));
@@ -42,7 +42,7 @@ pub(super) async fn page(
     };
     let script = format!(
         "SELECT incarnation FROM ONLY buckets:$bucket; {exact} \
-         SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT {limit};"
+         SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT $limit;"
     );
     // Plain reads, the bucket first: a row is listed only when it carries the incarnation read before it.
     let mut answers = pool.run(&script, parameters).await?.into_iter();

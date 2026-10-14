@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- The metadata store needs TessariDB `0.33.4-beta` or later (was `0.33.2-beta`): every row count is bound into
+  its statement instead of written into the text, and a deferred reclaim, heal or lifecycle run is handed back with
+  `RELEASE … NOT BEFORE` in one write.
 - Lifecycle rules are applied. Every node runs a lifecycle pass; each bucket with rules sits in a queue in TessariDB
   that hands it to one node at a time, and is due again an hour after each pass. A pass expires the current version
   (a delete marker in a versioned bucket) once its `Days` or `Date` is reached, removes noncurrent versions past
@@ -12,7 +15,6 @@ section records which TessariDB version its metadata runs on.
   version, and aborts multipart uploads older than `DaysAfterInitiation`. A period ends at the next midnight UTC after
   its days are up. An object rewritten after the pass judged it is not expired, even with the same bytes.
 - The compose file and the process tests run TessariDB `0.34.0-beta`; the whole live suite passes against it.
-  The metadata store still needs `0.33.2-beta` or later.
 - Bucket lifecycle configuration: PutBucketLifecycleConfiguration, GetBucketLifecycleConfiguration
   (`NoSuchLifecycleConfiguration` when none) and DeleteBucketLifecycle. Rules filter by prefix and say Expiration
   (`Days`, `Date` at midnight UTC, or `ExpiredObjectDeleteMarker`), `NoncurrentVersionExpiration` (with

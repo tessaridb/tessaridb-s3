@@ -102,9 +102,11 @@ impl TessariObjects {
         after: &str,
         limit: usize,
     ) -> Result<Vec<Unconverted>> {
-        let parameters = vec![("after".to_owned(), Value::String(after.to_owned()))];
-        // `LIMIT` takes a literal (0.33 refuses a parameter there); the limit is this server's own integer.
-        let script = format!("SELECT {FIELDS} FROM objects AFTER objects:$after LIMIT {limit};");
+        let parameters = vec![
+            ("after".to_owned(), Value::String(after.to_owned())),
+            ("limit".to_owned(), crate::params::count(limit)),
+        ];
+        let script = format!("SELECT {FIELDS} FROM objects AFTER objects:$after LIMIT $limit;");
         let answers = self.pool.run(&script, parameters).await?;
         match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records

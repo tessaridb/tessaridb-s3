@@ -51,12 +51,9 @@ impl TessariObjects {
     /// At most `limit` records still holding bytes. A store whose table never declared the column answers none: a
     /// condition on an undeclared field narrows rather than refuses.
     pub(crate) async fn inline_records(&self, limit: usize) -> Result<Vec<InlineRecord>> {
-        // `LIMIT` takes a literal (0.33 refuses a parameter there); the limit is this server's own integer, never a
-        // caller's value, and an integer formats to digits only.
-        let script = format!(
-            "SELECT bucket_name, key, incarnation, inline FROM objects WHERE inline != NONE LIMIT {limit};"
-        );
-        let answers = self.pool.run(&script, Vec::new()).await?;
+        let script = "SELECT bucket_name, key, incarnation, inline FROM objects WHERE inline != NONE LIMIT $limit;";
+        let parameters = vec![("limit".to_owned(), crate::params::count(limit))];
+        let answers = self.pool.run(script, parameters).await?;
         all_records(answers.into_iter().next(), "object")?
             .iter()
             .map(inline_record)

@@ -247,14 +247,16 @@ impl MultipartRepository for TessariMultipart {
         after: u16,
         limit: usize,
     ) -> Result<(Vec<StoredPart>, bool)> {
-        let parameters = vec![("after".to_owned(), part_id(id, after))];
-        // One more than the page decides IsTruncated. `LIMIT` takes a literal on 0.33.1; this is the server's own
-        // integer, never a caller's value.
-        let fetch = limit.saturating_add(1);
-        let script = format!(
-            "SELECT upload, number, size, etag, modified, checksums FROM parts AFTER parts:$after LIMIT {fetch};"
-        );
-        let answers = self.pool.run(&script, parameters).await?;
+        // One more than the page decides IsTruncated.
+        let parameters = vec![
+            ("after".to_owned(), part_id(id, after)),
+            (
+                "limit".to_owned(),
+                crate::params::count(limit.saturating_add(1)),
+            ),
+        ];
+        let script = "SELECT upload, number, size, etag, modified, checksums FROM parts AFTER parts:$after LIMIT $limit;";
+        let answers = self.pool.run(script, parameters).await?;
         let records = match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records,
             _ => Vec::new(),
@@ -273,13 +275,16 @@ impl MultipartRepository for TessariMultipart {
     }
 
     async fn all_parts(&self, id: UploadId) -> Result<Vec<PartRow>> {
-        let parameters = vec![("upload".to_owned(), Value::Uuid(id.bytes()))];
-        // `LIMIT` takes a literal; this is the server's own constant.
-        let script = format!(
-            "SELECT number, data, size, etag, checksums FROM parts WHERE upload = $upload \
-             LIMIT {MULTIPART_MAX_PARTS} USING INDEX by_upload;"
-        );
-        let answers = self.pool.run(&script, parameters).await?;
+        let parameters = vec![
+            ("upload".to_owned(), Value::Uuid(id.bytes())),
+            (
+                "limit".to_owned(),
+                crate::params::count(usize::from(MULTIPART_MAX_PARTS)),
+            ),
+        ];
+        let script = "SELECT number, data, size, etag, checksums FROM parts WHERE upload = $upload \
+             LIMIT $limit USING INDEX by_upload;";
+        let answers = self.pool.run(script, parameters).await?;
         let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
             return Ok(Vec::new());
         };

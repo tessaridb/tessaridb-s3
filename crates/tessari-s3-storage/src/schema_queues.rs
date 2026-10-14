@@ -124,7 +124,10 @@ async fn drain(pool: &MetaPool, table: &str, read: &str, step: &str) -> Result<u
     let mut moved = 0_usize;
     loop {
         let answers = pool
-            .run(&format!("{read} LIMIT {BATCH};"), Vec::new())
+            .run(
+                &format!("{read} LIMIT $limit;"),
+                vec![("limit".to_owned(), crate::params::count(BATCH))],
+            )
             .await?;
         let records = match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records,

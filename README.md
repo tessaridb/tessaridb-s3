@@ -93,8 +93,8 @@ cargo deny check
 
 ## Running
 
-The metadata store is a TessariDB node, `0.33.2-beta` or later (`tessaridb/tessaridb:0.34.0-beta`): the listings page
-with a bound record cursor, which earlier releases refuse. The process reads its configuration from the environment:
+The metadata store is a TessariDB node, `0.33.4-beta` or later (`tessaridb/tessaridb:0.34.0-beta`): the listings page
+with a bound record cursor and every row count is bound, which earlier releases refuse. The process reads its configuration from the environment:
 
 | Variable | Default | Meaning |
 |---|---|---|

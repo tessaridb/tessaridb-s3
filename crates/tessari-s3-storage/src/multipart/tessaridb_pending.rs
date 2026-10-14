@@ -177,15 +177,13 @@ pub(super) async fn page(
             Value::String(bucket.as_str().to_owned()),
         ),
         ("after".to_owned(), Value::String(after.to_owned())),
+        ("limit".to_owned(), crate::params::count(limit)),
     ];
-    // `LIMIT` takes a literal on 0.33.1; the limit is this server's own integer, never a caller's value.
-    let script = format!(
-        "SELECT incarnation FROM ONLY buckets:$bucket; \
+    let script = "SELECT incarnation FROM ONLY buckets:$bucket; \
          SELECT upload, bucket_name, key, incarnation, initiated, position FROM pending AFTER pending:$after \
-         LIMIT {limit};"
-    );
+         LIMIT $limit;";
     // Plain reads, the bucket first: an upload is listed only when it carries the incarnation read before it.
-    let mut answers = pool.run(&script, parameters).await?.into_iter();
+    let mut answers = pool.run(script, parameters).await?.into_iter();
     let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
     let walked = match answers.next() {
         Some(Answer::Records { records, .. }) => records,
@@ -209,18 +207,16 @@ pub(super) async fn initiated_before(
     cutoff: Timestamp,
     limit: usize,
 ) -> Result<Vec<UploadId>> {
-    let parameters = vec![(
+    let mut parameters = vec![(
         "cutoff".to_owned(),
         Value::Datetime {
             seconds: cutoff.seconds,
             nanos: cutoff.nanos,
         },
     )];
-    // `LIMIT` takes a literal on 0.33.1; the limit is this server's own integer, never a caller's value.
-    let script = format!(
-        "SELECT upload FROM pending WHERE initiated < $cutoff LIMIT {limit} USING INDEX by_pending_initiated;"
-    );
-    let answers = pool.run(&script, parameters).await?;
+    parameters.push(("limit".to_owned(), crate::params::count(limit)));
+    let script = "SELECT upload FROM pending WHERE initiated < $cutoff LIMIT $limit USING INDEX by_pending_initiated;";
+    let answers = pool.run(script, parameters).await?;
     let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
         return Ok(Vec::new());
     };

@@ -41,12 +41,16 @@ pub(super) async fn parts_of(
     let parameters = vec![
         ("id".to_owned(), record),
         ("upload".to_owned(), Value::Uuid(upload)),
+        (
+            "limit".to_owned(),
+            crate::params::count(usize::from(MULTIPART_MAX_PARTS)),
+        ),
     ];
     // Two plain reads, the parts FIRST: a completed upload's parts never change and go only after no object names
     // the upload, and an upload id never comes back — so the object still naming it afterwards proves the parts were
-    // whole when they were read. `LIMIT` takes a literal and a table is grammar; both are this server's own.
+    // whole when they were read. A table is grammar, and this one is the server's own.
     let script = format!(
-        "SELECT number, data, size FROM parts WHERE upload = $upload LIMIT {MULTIPART_MAX_PARTS} \
+        "SELECT number, data, size FROM parts WHERE upload = $upload LIMIT $limit \
          USING INDEX by_upload; SELECT upload FROM ONLY {table}:$id;"
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();

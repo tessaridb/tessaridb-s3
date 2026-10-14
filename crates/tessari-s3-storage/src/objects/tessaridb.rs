@@ -158,13 +158,19 @@ impl ObjectRepository for TessariObjects {
     }
 
     async fn defer(&self, id: [u8; 16]) -> Result<()> {
-        let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        // The retry delay is this server's own constant, formatted to digits only.
-        let script = format!(
-            "BEGIN; UPDATE reclaims:$data SET due = time::from_unix(time::unix(time::now()) + {RECLAIM_RETRY_SECS}); \
-             RELEASE reclaims:$data; COMMIT;"
-        );
-        self.pool.run(&script, parameters).await?;
+        let parameters = vec![
+            ("data".to_owned(), Value::Uuid(id)),
+            (
+                "retry".to_owned(),
+                crate::params::seconds(RECLAIM_RETRY_SECS),
+            ),
+        ];
+        self.pool
+            .run(
+                "RELEASE reclaims:$data NOT BEFORE duration::from_secs($retry);",
+                parameters,
+            )
+            .await?;
         Ok(())
     }
 

@@ -77,11 +77,18 @@ impl ActionRepository for TessariActions {
 
     async fn after(&self, after: u64, limit: usize) -> Result<Vec<ActionEntity>> {
         let from = i64::try_from(after).map_err(|_| malformed("position"))?;
-        let parameters = vec![("from".to_owned(), Value::Number(Number::Integer(from)))];
-        // A position read starts at its position rather than walking the year of actions before it. `LIMIT` takes a
-        // literal; the limit is this server's own integer and formats to digits only.
-        let script = format!("READ FROM console_actions AFTER $from LIMIT {limit};");
-        let answers = self.pool.run(&script, parameters).await?;
+        let parameters = vec![
+            ("from".to_owned(), Value::Number(Number::Integer(from))),
+            ("limit".to_owned(), crate::params::count(limit)),
+        ];
+        // A position read starts at its position rather than walking the year of actions before it.
+        let answers = self
+            .pool
+            .run(
+                "READ FROM console_actions AFTER $from LIMIT $limit;",
+                parameters,
+            )
+            .await?;
         match answers.into_iter().next() {
             Some(Answer::Records { records, .. }) => records
                 .iter()
