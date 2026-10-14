@@ -10,6 +10,7 @@ pub mod erasure;
 mod error;
 pub mod internal;
 pub mod lifecycle;
+pub mod media;
 pub mod multipart;
 pub mod notification;
 pub mod objects;

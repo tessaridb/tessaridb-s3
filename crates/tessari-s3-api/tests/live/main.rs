@@ -30,6 +30,7 @@ mod erasure_reads;
 mod large;
 mod lifecycle;
 mod listing;
+mod media;
 mod meta_pool;
 mod metadata;
 mod multipart;

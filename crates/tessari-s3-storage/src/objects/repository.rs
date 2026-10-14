@@ -40,7 +40,8 @@ pub(crate) struct Head {
     pub(crate) newest: Option<u64>,
     /// The sequence of the key's null version.
     pub(crate) null: Option<u64>,
-    /// Whether the bucket has a notification configuration: a change then leaves its event (`object_events`).
+    /// Whether the bucket has a notification configuration or media rules: a change then leaves its event
+    /// (`object_events`).
     pub(crate) notifies: bool,
     /// Whether the key has a current object record.
     pub(crate) current: bool,

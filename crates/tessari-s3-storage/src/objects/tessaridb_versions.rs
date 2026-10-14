@@ -64,14 +64,15 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
     // bucket and key fields tell apart. The null version's sequence is kept at the key's own address in
     // `version_nulls`: an index cannot answer inside a transaction once anything in the store has committed since it
     // began, and this read must hold under concurrent writers.
-    let script = "BEGIN; SELECT versioning, notify FROM ONLY buckets:$bucket; \
+    let script = "BEGIN; SELECT versioning, notify, media FROM ONLY buckets:$bucket; \
                   SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
                   SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;";
     let mut answers = pool.run(script, parameters).await?.into_iter();
     let _begin = answers.next();
     let bucket_record = first_record(answers.next())?;
+    // A change is recorded for whoever reads `object_events`: the notification destinations and the media workers.
     let notifies = matches!(&bucket_record, Some(Value::Object(fields))
-        if !matches!(fields.get("notify"), None | Some(Value::None)));
+        if ["notify", "media"].iter().any(|field| !matches!(fields.get(*field), None | Some(Value::None))));
     let state = match bucket_record {
         Some(Value::Object(fields)) => match fields.get("versioning") {
             None | Some(Value::None) => None,
