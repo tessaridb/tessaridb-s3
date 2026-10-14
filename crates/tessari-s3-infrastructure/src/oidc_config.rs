@@ -12,9 +12,17 @@ pub(crate) const CLIENT_ID: &str = "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID";
 pub(crate) const CLIENT_SECRET: &str = "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET";
 pub(crate) const REDIRECT_URI: &str = "TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI";
 pub(crate) const MFA_AMR: &str = "TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR";
+pub(crate) const BREAK_GLASS_WEBHOOK: &str = "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK";
 
 /// Every variable of this group, the issuer first.
-pub(crate) const ALL: [&str; 5] = [ISSUER, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, MFA_AMR];
+pub(crate) const ALL: [&str; 6] = [
+    ISSUER,
+    CLIENT_ID,
+    CLIENT_SECRET,
+    REDIRECT_URI,
+    MFA_AMR,
+    BREAK_GLASS_WEBHOOK,
+];
 
 /// The provider, when `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` is set; a companion without it is refused.
 pub(crate) fn oidc_settings(get: &impl Fn(&str) -> Option<String>) -> Result<Option<OidcSettings>> {
@@ -53,6 +61,9 @@ pub(crate) fn oidc_settings(get: &impl Fn(&str) -> Option<String>) -> Result<Opt
         client_secret: SecretKey::new(required(CLIENT_SECRET)?),
         redirect_uri: url(REDIRECT_URI, &required(REDIRECT_URI)?)?,
         mfa_amr,
+        break_glass_webhook: get(BREAK_GLASS_WEBHOOK)
+            .map(|text| url(BREAK_GLASS_WEBHOOK, &text))
+            .transpose()?,
     }))
 }
 

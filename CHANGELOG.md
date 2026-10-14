@@ -10,6 +10,9 @@ section records which TessariDB version its metadata runs on.
   `amr`, and the identity linked to a user by an operator (`PUT`/`DELETE /api/v1/users/{user}/identity`, recorded).
   In-flight sign-ins live in the metadata store for ten minutes and are taken once. A console session now names
   either an access key or a user; sessions issued before this version are no longer accepted.
+- With an identity provider configured, a root sign-in to the console is break-glass: it requires a `reason`, lasts
+  15 minutes, is recorded before the session is issued, and is announced to `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK`
+  when that is set.
 - `tessaridb-s3-bench`, a load generator that measures the server from the client side. It runs PUT, GET, HEAD,
   ListObjectsV2 and DELETE for each object-size class and concurrency step, multipart uploads included. It reports
   latency percentiles, rates, failures by S3 error code and a correctness check of every GET. `summarise` combines

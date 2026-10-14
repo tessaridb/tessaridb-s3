@@ -39,6 +39,8 @@ pub struct OidcSettings {
     pub redirect_uri: String,
     /// `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` — `amr` values that prove a second factor; one must be present.
     pub mfa_amr: Vec<String>,
+    /// `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK` — where a root sign-in is announced as it happens, if anywhere.
+    pub break_glass_webhook: Option<String>,
 }
 
 const LISTEN: &str = "TESSARIDB_S3_CONSOLE_LISTEN";

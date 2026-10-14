@@ -5,6 +5,7 @@
 
 mod access;
 mod actions;
+mod break_glass;
 mod buckets;
 mod cluster;
 mod content;
@@ -34,8 +35,8 @@ use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post, put};
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
 use tessari_s3_core::authz::Principal;
-use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::oidc::OidcClient;
+use tessari_s3_infrastructure::{S3Config, WebhookClient};
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{Code, SecretKey};
 
@@ -66,6 +67,8 @@ struct Inner {
     principals: Principals,
     usage_interval_secs: u64,
     oidc: Option<OidcClient>,
+    /// Where a root sign-in is announced, when an identity provider and a webhook are configured.
+    break_glass_alert: Option<(WebhookClient, String)>,
 }
 
 impl ConsoleState {
@@ -86,6 +89,7 @@ impl ConsoleState {
             .as_ref()
             .map(|settings| OidcClient::new(settings, CONSOLE_OIDC_REFRESH_MIN_SECS))
             .transpose()?;
+        let break_glass_alert = break_glass::alert(console.oidc.as_ref())?;
         Ok(Some(Self {
             inner: Arc::new(Inner {
                 key_id: config.root_access_key.clone(),
@@ -109,6 +113,7 @@ impl ConsoleState {
                 principals: Principals::new(),
                 usage_interval_secs: config.usage_interval_secs,
                 oidc,
+                break_glass_alert,
             }),
         }))
     }
@@ -116,6 +121,11 @@ impl ConsoleState {
     /// The identity provider's client, when one is configured.
     fn oidc(&self) -> Option<&OidcClient> {
         self.inner.oidc.as_ref()
+    }
+
+    /// Where a root sign-in is announced, if anywhere.
+    fn break_glass_alert(&self) -> Option<&(WebhookClient, String)> {
+        self.inner.break_glass_alert.as_ref()
     }
 
     fn key_id(&self) -> &str {

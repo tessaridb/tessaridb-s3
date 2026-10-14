@@ -18,6 +18,7 @@ fn settings(provider: &Provider) -> OidcSettings {
         client_secret: SecretKey::new(CLIENT_SECRET.to_owned()),
         redirect_uri: REDIRECT.to_owned(),
         mfa_amr: vec!["mfa".to_owned()],
+        break_glass_webhook: None,
     }
 }
 

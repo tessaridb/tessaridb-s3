@@ -168,6 +168,9 @@ pub const DEFAULT_HEAL_INTERVAL_SECS: u64 = 60;
 /// Seconds a console session lasts from sign-in; there is no refresh — the operator signs in again.
 pub const CONSOLE_SESSION_SECS: i64 = 3_600;
 
+/// Seconds a root sign-in lasts where an identity provider is configured: the emergency path is bounded.
+pub const CONSOLE_BREAK_GLASS_SECS: i64 = 900;
+
 /// The cookie the console session travels in.
 pub const CONSOLE_SESSION_COOKIE: &str = "tessaridb_s3_console";
 

@@ -137,6 +137,7 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` / `_CLIENT_SECRET` | — | the console's client at the provider; the secret stays on the server (`client_secret_basic`) |
 | `TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI` | — | the callback registered at the provider, exactly: the console's address followed by `/api/v1/auth/oidc/callback` |
 | `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` | `mfa` | comma-separated `amr` values that prove a second factor; a sign-in whose ID token carries none of them is refused |
+| `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK` | unset (no alert) | where a root sign-in to the console is announced as it happens: one JSON POST (`event`, `key_id`, `reason`, `client`, `expires`), over https or http to this machine. Needs `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
@@ -162,6 +163,12 @@ the provider's metadata names), issuer, audience, expiry, nonce and `at_hash`, a
 must be linked to a user (`PUT /api/v1/users/{user}/identity` with the provider's `subject`, by whoever may manage
 that user, recorded like any change). Every refused return is the same `401`; the reason is in the node's log. The
 session holds the user, not a key, and ends at its next request once the user is disabled.
+
+Beside an identity provider, signing in with the root credential is the emergency path. It owes a `reason`, and the
+session lasts 15 minutes instead of an hour. The sign-in is recorded in the action record (`break_glass_sign_in`)
+before the session exists; a record that cannot be written refuses the sign-in. When a webhook is configured, the
+sign-in is announced to it as it happens. An alert that cannot be delivered does not bar the path: it is logged and
+the record's outcome says `alert_failed`. Without an identity provider, root signs in as before.
 
 The page is built from TypeScript in `crates/tessari-s3-api/panel/`; its output is committed to
 `crates/tessari-s3-api/assets/` and embedded in the binary, so building the server never needs Node. Only changing

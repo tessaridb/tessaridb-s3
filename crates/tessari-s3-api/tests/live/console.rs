@@ -85,7 +85,10 @@ pub(crate) async fn send(
 }
 
 pub(crate) async fn sign_in(console: &ConsoleState) -> String {
-    let body = format!("{{\"access_key_id\":\"{ACCESS_KEY}\",\"secret_access_key\":\"{SECRET}\"}}");
+    // The reason is what a root sign-in owes when an identity provider is configured; without one it is not asked for.
+    let body = format!(
+        "{{\"access_key_id\":\"{ACCESS_KEY}\",\"secret_access_key\":\"{SECRET}\",\"reason\":\"live test\"}}"
+    );
     let answer = send(console, "POST", "/api/v1/session", None, Some(&body)).await;
     assert_eq!(answer.status, 200);
     let cookie = answer

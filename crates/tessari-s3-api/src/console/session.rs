@@ -12,7 +12,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
-use tessari_s3_constants::{CONSOLE_SESSION_COOKIE, CONSOLE_SESSION_SECS};
+use tessari_s3_constants::{
+    CONSOLE_BREAK_GLASS_SECS, CONSOLE_SESSION_COOKIE, CONSOLE_SESSION_SECS,
+};
 
 use tessari_s3_core::authz::{Action, Decision, Principal, authorize};
 use tessari_s3_core::console::{Session, Subject};
@@ -24,6 +26,8 @@ use super::error::ConsoleError;
 pub(super) struct SignIn {
     access_key_id: String,
     secret_access_key: String,
+    /// Why — owed by a root sign-in where an identity provider is configured, and read nowhere else.
+    reason: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -77,39 +81,51 @@ pub(super) async fn sign_in(
     let SignIn {
         access_key_id,
         secret_access_key,
+        reason,
     } = serde_json::from_slice(&body)
         .map_err(|_| ConsoleError::bad_request("expected access_key_id and secret_access_key"))?;
     // The key id names the credential (root or a user's live key); the secret is then compared in constant time.
-    let secret_matches = match state.principal_for(&access_key_id).await? {
-        Some((_, secret)) => bool::from(
-            secret_access_key
-                .as_bytes()
-                .ct_eq(secret.expose().as_bytes()),
-        ),
-        None => false,
+    let principal = match state.principal_for(&access_key_id).await? {
+        Some((principal, secret))
+            if bool::from(
+                secret_access_key
+                    .as_bytes()
+                    .ct_eq(secret.expose().as_bytes()),
+            ) =>
+        {
+            principal
+        }
+        _ => {
+            tracing::warn!(client = %client.ip(), "console sign-in refused");
+            return Err(ConsoleError::unauthorized());
+        }
     };
-    if !secret_matches {
-        tracing::warn!(client = %client.ip(), "console sign-in refused");
-        return Err(ConsoleError::unauthorized());
-    }
+    // Beside an identity provider, people sign in through it; the root credential is then the emergency path.
+    let lifetime = if matches!(principal, Principal::Root) && state.oidc().is_some() {
+        let expires = now.saturating_add(CONSOLE_BREAK_GLASS_SECS);
+        super::break_glass::admit(&state, &access_key_id, reason, client.ip(), expires).await?;
+        CONSOLE_BREAK_GLASS_SECS
+    } else {
+        CONSOLE_SESSION_SECS
+    };
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).map_err(|_| ConsoleError::internal())?;
     let token = tessari_s3_core::console::issue(
         state.secret(),
         &Subject::Key(access_key_id.clone()),
         now,
-        CONSOLE_SESSION_SECS,
+        lifetime,
         nonce,
     );
     tracing::info!(client = %client.ip(), key_id = access_key_id, "console sign-in");
     let mut response = Json(Signed {
         key_id: &access_key_id,
-        expires: now.saturating_add(CONSOLE_SESSION_SECS),
+        expires: now.saturating_add(lifetime),
     })
     .into_response();
     response
         .headers_mut()
-        .insert(SET_COOKIE, cookie(&state, &token, CONSOLE_SESSION_SECS)?);
+        .insert(SET_COOKIE, cookie(&state, &token, lifetime)?);
     Ok(response)
 }
 

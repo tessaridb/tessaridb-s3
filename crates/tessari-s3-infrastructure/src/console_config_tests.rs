@@ -222,3 +222,54 @@ fn an_identity_provider_without_a_console_is_refused() {
         })
     ));
 }
+
+#[test]
+fn a_break_glass_webhook_follows_the_identity_provider_and_its_url_rule() {
+    let provider_only = load(&with(&OIDC))
+        .expect("loads")
+        .console
+        .expect("console")
+        .oidc
+        .expect("provider");
+    assert_eq!(provider_only.break_glass_webhook, None);
+    let mut hooked = with(&OIDC);
+    hooked.push((
+        "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
+        "https://alerts.example.test/break-glass",
+    ));
+    let oidc = load(&hooked)
+        .expect("loads")
+        .console
+        .expect("console")
+        .oidc
+        .expect("provider");
+    assert_eq!(
+        oidc.break_glass_webhook.as_deref(),
+        Some("https://alerts.example.test/break-glass")
+    );
+    // Over http only to this machine, and never without a provider: break-glass exists only beside sign-in through one.
+    let mut plain = with(&OIDC);
+    plain.push((
+        "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
+        "http://alerts.example.test/break-glass",
+    ));
+    assert!(matches!(
+        load(&plain).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
+            ..
+        })
+    ));
+    let mut alone = with(&[("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101")]);
+    alone.push((
+        "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
+        "https://alerts.example.test/break-glass",
+    ));
+    assert!(matches!(
+        load(&alone).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
+            reason: "set without TESSARIDB_S3_CONSOLE_OIDC_ISSUER",
+        })
+    ));
+}

@@ -17,9 +17,12 @@ use crate::oidc_provider::{CLIENT_ID, CLIENT_SECRET, Provider, REDIRECT, SUBJECT
 use crate::users::user;
 use crate::{IGNORED, live_config, prepared, scratch_dir, test_node};
 
-/// A console over a fresh store whose identity provider is `provider`, with the space `alpha` and its members `ann`
-/// and `bob`.
-async fn console_with(provider: &Provider) -> (ConsoleState, Storage) {
+/// A console over a fresh store whose identity provider is `provider` (announcing a root sign-in to `webhook`, when
+/// given), with the space `alpha` and its members `ann` and `bob`.
+pub(crate) async fn console_with(
+    provider: &Provider,
+    webhook: Option<String>,
+) -> (ConsoleState, Storage) {
     let mut config = live_config(test_node(), None, &scratch_dir());
     let console = config.console.as_mut().expect("a console");
     // These tests start more sign-ins a minute, from one address, than the default limit lets through.
@@ -30,6 +33,7 @@ async fn console_with(provider: &Provider) -> (ConsoleState, Storage) {
         client_secret: SecretKey::new(CLIENT_SECRET.to_owned()),
         redirect_uri: REDIRECT.to_owned(),
         mfa_amr: vec!["mfa".to_owned()],
+        break_glass_webhook: webhook,
     });
     let storage = prepared(&config).await;
     let alpha = SpaceName::new("alpha").expect("a space name");
@@ -103,7 +107,7 @@ fn refused(seen: &Seen, case: &str) {
 async fn a_linked_person_signs_in_as_the_user_once_per_state() {
     let _why = IGNORED;
     let provider = Provider::start().await;
-    let (console, storage) = console_with(&provider).await;
+    let (console, storage) = console_with(&provider, None).await;
     storage
         .identities()
         .link(&user("ann"), &provider.issuer, SUBJECT)
@@ -138,7 +142,7 @@ async fn a_linked_person_signs_in_as_the_user_once_per_state() {
 async fn every_other_return_is_the_same_refusal_and_no_session() {
     let _why = IGNORED;
     let provider = Provider::start().await;
-    let (console, storage) = console_with(&provider).await;
+    let (console, storage) = console_with(&provider, None).await;
     // Nobody is linked yet: a correct sign-in of an unlinked identity.
     refused(
         &sign_in_through(&provider, &console, "code-unlinked", Shape::Good).await,
@@ -196,7 +200,7 @@ async fn every_other_return_is_the_same_refusal_and_no_session() {
 async fn an_operator_links_and_unlinks_an_identity_on_the_record() {
     let _why = IGNORED;
     let provider = Provider::start().await;
-    let (console, _) = console_with(&provider).await;
+    let (console, _) = console_with(&provider, None).await;
     let root = sign_in(&console).await;
     let link = |user: &'static str, subject: &'static str| {
         let console = console.clone();
