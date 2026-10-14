@@ -17,7 +17,7 @@ use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_daemons::{
-    Healer, LifecycleWorker, NotifyWorker, Reclaimer, UploadReaper, UsageScanner, run,
+    Destination, Healer, LifecycleWorker, NotifyWorker, Reclaimer, UploadReaper, UsageScanner, run,
 };
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
@@ -111,24 +111,22 @@ async fn main() -> anyhow::Result<()> {
     if !config.notify_targets.is_empty() {
         let client = tessari_s3_infrastructure::WebhookClient::new()?;
         for target in &config.notify_targets {
-            match &target.endpoint {
-                NotifyEndpoint::Webhook(url) => {
-                    let worker = NotifyWorker::new(
-                        notifications.clone(),
-                        target.id.clone(),
-                        url.clone(),
-                        config.region.clone(),
-                        client.clone(),
-                    );
-                    daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
-                }
-                NotifyEndpoint::Kafka { .. } => {
-                    tracing::warn!(
-                        target = target.id.as_str(),
-                        "Kafka delivery is not built yet; its events are kept in the topic"
-                    );
-                }
-            }
+            let destination = match &target.endpoint {
+                NotifyEndpoint::Webhook(url) => Destination::Webhook {
+                    url: url.clone(),
+                    client: client.clone(),
+                },
+                NotifyEndpoint::Kafka { brokers, topic } => Destination::Kafka(
+                    tessari_s3_infrastructure::KafkaProducer::new(brokers.clone(), topic.clone()),
+                ),
+            };
+            let worker = NotifyWorker::new(
+                notifications.clone(),
+                target.id.clone(),
+                destination,
+                config.region.clone(),
+            );
+            daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
         }
     }
     let scanner = UsageScanner::new(

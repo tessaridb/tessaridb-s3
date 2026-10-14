@@ -11,7 +11,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
-use tessari_s3_daemons::{Daemon, NotifyWorker};
+use tessari_s3_daemons::{Daemon, Destination, NotifyWorker};
 use tessari_s3_infrastructure::WebhookClient;
 
 use crate::notifications::{CONFIGURATION, notification};
@@ -89,9 +89,11 @@ async fn matching_events_reach_the_webhook_once_and_a_refused_one_is_retried() {
     let worker = NotifyWorker::new(
         notifications,
         "hooks".to_owned(),
-        url,
+        Destination::Webhook {
+            url,
+            client: WebhookClient::new().expect("a client"),
+        },
         "us-east-1".to_owned(),
-        WebhookClient::new().expect("a client"),
     );
     call(&state, "PUT", "/hooked/logs/a.txt", vec![], b"a").await;
     // No rule names this key: settled without a delivery.
@@ -138,5 +140,114 @@ async fn matching_events_reach_the_webhook_once_and_a_refused_one_is_retried() {
         by_key(&receiver).get("logs/b.txt").map(Vec::len),
         Some(2),
         "delivered, then settled"
+    );
+}
+
+/// The Kafka broker the Kafka test produces to (`TESSARIDB_S3_TEST_KAFKA`, `host:port`).
+fn kafka_broker() -> String {
+    std::env::var("TESSARIDB_S3_TEST_KAFKA")
+        .expect("TESSARIDB_S3_TEST_KAFKA is required for this test")
+}
+
+/// Every record on `topic`, as (record key, event name) pairs, sorted.
+async fn consumed(broker: &str, topic: &str) -> Vec<(String, String)> {
+    use rskafka::client::ClientBuilder;
+    use rskafka::client::partition::UnknownTopicHandling;
+    let client = ClientBuilder::new(vec![broker.to_owned()])
+        .build()
+        .await
+        .expect("a client");
+    let partitions = client
+        .list_topics()
+        .await
+        .expect("topics")
+        .into_iter()
+        .find(|listed| listed.name == topic)
+        .expect("the topic")
+        .partitions;
+    let mut seen = Vec::new();
+    for partition in partitions {
+        let reader = client
+            .partition_client(topic.to_owned(), partition, UnknownTopicHandling::Retry)
+            .await
+            .expect("a partition");
+        let (records, _) = reader
+            .fetch_records(0, 1..1_000_000, 1_000)
+            .await
+            .expect("records");
+        for record in records {
+            let key = String::from_utf8(record.record.key.expect("a key")).expect("text");
+            let value: serde_json::Value =
+                serde_json::from_slice(&record.record.value.expect("a value")).expect("JSON");
+            let name = value["Records"][0]["eventName"]
+                .as_str()
+                .expect("a name")
+                .to_owned();
+            seen.push((key, name));
+        }
+    }
+    seen.sort();
+    seen
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node and a Kafka broker: set TESSARIDB_S3_TEST_META, _USER, _PASSWORD and _KAFKA"]
+async fn a_kafka_destination_receives_each_matching_event_keyed_by_its_object() {
+    use rskafka::client::ClientBuilder;
+    use tessari_s3_infrastructure::KafkaProducer;
+    use tessari_s3_infrastructure::tessaridb::Value;
+    let _why = IGNORED;
+    let broker = kafka_broker();
+    let topic = format!("s3-events-{}", uuid::Uuid::new_v4().simple());
+    ClientBuilder::new(vec![broker.clone()])
+        .build()
+        .await
+        .expect("a client")
+        .controller_client()
+        .expect("the controller")
+        .create_topic(topic.clone(), 3, 1, 5_000)
+        .await
+        .expect("topic created");
+    let (state, planter) = fresh().await;
+    assert_eq!(
+        call(&state, "PUT", "/streamed", vec![], b"").await.status,
+        200
+    );
+    // The API refuses a destination the operator did not declare, and this suite declares only a webhook; the
+    // configuration is written as the API stores it.
+    planter
+        .run(
+            "UPDATE buckets:'streamed' SET notify = { rules: [{ id: 'to-kafka', target: 'orders', \
+             events: ['s3:ObjectCreated:*', 's3:ObjectRemoved:*'], prefix: '', suffix: '' }] };",
+            Vec::<(String, Value)>::new(),
+        )
+        .await
+        .expect("configured");
+    let notifications = state.storage().notifications();
+    notifications
+        .define(["orders"])
+        .await
+        .expect("group defined");
+    let worker = NotifyWorker::new(
+        notifications,
+        "orders".to_owned(),
+        Destination::Kafka(KafkaProducer::new(vec![broker.clone()], topic.clone())),
+        "us-east-1".to_owned(),
+    );
+    call(&state, "PUT", "/streamed/a", vec![], b"a").await;
+    call(&state, "PUT", "/streamed/b", vec![], b"b").await;
+    call(&state, "DELETE", "/streamed/a", vec![], b"").await;
+    worker.run_once().await.expect("a run");
+    worker
+        .run_once()
+        .await
+        .expect("a second run delivers nothing again");
+    assert_eq!(
+        consumed(&broker, &topic).await,
+        vec![
+            ("streamed/a".to_owned(), "ObjectCreated:Put".to_owned()),
+            ("streamed/a".to_owned(), "ObjectRemoved:Delete".to_owned()),
+            ("streamed/b".to_owned(), "ObjectCreated:Put".to_owned()),
+        ]
     );
 }

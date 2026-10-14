@@ -1,4 +1,4 @@
-//! The notification worker for one webhook destination: delivers the events its group hands out (see
+//! The notification worker for one destination — a webhook or a Kafka topic: delivers the events its group hands out (see
 //! `NotificationService::next`) as S3 event records, a few at once, settling each by its outcome — at least once,
 //! never before the change committed, and a destination that keeps failing has its events dead-lettered.
 
@@ -10,37 +10,62 @@ use tessari_s3_constants::{
     DAEMON_RUN_TIMEOUT_SECS, NOTIFY_BATCH, NOTIFY_CONCURRENCY, NOTIFY_POLL_SECS,
 };
 use tessari_s3_core::auth::uri_encode;
-use tessari_s3_infrastructure::WebhookClient;
+use tessari_s3_infrastructure::{KafkaProducer, WebhookClient};
 use tessari_s3_storage::notifications::{Due, NotificationService};
 
 use crate::Error;
 use crate::daemon::{Daemon, DaemonFuture, Report};
 
-/// Delivers one destination's events to its webhook.
+/// Where a worker delivers.
+pub enum Destination {
+    /// POSTed to this URL.
+    Webhook {
+        /// The URL the operator declared.
+        url: String,
+        /// The shared webhook client.
+        client: WebhookClient,
+    },
+    /// Produced to a Kafka topic, keyed by `bucket/key`.
+    Kafka(KafkaProducer),
+}
+
+impl Destination {
+    async fn send(&self, due: &Due, body: bytes::Bytes) -> bool {
+        match self {
+            Self::Webhook { url, client } => client.post(url, body).await,
+            Self::Kafka(producer) => {
+                let event = &due.event;
+                let key = format!("{}/{}", event.bucket, event.key);
+                producer
+                    .send(&key, body, (event.at.seconds, event.at.nanos))
+                    .await
+            }
+        }
+    }
+}
+
+/// Delivers one destination's events.
 pub struct NotifyWorker {
     notifications: NotificationService,
     target: String,
-    url: String,
+    destination: Destination,
     region: String,
-    client: WebhookClient,
 }
 
 impl NotifyWorker {
-    /// A worker delivering `target`'s events to `url`, naming `region` in each record.
+    /// A worker delivering `target`'s events to `destination`, naming `region` in each record.
     #[must_use]
     pub const fn new(
         notifications: NotificationService,
         target: String,
-        url: String,
+        destination: Destination,
         region: String,
-        client: WebhookClient,
     ) -> Self {
         Self {
             notifications,
             target,
-            url,
+            destination,
             region,
-            client,
         }
     }
 }
@@ -160,7 +185,7 @@ impl Daemon for NotifyWorker {
                 let outcomes: Vec<(Due, bool)> = futures_util::stream::iter(due)
                     .map(|due| async move {
                         let delivered = match body(&due, &self.region) {
-                            Ok(body) => self.client.post(&self.url, body).await,
+                            Ok(body) => self.destination.send(&due, body).await,
                             Err(error) => {
                                 tracing::error!(%error, "a notification could not be encoded");
                                 false

@@ -14,7 +14,7 @@ pub use daemon::{Daemon, DaemonFuture, Report};
 pub use error::{Error, Result};
 pub use healer::Healer;
 pub use lifecycle::LifecycleWorker;
-pub use notify::NotifyWorker;
+pub use notify::{Destination, NotifyWorker};
 pub use reaper::UploadReaper;
 pub use reclaimer::Reclaimer;
 pub use runner::{Runs, run};

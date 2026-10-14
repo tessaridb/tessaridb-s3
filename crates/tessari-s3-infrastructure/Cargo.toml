@@ -18,6 +18,8 @@ tracing.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
+rskafka.workspace = true
+siphasher.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 
