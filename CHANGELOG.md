@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- A console action whose record append lost to a concurrent one waits a growing, randomly spread interval before
+  appending again, instead of retrying at once; under load an action is no longer answered `500` with
+  `action_not_recorded` after being carried out.
 - A write the metadata store refuses for a reason that is no condition of the request — a broken event, a record
   that does not fit the schema — answers `500 InternalError` instead of `503 ServiceUnavailable` (or `412`): only a
   `conflict` refusal is read as a failed condition or a lost race.

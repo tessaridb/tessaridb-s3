@@ -1,8 +1,6 @@
 //! The metadata schema, applied at start-up. Every definition says `IF NOT EXISTS`, so a node that restarts
 //! re-runs it without effect.
 
-use std::time::Duration;
-
 use tessari_s3_constants::{SCHEMA_RETRY_ATTEMPTS, SCHEMA_RETRY_BACKOFF_MS};
 use tessari_s3_infrastructure::tessaridb::{MetaError, MetaPool, RefusalClass};
 
@@ -153,10 +151,7 @@ pub async fn apply(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
                 if error.is_class(RefusalClass::Retry) && attempt < SCHEMA_RETRY_ATTEMPTS =>
             {
                 tracing::debug!(attempt, error = %error, "schema contended; retrying");
-                let step = u64::from(attempt).saturating_mul(SCHEMA_RETRY_BACKOFF_MS);
-                // Jitter, so nodes (or tests) that collided once do not retry in lockstep and collide again.
-                let backoff = step.saturating_add(jitter(step));
-                tokio::time::sleep(Duration::from_millis(backoff)).await;
+                tokio::time::sleep(crate::backoff::backoff(attempt, SCHEMA_RETRY_BACKOFF_MS)).await;
                 attempt = attempt.saturating_add(1);
             }
             outcome => return outcome,
@@ -182,15 +177,6 @@ fn grace(
         "grace".to_owned(),
         tessari_s3_infrastructure::tessaridb::Value::from(seconds),
     )])
-}
-
-/// A random value in `0..bound` from the standard library's randomly keyed hasher; no dependency needed for a
-/// back-off spread.
-fn jitter(bound: u64) -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u64(bound);
-    hasher.finish().checked_rem(bound).unwrap_or(0)
 }
 
 async fn apply_once(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {

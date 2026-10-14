@@ -128,6 +128,10 @@ pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
 /// record after this one's snapshot); a refused append wrote nothing, so the next attempt cannot duplicate it.
 pub const ACTION_RECORD_ATTEMPTS: u32 = 5;
 
+/// Milliseconds of back-off per attempt between action-record appends (20, 40, 60 … ms, plus a spread): without it
+/// concurrent appends that lost once lose again together.
+pub const ACTION_RECORD_BACKOFF_MS: u64 = 20;
+
 /// Largest sum of user metadata names and values, in UTF-8 bytes (2 KB, S3's limit; MetadataTooLarge beyond it).
 pub const USER_METADATA_MAX: usize = 2 * 1024;
 

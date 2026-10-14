@@ -1,6 +1,8 @@
 //! Action-record rules: an action is recorded as it ended, and the record is read newest first a page at a time.
 
-use tessari_s3_constants::{ACTION_RECORD_ATTEMPTS, CONSOLE_ACTIONS_PAGE_MAX};
+use tessari_s3_constants::{
+    ACTION_RECORD_ATTEMPTS, ACTION_RECORD_BACKOFF_MS, CONSOLE_ACTIONS_PAGE_MAX,
+};
 use tessari_s3_infrastructure::tessaridb::RefusalClass;
 
 use super::model::{Action, NewAction};
@@ -35,6 +37,8 @@ impl ActionService {
                     if error.is_class(RefusalClass::Retry) && attempt < ACTION_RECORD_ATTEMPTS =>
                 {
                     tracing::debug!(attempt, error = %error, "action record contended; appending again");
+                    tokio::time::sleep(crate::backoff::backoff(attempt, ACTION_RECORD_BACKOFF_MS))
+                        .await;
                     attempt = attempt.saturating_add(1);
                 }
                 outcome => return outcome,
