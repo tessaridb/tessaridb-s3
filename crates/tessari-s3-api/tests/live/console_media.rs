@@ -3,9 +3,9 @@
 //! turns media processing off.
 
 use serde_json::{Value, json};
-use tessari_s3_core::authz::Role;
+use tessari_s3_core::authz::{Access, Role};
 
-use crate::access::user_with_key;
+use crate::access::{grant, user_with_key};
 use crate::console::send;
 use crate::console_users::{sign_in_as, states};
 use crate::{IGNORED, call_as};
@@ -25,6 +25,17 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
             .status,
         200
     );
+    // Bob may read and write the bucket's objects, which is everything a grant confers, and still may not configure it.
+    grant(
+        state.storage(),
+        "bob",
+        "pics",
+        Access {
+            read: true,
+            write: true,
+        },
+    )
+    .await;
     let ann_token = sign_in_as(&console, &ann).await.expect("ann signed in");
     let bob_token = sign_in_as(&console, &bob).await.expect("bob signed in");
     let none = send(&console, "GET", MEDIA, Some(&ann_token), None).await;
@@ -35,6 +46,13 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
         {"id": "photos", "content_types": ["image/*"], "prefix": "photos/", "outputs": ["thumb", "web"]},
         {"id": "clips", "content_types": ["video/mp4"], "prefix": "", "outputs": ["720p", "poster"]}
     ]});
+    assert_eq!(
+        send(&console, "GET", MEDIA, Some(&bob_token), None)
+            .await
+            .status,
+        200,
+        "a reader of the bucket sees its media rules"
+    );
     let refused = send(
         &console,
         "PUT",
@@ -45,7 +63,7 @@ async fn the_bucket_s_configurer_sets_media_rules_and_a_bad_rule_is_refused() {
     .await;
     assert_eq!(
         refused.status, 403,
-        "a member without a grant does not configure the bucket"
+        "a grant to read and write does not configure the bucket"
     );
     let set = send(
         &console,

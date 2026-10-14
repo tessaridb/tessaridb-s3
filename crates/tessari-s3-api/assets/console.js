@@ -233,16 +233,16 @@
   //! only ever placed with `textContent` or as an attribute value; nothing here
   //! parses a string as markup.
   function el(tag, attributes = {}, ...children) {
-    const made = document.createElement(tag);
+    const made2 = document.createElement(tag);
     for (const [name, value] of Object.entries(attributes)) {
-      made.setAttribute(name, value);
+      made2.setAttribute(name, value);
     }
     for (const child of children) {
       if (child !== null && child !== false) {
-        made.append(child);
+        made2.append(child);
       }
     }
-    return made;
+    return made2;
   }
   function at(id) {
     const found = document.getElementById(id);
@@ -1134,11 +1134,156 @@
     return region;
   }
 
+  // src/media-model.ts
+  //! A bucket's media rules as the console sends and answers them: which uploads
+  //! (content types under a key prefix) get which renditions. The server checks a
+  //! rule set as a whole; this page only reads the answer and shapes the form.
+  var OUTPUTS = [
+    { name: "thumb", label: "Thumbnail", kind: "image" },
+    { name: "web", label: "Web image", kind: "image" },
+    { name: "720p", label: "720p video", kind: "video" },
+    { name: "poster", label: "Video poster", kind: "video" }
+  ];
+  var isOutput = (value) => OUTPUTS.some((output) => output.name === value);
+  function rule(v) {
+    if (!record(v) || !text(v["id"]) || !text(v["prefix"])) {
+      return null;
+    }
+    const types = list(v["content_types"], (entry) => text(entry) ? entry : null);
+    const outputs = list(v["outputs"], (entry) => isOutput(entry) ? entry : null);
+    return types === null || outputs === null ? null : { id: v["id"], content_types: types, prefix: v["prefix"], outputs };
+  }
+  function readMediaRules(v) {
+    return record(v) ? list(v["rules"], rule) : null;
+  }
+  var typesOf = (written) => written.split(",").map((part) => part.trim()).filter((part) => part !== "");
+
+  // src/bucket-media.ts
+  //! A bucket's media rules, inline under its row: anyone who reads the bucket
+  //! sees them, and whoever configures it changes them — the server decides which
+  //! one the signed-in key is. The rules are sent whole, so a repeated save
+  //! changes nothing; saving none turns media processing off.
+  var made = 0;
+  function ruleEditor(base, rule2, remove) {
+    made += 1;
+    const id = `${base}-${made}`;
+    const name = field(`${id}-id`, "Rule ID", { spellcheck: "false", autocomplete: "off", required: "" });
+    const types = field(`${id}-types`, "Content types", { spellcheck: "false", autocomplete: "off", required: "" }, "Comma-separated, such as image/* or video/mp4.");
+    const prefix = field(`${id}-prefix`, "Key prefix", { spellcheck: "false", autocomplete: "off" }, "Empty: every key in the bucket.");
+    const boxes = OUTPUTS.map((output) => {
+      const box3 = el("input", { id: `${id}-${output.name}`, type: "checkbox", value: output.name });
+      box3.checked = rule2?.outputs.includes(output.name) ?? false;
+      return { output, box: box3 };
+    });
+    name.input.value = rule2?.id ?? "";
+    types.input.value = rule2?.content_types.join(", ") ?? "";
+    prefix.input.value = rule2?.prefix ?? "";
+    const drop = el("button", { type: "button", class: "quiet" }, "Remove rule");
+    const box2 = el(
+      "fieldset",
+      { class: "card" },
+      el("legend", {}, "Rule"),
+      name.row,
+      types.row,
+      prefix.row,
+      el("fieldset", { class: "checks" }, el("legend", {}, "Outputs"), ...boxes.map(({ output, box: check2 }) => el("label", { class: "check", for: check2.id }, check2, output.label))),
+      el("div", { class: "actions" }, drop)
+    );
+    const editor = {
+      box: box2,
+      read: () => ({
+        id: name.input.value.trim(),
+        content_types: typesOf(types.input.value),
+        prefix: prefix.input.value,
+        outputs: boxes.filter(({ box: check2 }) => check2.checked).map(({ output }) => output.name)
+      })
+    };
+    drop.addEventListener("click", () => remove(editor));
+    return editor;
+  }
+  function mediaForm(screen, bucket2, close) {
+    const base = `media-${bucket2.name}`;
+    const said = el("div", { "aria-live": "polite" });
+    const body = el("div", {}, el("p", { class: "muted" }, "Reading the media rules…"));
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${base}-title` },
+      el("p", { id: `${base}-title` }, el("strong", {}, "Media: "), mono(bucket2.name)),
+      el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Without rules nothing is processed."),
+      body,
+      said
+    );
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    const route = `/buckets/${encodeURIComponent(bucket2.name)}/media`;
+    void call("GET", route, readMediaRules).then((answer) => {
+      if (!answer.ok) {
+        if (answer.status === 401) {
+          screen.signIn();
+          return;
+        }
+        const back = el("button", { type: "button", class: "quiet" }, "Close");
+        back.addEventListener("click", close);
+        fill(body, refusal(answer), el("div", { class: "actions" }, back));
+        back.focus();
+        return;
+      }
+      const editors = [];
+      const list2 = el("div", {});
+      const none = el("p", { class: "muted" }, "No rules: nothing in this bucket is processed.");
+      const show = () => {
+        none.hidden = editors.length > 0;
+      };
+      const remove = (editor) => {
+        editors.splice(editors.indexOf(editor), 1);
+        editor.box.remove();
+        show();
+        add.focus();
+      };
+      const append = (rule2) => {
+        const editor = ruleEditor(base, rule2, remove);
+        editors.push(editor);
+        list2.append(editor.box);
+        show();
+        return editor;
+      };
+      const add = el("button", { type: "button", class: "quiet" }, "Add rule");
+      add.addEventListener("click", () => append(null).box.querySelector("input")?.focus());
+      answer.value.forEach(append);
+      show();
+      const reason = field(`${base}-reason`, "Reason (optional)", { maxlength: "500" }, "Recorded with your key id.");
+      const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+      cancel.addEventListener("click", close);
+      fill(body, none, list2, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel));
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const why = reason.input.value.trim();
+        const rules = editors.map((editor) => editor.read());
+        const saved = await call("PUT", route, ignored, why === "" ? { rules } : { rules, reason: why });
+        if (saved.ok) {
+          announce(`Saved the media rules of ${bucket2.name}.`);
+          screen.redraw();
+          return;
+        }
+        if (saved.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(saved));
+      });
+      (editors[0]?.box.querySelector("input") ?? add).focus();
+    });
+    return form;
+  }
+
   // src/buckets.ts
   //! Buckets: find one (the list is complete, so filtering it here hides nothing
   //! the server sent), see how many objects and bytes each holds as last measured,
   //! create one from the form the header's button reveals, delete an empty one
-  //! with a reason, and — for operators — set its quota.
+  //! with a reason, see and set its media rules, and — for operators — set its quota.
   var TITLE2 = "Buckets";
   function createForm(screen, opener) {
     const name = field("new-bucket", "Bucket name", { spellcheck: "false", autocomplete: "off", required: "" }, "3-63 lowercase letters, digits, dots and hyphens.");
@@ -1200,6 +1345,7 @@
     const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket2.name}`, "danger");
     const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket2.name}`) : null;
     const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
+    const media = iconAction("image", "Media…", `Media rules of ${bucket2.name}`);
     const held = figures(usage, bucket2);
     const line = row(
       el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket2.name)),
@@ -1209,7 +1355,7 @@
       numeric(limits(bucket2)),
       moment(bucket2.created),
       mono(bucket2.region),
-      el("div", { class: "actions" }, upload, quota, remove)
+      el("div", { class: "actions" }, upload, media, quota, remove)
     );
     quota?.addEventListener("click", () => {
       const cell = el("td", { colspan: "8" });
@@ -1218,6 +1364,17 @@
         quotaForm(screen, bucket2, () => {
           region.remove();
           quota.focus();
+        })
+      );
+      line.after(region);
+    });
+    media.addEventListener("click", () => {
+      const cell = el("td", { colspan: "8" });
+      const region = el("tr", { class: "asking" }, cell);
+      cell.append(
+        mediaForm(screen, bucket2, () => {
+          region.remove();
+          media.focus();
         })
       );
       line.after(region);

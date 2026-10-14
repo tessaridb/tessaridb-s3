@@ -7,6 +7,13 @@ section records which TessariDB version its metadata runs on.
 
 - The console's empty states (no buckets yet, an empty bucket or folder) sit inset in their card like a table does,
   instead of against its edges.
+- Media rules per bucket, kept in the bucket's record: which content types under which key prefix get a
+  thumbnail, a web image, a 720p video or a poster. The console reads them at
+  `GET /api/v1/buckets/{bucket}/media` for whoever reads the bucket and sets them at `PUT` for whoever configures
+  it, refusing a rule set that names an output its content types cannot give, an unknown output, a repeated ID, a
+  prefix under `.renditions/` or more than 100 rules, with nothing stored; each change is recorded. A bucket's row in
+  the console has a Media action for them. A bucket with media rules records its changes like a bucket with a
+  notification configuration. Renditions are not made yet.
 - Groundwork for bucket notifications: in a bucket with a notification configuration, every object Put, Copy,
   CompleteMultipartUpload, Delete and delete-marker creation appends one message to the `object_events` topic, in the
   change's own commit, written by the metadata store's own events. A refused write records nothing. A version or
