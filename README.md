@@ -93,7 +93,7 @@ cargo deny check
 
 ## Running
 
-The metadata store is a TessariDB node, `0.33.2-beta` or later (`tessaridb/tessaridb:0.33.2-beta`): the listings page
+The metadata store is a TessariDB node, `0.33.2-beta` or later (`tessaridb/tessaridb:0.34.0-beta`): the listings page
 with a bound record cursor, which earlier releases refuse. The process reads its configuration from the environment:
 
 | Variable | Default | Meaning |
@@ -168,7 +168,7 @@ TESSARIDB_S3_TEST_META=127.0.0.1:9080 TESSARIDB_S3_TEST_META_USER=… TESSARIDB_
 
 With the same variables, `cargo test -p tessari-s3-node --test processes -- --ignored`
 starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them. The same command runs the fault
-tests, which need Docker and the `tessaridb/tessaridb:0.33.2-beta` image: they start their own three-node
+tests, which need Docker and the `tessaridb/tessaridb:0.34.0-beta` image: they start their own three-node
 TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
 traffic, then check that every acknowledged object reads back whole and nothing else is visible.
 
@@ -183,7 +183,7 @@ docker compose up -d --wait
 aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
 ```
 
-The database (`tessaridb/tessaridb:0.33.2-beta`) declares its owner from `.env` on first start and is reachable only
+The database (`tessaridb/tessaridb:0.34.0-beta`; a store an earlier image created opens unchanged and keeps its on-disk format until `ALTER STORE FINALIZE FORMAT` — run that only once no older image will open the store again) declares its owner from `.env` on first start and is reachable only
 from the S3 server over the compose network. A one-shot `s3-account` step (`docker/s3-account.sh`) signs in as that
 owner once to declare the namespace, the database and the server's own account; the server then signs in as `s3`,
 an editor of `s3.meta` that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put

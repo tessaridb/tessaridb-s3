@@ -7,7 +7,7 @@ use std::process::Command as BlockingCommand;
 use tokio::process::Command;
 
 /// The engine release the metadata runs on, as the README pins it.
-pub const IMAGE: &str = "tessaridb/tessaridb:0.33.2-beta";
+pub const IMAGE: &str = "tessaridb/tessaridb:0.34.0-beta";
 
 /// Runs `docker` with `args` and answers its standard output; any failure fails the test with docker's own words.
 pub async fn docker(args: &[&str]) -> String {

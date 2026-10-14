@@ -5,6 +5,8 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- The compose file and the process tests run TessariDB `0.34.0-beta`; the whole live suite passes against it.
+  The metadata store still needs `0.33.2-beta` or later.
 - Bucket lifecycle configuration: PutBucketLifecycleConfiguration, GetBucketLifecycleConfiguration
   (`NoSuchLifecycleConfiguration` when none) and DeleteBucketLifecycle. Rules filter by prefix and say Expiration
   (`Days`, `Date` at midnight UTC, or `ExpiredObjectDeleteMarker`), `NoncurrentVersionExpiration` (with
