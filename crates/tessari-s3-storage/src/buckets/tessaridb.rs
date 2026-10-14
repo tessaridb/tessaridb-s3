@@ -128,6 +128,19 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
+    async fn set_media(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        let script = match rules {
+            Some(rules) => {
+                parameters.push(("rules".to_owned(), rules));
+                "UPDATE buckets:$name SET media = $rules;"
+            }
+            None => "UPDATE buckets:$name SET media = NONE;",
+        };
+        self.pool.run(script, parameters).await?;
+        Ok(())
+    }
+
     async fn set_limits(
         &self,
         name: &BucketName,

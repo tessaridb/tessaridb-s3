@@ -29,6 +29,8 @@ pub struct BucketEntity {
     pub lifecycle: Option<Vec<Value>>,
     /// The notification configuration as stored; absent while none is set.
     pub notify: Option<Value>,
+    /// The media rules as stored; absent while none are set.
+    pub media: Option<Vec<Value>>,
 }
 
 impl BucketEntity {
@@ -84,6 +86,11 @@ impl BucketEntity {
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
             Some(_) => return Err(malformed("notify")),
         };
+        let media = match fields.get("media") {
+            None | Some(Value::None) => None,
+            Some(Value::Array(rules)) => Some(rules.clone()),
+            Some(_) => return Err(malformed("media")),
+        };
         let limit = |field: &'static str| match fields.get(field) {
             None | Some(Value::None) => Ok(None),
             Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
@@ -101,6 +108,7 @@ impl BucketEntity {
             versioning,
             lifecycle,
             notify,
+            media,
         })
     }
 }

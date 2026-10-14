@@ -2,6 +2,7 @@
 
 mod entity;
 mod lifecycle;
+mod media;
 mod model;
 mod notification;
 mod repository;

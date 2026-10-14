@@ -147,6 +147,24 @@ impl BucketService {
         Ok(true)
     }
 
+    /// Sets `name`'s media rules (already validated); no rules turns media processing off. `false` when there is no
+    /// such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_media(
+        &self,
+        name: &BucketName,
+        rules: &[tessari_s3_core::media::Rule],
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        let stored = (!rules.is_empty()).then(|| super::media::to_value(rules));
+        self.repository.set_media(name, stored).await?;
+        Ok(true)
+    }
+
     /// The buckets `visible` covers, in byte order of their names.
     ///
     /// # Errors

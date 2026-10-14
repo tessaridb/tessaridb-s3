@@ -60,6 +60,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         configuration: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s media rules, or removes them when `rules` is `None`.
+    fn set_media(
+        &self,
+        name: &BucketName,
+        rules: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;
     /// Whether any object record lies in `name`'s range.
     fn holds_objects(&self, name: &BucketName) -> impl Future<Output = Result<bool>> + Send;
