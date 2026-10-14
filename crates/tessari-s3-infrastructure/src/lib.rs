@@ -7,6 +7,7 @@ mod console_config;
 mod error;
 mod iam_config;
 mod kafka;
+pub mod media_image;
 mod meta_config;
 mod notify_config;
 pub mod peer;

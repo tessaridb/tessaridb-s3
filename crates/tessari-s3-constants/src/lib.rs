@@ -308,6 +308,16 @@ pub const MEDIA_RETRY_MAX_SECS: u64 = 600;
 /// Seconds between a media worker's reads when nothing was handed out.
 pub const MEDIA_POLL_SECS: u64 = 1;
 
+/// The largest original a media worker reads, in bytes: an image past it gets no renditions.
+pub const MEDIA_MAX_INPUT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The most pixels an original may declare before it is decoded — a small file can declare a huge image, and decoding
+/// it would take memory in proportion to the declaration.
+pub const MEDIA_MAX_PIXELS: u64 = 50_000_000;
+
+/// The JPEG quality image renditions are written at.
+pub const MEDIA_JPEG_QUALITY: u8 = 82;
+
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 
