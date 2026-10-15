@@ -5,6 +5,11 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Cluster members are admitted, not trusted: a node joins only as a founding member
+  (`TESSARIDB_S3_FOUNDING_MEMBERS`), when root approves it in the console, or with a one-time join token
+  (`TESSARIDB_S3_JOIN_TOKEN`), and root removes nodes for good. Internal mutual TLS is now required, each node's
+  certificate issued for `<node id>.peer.tessari-s3`; the cluster secret no longer signs internal requests and only
+  places data.
 - An applied layout is put into effect: each cluster member moves objects written under an older layout onto it —
   copying and verifying the shards whose node changes before switching the object, and removing the old shards once
   the reclaim grace has passed — at most `TESSARIDB_S3_MOVE_BYTES_PER_SEC` (default 32 MiB) a second. The console's
