@@ -16,6 +16,7 @@ mod signer;
 mod disk;
 mod docker;
 mod faults;
+mod join;
 mod meta;
 mod notify;
 mod requests;

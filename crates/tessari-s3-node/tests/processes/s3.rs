@@ -31,9 +31,9 @@ pub struct Meta {
     pub zones: Option<&'static [&'static str]>,
 }
 
-/// A certificate authority minted for one cluster and the peer credential it issues each of its `count` nodes,
-/// `<node>.peer.tessari-s3`: `ca.pem`, `<node>-cert.pem` and `<node>-key.pem` in a fresh directory the cluster
-/// removes when it is dropped.
+/// A certificate authority minted for one cluster and the peer credential it issues each of its `count` nodes and one
+/// more, `n<count + 1>`, for a node that asks to join later: `ca.pem`, `<node>-cert.pem` and `<node>-key.pem` in a
+/// fresh directory the cluster removes when it is dropped.
 fn internal_tls(count: usize) -> PathBuf {
     let dir = scratch("tls");
     std::fs::create_dir_all(&dir).expect("tls directory");
@@ -42,7 +42,7 @@ fn internal_tls(count: usize) -> PathBuf {
     let authority_key = rcgen::KeyPair::generate().expect("authority key");
     let authority = authority.self_signed(&authority_key).expect("authority");
     std::fs::write(dir.join("ca.pem"), authority.pem()).expect("ca written");
-    for n in 1..=count {
+    for n in 1..=count.saturating_add(1) {
         let key = rcgen::KeyPair::generate().expect("node key");
         let leaf = rcgen::CertificateParams::new(vec![format!("n{n}.peer.tessari-s3")])
             .expect("node parameters")
@@ -211,27 +211,48 @@ async fn launch(
     namespace: &str,
     name: &str,
     logs: &Path,
-    (s3, internal): (String, String),
+    addresses: (String, String),
     dir: PathBuf,
 ) -> Node {
+    spawn((meta, tls, namespace, logs), name, addresses, dir, &[])
+        .await
+        .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"))
+}
+
+/// Starts node `name` with the cluster's variables and then `extra`, which replace any of the same name; `Ok` once
+/// its S3 port accepts, `Err` with its log when the process ends first.
+async fn spawn(
+    (meta, tls, namespace, logs): (&Meta, &Path, &str, &Path),
+    name: &str,
+    (s3, internal): (String, String),
+    dir: PathBuf,
+    extra: &[(&str, &str)],
+) -> Result<Node, String> {
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(logs.join(format!("{name}.log")))
         .expect("log file");
-    let child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
         .env_clear()
         .envs(environment(
             meta, tls, namespace, name, &s3, &internal, &dir,
         ))
+        .envs(extra.iter().copied())
         .stdout(Stdio::from(log.try_clone().expect("log handle")))
         .stderr(Stdio::from(log))
         .kill_on_drop(true)
         .spawn()
         .expect("the binary starts");
     let started = Instant::now();
-    // A readiness signal, not a timing assertion: the port is polled until the process opens it or the deadline.
+    // A readiness signal, not a timing assertion: the port is polled until the process opens it, ends, or the
+    // deadline passes.
     while tokio::net::TcpStream::connect(&s3).await.is_err() {
+        if let Ok(Some(status)) = child.try_wait() {
+            std::fs::remove_dir_all(&dir).ok();
+            let log = std::fs::read_to_string(logs.join(format!("{name}.log"))).unwrap_or_default();
+            return Err(format!("{name} exited ({status}): {log}"));
+        }
         assert!(
             started.elapsed() < READY_WITHIN,
             "{name} did not open its S3 port within {READY_WITHIN:?}; see {}",
@@ -239,13 +260,13 @@ async fn launch(
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    Node {
+    Ok(Node {
         child,
         name: name.to_owned(),
         s3,
         internal,
         dir,
-    }
+    })
 }
 
 impl Cluster {
@@ -284,6 +305,33 @@ impl Cluster {
             tls,
             settings: meta,
         }
+    }
+
+    /// Starts one more node, `n<size + 1>`, holding the credential minted for it unless `extra` names other files, with
+    /// `extra` added to its variables; it becomes one of the cluster's nodes once it starts.
+    ///
+    /// # Errors
+    /// The node's log, when it refuses to start.
+    pub async fn join(&mut self, extra: &[(&str, &str)]) -> Result<(), String> {
+        let name = format!("n{}", size(&self.settings).saturating_add(1));
+        let addresses = (
+            format!("127.0.0.1:{}", free_port()),
+            format!("127.0.0.1:{}", free_port()),
+        );
+        let cluster = (
+            &self.settings,
+            self.tls.as_path(),
+            self.namespace.as_str(),
+            self.logs.as_path(),
+        );
+        let node = spawn(cluster, &name, addresses, scratch("data"), extra).await?;
+        self.nodes.push(node);
+        Ok(())
+    }
+
+    /// The path of this cluster's credential file `file` (`<node>-cert.pem`, `<node>-key.pem`).
+    pub fn credential(&self, file: &str) -> String {
+        self.tls.join(file).display().to_string()
     }
 
     /// Starts node `index` again as it was: its name, its addresses and its data directory.
