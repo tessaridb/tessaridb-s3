@@ -68,9 +68,13 @@ async fn main() -> anyhow::Result<()> {
         // Registered before serving, so a node is never answering requests the cluster does not know it exists for.
         storage
             .cluster()
-            .register(&cluster.node, &cluster.internal_advertise)
+            .register(
+                &cluster.node,
+                &cluster.internal_advertise,
+                cluster.zone.as_ref(),
+            )
             .await?;
-        tracing::info!(node = cluster.node.as_str(), code = %format_args!("{}+{}", cluster.code.data(), cluster.code.parity()), "registered with the cluster");
+        tracing::info!(node = cluster.node.as_str(), zone = cluster.zone.as_ref().map(|zone| zone.as_str()), code = %format_args!("{}+{}", cluster.code.data(), cluster.code.parity()), "registered with the cluster");
     }
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut daemons = JoinSet::new();

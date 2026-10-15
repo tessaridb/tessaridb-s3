@@ -1,4 +1,5 @@
-//! Topology in TessariDB: `s3_nodes:<node id>` per node and `layouts:<version>` per layout; every value is bound.
+//! Topology in TessariDB: `s3_nodes:<node id>` per node, `layouts:<version>` per layout and `layout_current:'cluster'`
+//! naming the version new objects are written under; every value is bound.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 
@@ -40,14 +41,19 @@ fn records(answers: Vec<Answer>) -> Result<Vec<Value>> {
 }
 
 impl ClusterRepository for TessariCluster {
-    async fn register(&self, node: &str, endpoint: &str) -> Result<()> {
+    async fn register(&self, node: &str, endpoint: &str, zone: Option<&str>) -> Result<()> {
         let parameters = vec![
             ("node".to_owned(), Value::String(node.to_owned())),
             ("endpoint".to_owned(), Value::String(endpoint.to_owned())),
+            (
+                "zone".to_owned(),
+                zone.map_or(Value::None, |zone| Value::String(zone.to_owned())),
+            ),
         ];
         self.pool
             .run(
-                "UPSERT s3_nodes:$node SET node = $node, endpoint = $endpoint, seen = time::now();",
+                "UPSERT s3_nodes:$node SET node = $node, endpoint = $endpoint, zone = $zone, \
+                 seen = time::now();",
                 parameters,
             )
             .await?;
@@ -59,7 +65,7 @@ impl ClusterRepository for TessariCluster {
         let answers = self
             .pool
             .run(
-                "SELECT node, endpoint FROM s3_nodes ORDER BY node LIMIT 256;",
+                "SELECT node, endpoint, zone FROM s3_nodes ORDER BY node LIMIT 256;",
                 Vec::new(),
             )
             .await?;
@@ -67,6 +73,32 @@ impl ClusterRepository for TessariCluster {
             .iter()
             .map(NodeEntity::from_value)
             .collect()
+    }
+
+    async fn current(&self) -> Result<Option<i64>> {
+        let answers = self
+            .pool
+            .run(
+                "SELECT version FROM ONLY layout_current:'cluster';",
+                Vec::new(),
+            )
+            .await?;
+        let Some(record) = first_record(answers.into_iter().next())? else {
+            return Ok(None);
+        };
+        match record {
+            Value::Object(fields) => match fields.get("version") {
+                Some(Value::Number(Number::Integer(version))) => Ok(Some(*version)),
+                _ => Err(Error::Malformed {
+                    record: "layout_current",
+                    reason: "version",
+                }),
+            },
+            _ => Err(Error::Malformed {
+                record: "layout_current",
+                reason: "not an object",
+            }),
+        }
     }
 
     async fn layout(&self, version: i64) -> Result<Option<LayoutEntity>> {
@@ -98,13 +130,12 @@ impl ClusterRepository for TessariCluster {
                 "parity".to_owned(),
                 Value::Number(Number::Integer(layout.parity)),
             ),
-            (
-                "nodes".to_owned(),
-                Value::Array(layout.nodes.iter().cloned().map(Value::String).collect()),
-            ),
+            ("sets".to_owned(), layout.sets_value()),
         ];
-        let script = "CREATE layouts:$version = { version: $version, data: $data, parity: $parity, nodes: $nodes, \
-                      created: time::now() };";
+        // One transaction: the first layout never exists without the pointer naming it, nor the pointer without it.
+        let script = "BEGIN; CREATE layouts:$version = { version: $version, data: $data, parity: $parity, \
+                      sets: $sets, created: time::now() }; CREATE layout_current:'cluster' = { version: $version }; \
+                      COMMIT;";
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(Proposed::Created),
             Err(error) if error.is_class(RefusalClass::Conflict) => Ok(Proposed::Exists),

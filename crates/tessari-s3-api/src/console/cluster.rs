@@ -8,6 +8,7 @@ use futures_util::stream::{self, StreamExt};
 use serde::Serialize;
 use tessari_s3_constants::{CONSOLE_BACKLOG_COUNT_MAX, ERASURE_MAX_WIDTH};
 use tessari_s3_core::authz::{Action, Principal};
+use tessari_s3_core::erasure::Layout;
 
 use super::ConsoleState;
 use super::access::allow;
@@ -17,8 +18,35 @@ use super::status::{BacklogView, MemberView, view};
 #[derive(Serialize)]
 struct LayoutView {
     version: u32,
-    /// The nodes in placement order: shard `i` of every object goes to the `i`-th.
-    nodes: Vec<String>,
+    /// The erasure sets: an object goes to one, chosen by a keyed hash of its data id, one shard per node.
+    sets: Vec<Vec<LayoutMemberView>>,
+}
+
+#[derive(Serialize)]
+struct LayoutMemberView {
+    node: String,
+    /// The zone the node was in when the layout was made; absent: a domain of its own.
+    zone: Option<String>,
+}
+
+impl From<&Layout> for LayoutView {
+    fn from(layout: &Layout) -> Self {
+        Self {
+            version: layout.version(),
+            sets: layout
+                .sets()
+                .iter()
+                .map(|set| {
+                    set.iter()
+                        .map(|member| LayoutMemberView {
+                            node: member.node().as_str().to_owned(),
+                            zone: member.zone().map(|zone| zone.as_str().to_owned()),
+                        })
+                        .collect()
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -61,17 +89,10 @@ pub(super) async fn cluster(
     let layout = match state.code() {
         Some(code) => storage
             .cluster()
-            .layout(code)
+            .current(code)
             .await?
-            .map(|layout| LayoutView {
-                version: layout.version(),
-                nodes: layout
-                    .sets()
-                    .iter()
-                    .flatten()
-                    .map(|member| member.node().as_str().to_owned())
-                    .collect(),
-            }),
+            .as_ref()
+            .map(LayoutView::from),
         None => None,
     };
     let backlog = storage

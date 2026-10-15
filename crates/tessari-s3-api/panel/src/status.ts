@@ -45,9 +45,15 @@ export function memberTable(members: readonly Member[]): HTMLElement {
     ? empty("No members are registered yet.")
     : table(
         "Cluster members",
-        ["Member", "State", "Disk", "Internal address"],
+        ["Member", "Zone", "State", "Disk", "Internal address"],
         members.map((member) =>
-          row(mono(member.node), state(member), member.drive === null ? "—" : meter(member.drive, `Disk space used on ${member.node}`), mono(member.endpoint)),
+          row(
+            mono(member.node),
+            member.zone === null ? "—" : mono(member.zone),
+            state(member),
+            member.drive === null ? "—" : meter(member.drive, `Disk space used on ${member.node}`),
+            mono(member.endpoint),
+          ),
         ),
       );
 }

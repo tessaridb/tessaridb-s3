@@ -3214,6 +3214,7 @@ dependencies = [
  "getrandom 0.4.3",
  "hkdf",
  "rustix",
+ "scc",
  "sha2",
  "tessari-s3-constants",
  "tessari-s3-core",

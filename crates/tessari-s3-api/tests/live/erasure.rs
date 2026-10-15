@@ -119,7 +119,7 @@ pub(crate) async fn member() -> Member {
     }
     storage
         .cluster()
-        .register(&NodeId::new("n1").expect("id"), "127.0.0.1:1")
+        .register(&NodeId::new("n1").expect("id"), "127.0.0.1:1", None)
         .await
         .expect("registered");
     let mut peers = Vec::new();
@@ -128,7 +128,7 @@ pub(crate) async fn member() -> Member {
         let node = NodeId::new(&format!("n{n}")).expect("id");
         storage
             .cluster()
-            .register(&node, &peer.address)
+            .register(&node, &peer.address, None)
             .await
             .expect("registered");
         peers.push(peer);

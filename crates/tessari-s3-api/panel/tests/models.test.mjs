@@ -6,17 +6,18 @@ const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, drive: own });
 
 test("a member says whether it answered and how full its drive is", () => {
-  const read = readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }, { node: "n2", endpoint: "127.0.0.1:2", answering: false, drive: null }]));
+  const read = readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", zone: "eu-1a", answering: true, drive }, { node: "n2", endpoint: "127.0.0.1:2", zone: null, answering: false, drive: null }]));
   assert.deepEqual(read?.members, [
-    { node: "n1", endpoint: "127.0.0.1:1", answering: true, drive },
-    { node: "n2", endpoint: "127.0.0.1:2", answering: false, drive: null },
+    { node: "n1", endpoint: "127.0.0.1:1", zone: "eu-1a", answering: true, drive },
+    { node: "n2", endpoint: "127.0.0.1:2", zone: null, answering: false, drive: null },
   ]);
+  assert.equal(readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }])), null, "the zone is always sent, null when none");
   assert.deepEqual(read?.drive, drive);
 });
 
 test("a member without its answer is not a status", () => {
-  assert.equal(readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", drive: null }])), null);
-  assert.equal(readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", answering: "yes", drive: null }])), null);
+  assert.equal(readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", zone: null, drive: null }])), null);
+  assert.equal(readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", zone: null, answering: "yes", drive: null }])), null);
 });
 
 test("a drive must carry three byte counts, or be null", () => {
@@ -73,14 +74,16 @@ test("the cluster view reads members, a layout or none, the backlog and the meta
   const cluster = {
     node: "n1",
     erasure: "2+1",
-    members: [{ node: "n1", endpoint: "127.0.0.1:1", answering: true, drive }],
-    layout: { version: 1, nodes: ["n1", "n2", "n3"] },
+    members: [{ node: "n1", endpoint: "127.0.0.1:1", zone: "a", answering: true, drive }],
+    layout: { version: 2, sets: [[{ node: "n1", zone: "a" }, { node: "n2", zone: "b" }, { node: "n3", zone: null }], [{ node: "n4", zone: "a" }, { node: "n5", zone: "b" }, { node: "n6", zone: "c" }]] },
     heal_backlog: { listed: 3, more: false, at_risk: 1 },
     metadata: { addresses: ["127.0.0.1:9080"] },
   };
   assert.deepEqual(readCluster(cluster), cluster);
   assert.deepEqual(readCluster({ ...cluster, node: null, erasure: null, members: null, layout: null })?.layout, null);
   assert.equal(readCluster({ ...cluster, metadata: { addresses: [1] } }), null);
+  assert.equal(readCluster({ ...cluster, layout: { version: 1, nodes: ["n1", "n2", "n3"] } }), null, "a layout is its sets");
+  assert.equal(readCluster({ ...cluster, layout: { version: 1, sets: [[{ node: "n1" }]] } }), null, "a set member always says its zone");
   assert.equal(readCluster({ ...cluster, heal_backlog: { listed: 3, more: false } }), null, "the at-risk count is always sent");
 });
 

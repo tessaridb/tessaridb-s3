@@ -461,17 +461,32 @@ async fn a_members_status_names_its_members_and_its_heal_backlog() {
         vec![true, true, false, true, true, true],
         "{cluster}"
     );
-    let mut placed: Vec<&str> = cluster["layout"]["nodes"]
+    let sets = cluster["layout"]["sets"]
         .as_array()
-        .expect("a layout on a member")
+        .expect("a layout on a member");
+    assert_eq!(sets.len(), 1, "{cluster}");
+    let mut placed: Vec<&str> = sets[0]
+        .as_array()
+        .expect("a set")
         .iter()
-        .map(|node| node.as_str().expect("node"))
+        .map(|member| {
+            assert_eq!(member["zone"], serde_json::Value::Null, "no zones named");
+            member["node"].as_str().expect("node")
+        })
         .collect();
     placed.sort_unstable();
     assert_eq!(
         placed,
         vec!["n1", "n2", "n3", "n4", "n5", "n6"],
         "{cluster}"
+    );
+    assert!(
+        cluster["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .all(|member| member["zone"] == serde_json::Value::Null),
+        "every member says its zone, here none: {cluster}"
     );
     assert_eq!(cluster["erasure"].as_str(), Some("4+2"));
     assert_eq!(

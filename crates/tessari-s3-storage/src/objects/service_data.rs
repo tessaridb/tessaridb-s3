@@ -58,9 +58,9 @@ impl ObjectService {
     /// Removes data `id`'s bytes: every shard from every node when it is erasure-coded, else its file.
     async fn remove_data(&self, id: [u8; 16]) -> Result<()> {
         if let Some(writes) = &self.erasure
-            && let Some(layout) = writes.sharded(id).await?
+            && writes.sharded(id).await?.is_some()
         {
-            return writes.remove(id, layout).await;
+            return writes.remove(id).await;
         }
         self.data.remove(id).await
     }

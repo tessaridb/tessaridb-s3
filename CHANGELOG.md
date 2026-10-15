@@ -5,6 +5,12 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Cluster members may name their failure domain with `TESSARIDB_S3_ZONE`. A layout now holds one or more erasure
+  sets, and no set puts more of one object's shards in one zone than its parity can lose; the first layout passes
+  over a node whose zone is already full. The layout record changed shape (`sets` of nodes with their zones) and a
+  `layout_current` record names the version new objects are written under, so a cluster's metadata from an earlier
+  build must start in a fresh namespace. The console's cluster view shows the sets, each node's zone and every
+  member's zone.
 - `TESSARIDB_S3_CONSOLE_KEY_SIGN_IN=root` makes the console provider-only: beside an identity provider, a user's access
   key no longer opens a console session (refused with `key_sign_in_disabled`; an earlier session ends at its next
   request), and the root key remains as the break-glass path. The default `all` keeps every key; the S3 API is not

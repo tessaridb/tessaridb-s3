@@ -9,7 +9,6 @@ use tessari_s3_core::erasure::{Code, Layout, PlacementKey, placement};
 use tessari_s3_infrastructure::ClusterSettings;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_types::NodeId;
-use tokio::sync::OnceCell;
 
 use super::read::ErasureReader;
 use super::repository::{ShardSet, ShardSetRepository};
@@ -30,8 +29,6 @@ pub(crate) struct ErasureWrites {
     peers: RemoteShards,
     pub(super) sets: TessariShardSets,
     stall: Duration,
-    /// Layouts never change once created, so the first one read is kept.
-    layout: OnceCell<Layout>,
 }
 
 impl ErasureWrites {
@@ -52,7 +49,6 @@ impl ErasureWrites {
             peers,
             sets: TessariShardSets::new(pool),
             stall: Duration::from_secs(SHARD_STALL_SECS),
-            layout: OnceCell::new(),
         }
     }
 
@@ -84,12 +80,18 @@ impl ErasureWrites {
         }
     }
 
-    async fn layout(&self) -> Result<&Layout> {
-        self.layout
-            .get_or_try_init(|| async {
-                self.cluster.layout(self.code).await?.ok_or(Error::NoLayout)
-            })
-            .await
+    /// The layout new objects are written under, read from the store for every write so a change applied on any
+    /// node is followed by the next write here.
+    async fn current(&self) -> Result<Layout> {
+        self.cluster
+            .current(self.code)
+            .await?
+            .ok_or(Error::NoLayout)
+    }
+
+    /// Layout `version`, which data written under it names.
+    pub(super) async fn version(&self, version: u32) -> Result<Layout> {
+        self.cluster.version(self.code, version).await
     }
 
     /// Where each shard of data `id` goes under `layout`: this node's drive, or the registered endpoint of a peer.
@@ -118,13 +120,13 @@ impl ErasureWrites {
     /// # Errors
     /// [`Error::NoLayout`], the metadata store's refusal or outage, or a plan that does not fit the code.
     pub(crate) async fn start(&self, id: [u8; 16], size: u64) -> Result<ErasureUpload> {
-        let layout = self.layout().await?;
+        let layout = self.current().await?;
         let set = ShardSet {
             layout: layout.version(),
             size,
         };
         self.sets.queue(id, set).await?;
-        let destinations = self.destinations(id, layout).await?;
+        let destinations = self.destinations(id, &layout).await?;
         let plan = ErasurePlan {
             id,
             code: self.code,
@@ -159,10 +161,10 @@ impl ErasureWrites {
         ErasureReader::new(Arc::clone(self), id, size, sources).map(Some)
     }
 
-    /// Data `id`'s shard set and where each of its shards is, when it is erasure-coded.
+    /// Data `id`'s shard set and where each of its shards is under the layout it names, when it is erasure-coded.
     ///
     /// # Errors
-    /// [`Error::Malformed`] for a layout this node does not hold, [`Error::NoLayout`], or the store's refusal.
+    /// [`Error::Malformed`] for a layout version nothing created, or the store's refusal.
     pub(super) async fn sources_of(
         &self,
         id: [u8; 16],
@@ -170,14 +172,8 @@ impl ErasureWrites {
         let Some(set) = self.sets.shard_set(id).await? else {
             return Ok(None);
         };
-        let layout = self.layout().await?;
-        if layout.version() != set.layout {
-            return Err(Error::Malformed {
-                record: "shard_sets",
-                reason: "a layout this node does not hold",
-            });
-        }
-        Ok(Some((set, self.destinations(id, layout).await?)))
+        let layout = self.version(set.layout).await?;
+        Ok(Some((set, self.destinations(id, &layout).await?)))
     }
 
     /// Lists data `id` for healing: it was acknowledged with fewer than every shard durable.
@@ -188,31 +184,33 @@ impl ErasureWrites {
         self.sets.heal(id).await
     }
 
-    /// Removes every shard of data `id` — written under layout `version` — from every node, then its shard-set
-    /// record, under this node's claim on the id so no healer writes a shard back behind it. A node that cannot be
-    /// reached leaves the record, so a later pass tries again.
+    /// Removes every shard of data `id` from every node, then its shard-set record, under this node's claim on the
+    /// id so no healer or mover writes a shard behind it. The layout is read under the claim: one read before it may
+    /// already have been moved on. A node that cannot be reached leaves the record, so a later pass tries again.
     ///
     /// # Errors
-    /// [`Error::Held`] while another node works on the id, [`Error::Malformed`] for a layout this node does not
-    /// hold, a peer's refusal or absence, or the store's.
-    pub(crate) async fn remove(&self, id: [u8; 16], version: u32) -> Result<()> {
+    /// [`Error::Held`] while another node works on the id, [`Error::Malformed`] for a layout version nothing
+    /// created, a peer's refusal or absence, or the store's.
+    pub(crate) async fn remove(&self, id: [u8; 16]) -> Result<()> {
         if !self.sets.claim(id, self.holder()).await? {
             return Err(Error::Held);
         }
-        let removed = self.remove_claimed(id, version).await;
+        let removed = self.remove_claimed(id).await;
         self.unclaim_logged(id).await;
         removed
     }
 
-    async fn remove_claimed(&self, id: [u8; 16], version: u32) -> Result<()> {
-        let layout = self.layout().await?;
-        if layout.version() != version {
-            return Err(Error::Malformed {
-                record: "shard_sets",
-                reason: "a layout this node does not hold",
-            });
-        }
-        for (index, destination) in self.destinations(id, layout).await?.into_iter().enumerate() {
+    async fn remove_claimed(&self, id: [u8; 16]) -> Result<()> {
+        let Some(set) = self.sets.shard_set(id).await? else {
+            return Ok(());
+        };
+        let layout = self.version(set.layout).await?;
+        for (index, destination) in self
+            .destinations(id, &layout)
+            .await?
+            .into_iter()
+            .enumerate()
+        {
             let shard = ShardRef {
                 id,
                 index: u16::try_from(index).map_err(|_| Error::InvalidShard {

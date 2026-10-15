@@ -44,11 +44,11 @@
     return record(v) && count(v["capacity"]) && count(v["free"]) && count(v["available"]) ? { capacity: v["capacity"], free: v["free"], available: v["available"] } : void 0;
   }
   function member(v) {
-    if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || typeof v["answering"] !== "boolean") {
+    if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || !textOrNull(v["zone"]) || typeof v["answering"] !== "boolean") {
       return null;
     }
     const space2 = drive(v["drive"]);
-    return space2 === void 0 ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space2 };
+    return space2 === void 0 ? null : { node: v["node"], endpoint: v["endpoint"], zone: v["zone"], answering: v["answering"], drive: space2 };
   }
   function readStatus(v) {
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
@@ -152,8 +152,9 @@
     if (v === null) {
       return null;
     }
-    const nodes = record(v) && count(v["version"]) ? names(v["nodes"]) : null;
-    return record(v) && count(v["version"]) && nodes !== null ? { version: v["version"], nodes } : void 0;
+    const placed = (entry) => record(entry) && text(entry["node"]) && textOrNull(entry["zone"]) ? { node: entry["node"], zone: entry["zone"] } : null;
+    const sets = record(v) && count(v["version"]) ? list(v["sets"], (set) => list(set, placed)) : null;
+    return record(v) && count(v["version"]) && sets !== null ? { version: v["version"], sets } : void 0;
   }
   function readCluster(v) {
     if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
@@ -1607,9 +1608,15 @@
   function memberTable(members) {
     return members.length === 0 ? empty("No members are registered yet.") : table(
       "Cluster members",
-      ["Member", "State", "Disk", "Internal address"],
+      ["Member", "Zone", "State", "Disk", "Internal address"],
       members.map(
-        (member2) => row(mono(member2.node), state(member2), member2.drive === null ? "—" : meter(member2.drive, `Disk space used on ${member2.node}`), mono(member2.endpoint))
+        (member2) => row(
+          mono(member2.node),
+          member2.zone === null ? "—" : mono(member2.zone),
+          state(member2),
+          member2.drive === null ? "—" : meter(member2.drive, `Disk space used on ${member2.node}`),
+          mono(member2.endpoint)
+        )
       )
     );
   }
@@ -1701,12 +1708,19 @@
       const why = cluster2.erasure === null ? "This node stores objects on its own." : "The layout is fixed once enough members have registered.";
       return el("section", { class: "card" }, el("h2", {}, "Layout"), el("p", { class: "muted" }, why));
     }
+    const { version, sets } = cluster2.layout;
     return el(
       "section",
       { class: "card" },
       el("h2", {}, "Layout"),
-      el("p", { class: "muted" }, `Version ${cluster2.layout.version}. Shard 1 of every object goes to the first node, shard 2 to the second, and so on.`),
-      el("ol", {}, ...cluster2.layout.nodes.map((node) => el("li", {}, mono(node))))
+      el(
+        "p",
+        { class: "muted" },
+        `Version ${version}. Each object goes to one erasure set, chosen from its data id, and each node of that set holds one of its shards; no set keeps more shards in one zone than it can lose.`
+      ),
+      ...sets.map(
+        (set, i) => el("div", {}, el("h3", {}, sets.length === 1 ? "Erasure set" : `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member2) => el("li", {}, mono(member2.node), member2.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member2.zone}`)))))
+      )
     );
   }
   async function cluster(screen) {

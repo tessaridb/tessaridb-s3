@@ -2,6 +2,7 @@
 //! other piece of metadata.
 
 mod entity;
+mod layouts;
 mod repository;
 mod service;
 mod tessaridb;

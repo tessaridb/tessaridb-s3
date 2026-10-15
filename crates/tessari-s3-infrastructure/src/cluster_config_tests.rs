@@ -169,3 +169,42 @@ fn internal_tls_is_three_files_read_together_or_none() {
     );
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
+
+#[test]
+fn a_node_names_its_zone_or_is_a_domain_of_its_own() {
+    let zone = |extra: &[(&'static str, &'static str)]| {
+        let mut vars = with(&CLUSTER);
+        vars.extend_from_slice(extra);
+        load(&vars).map(|config| {
+            config
+                .cluster
+                .expect("clustered")
+                .zone
+                .map(|zone| zone.as_str().to_owned())
+        })
+    };
+    assert_eq!(zone(&[]), Ok(None));
+    assert_eq!(
+        zone(&[("TESSARIDB_S3_ZONE", "eu-1a")]),
+        Ok(Some("eu-1a".to_owned()))
+    );
+    assert!(matches!(
+        zone(&[("TESSARIDB_S3_ZONE", "EU 1a")]),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_ZONE",
+            ..
+        })
+    ));
+    let mut stray = CREDENTIALS.to_vec();
+    stray.push(("TESSARIDB_S3_ZONE", "eu-1a"));
+    assert!(
+        matches!(
+            load(&stray).map(|_| ()),
+            Err(Error::InvalidConfig {
+                key: "TESSARIDB_S3_ERASURE",
+                ..
+            })
+        ),
+        "a zone without a cluster is a setting nobody reads"
+    );
+}

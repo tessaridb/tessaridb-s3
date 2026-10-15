@@ -26,6 +26,7 @@ hkdf.workspace = true
 sha2.workspace = true
 base64.workspace = true
 zeroize.workspace = true
+scc.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["time", "fs", "macros", "rt-multi-thread"] }

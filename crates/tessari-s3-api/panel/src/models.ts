@@ -4,7 +4,7 @@
 //! typed value or null.
 
 export type Drive = { readonly capacity: number; readonly free: number; readonly available: number };
-export type Member = { readonly node: string; readonly endpoint: string; readonly answering: boolean; readonly drive: Drive | null };
+export type Member = { readonly node: string; readonly endpoint: string; readonly zone: string | null; readonly answering: boolean; readonly drive: Drive | null };
 export type Backlog = { readonly listed: number; readonly more: boolean; readonly at_risk: number };
 export type Status = {
   readonly version: string;
@@ -93,7 +93,9 @@ export type Capabilities = {
   readonly view_cluster: boolean;
   readonly issue_upload_keys: boolean;
 };
-export type Layout = { readonly version: number; readonly nodes: readonly string[] };
+/** A node of a layout's erasure set and the zone it was in when the layout was made (null: a domain of its own). */
+export type LayoutMember = { readonly node: string; readonly zone: string | null };
+export type Layout = { readonly version: number; readonly sets: readonly (readonly LayoutMember[])[] };
 export type Cluster = {
   readonly node: string | null;
   readonly erasure: string | null;
@@ -153,11 +155,11 @@ function drive(v: unknown): Drive | null | undefined {
 }
 
 function member(v: unknown): Member | null {
-  if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || typeof v["answering"] !== "boolean") {
+  if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || !textOrNull(v["zone"]) || typeof v["answering"] !== "boolean") {
     return null;
   }
   const space = drive(v["drive"]);
-  return space === undefined ? null : { node: v["node"], endpoint: v["endpoint"], answering: v["answering"], drive: space };
+  return space === undefined ? null : { node: v["node"], endpoint: v["endpoint"], zone: v["zone"], answering: v["answering"], drive: space };
 }
 
 export function readStatus(v: unknown): Status | null {
@@ -310,8 +312,9 @@ function layout(v: unknown): Layout | null | undefined {
   if (v === null) {
     return null;
   }
-  const nodes = record(v) && count(v["version"]) ? names(v["nodes"]) : null;
-  return record(v) && count(v["version"]) && nodes !== null ? { version: v["version"], nodes } : undefined;
+  const placed = (entry: unknown): LayoutMember | null => (record(entry) && text(entry["node"]) && textOrNull(entry["zone"]) ? { node: entry["node"], zone: entry["zone"] } : null);
+  const sets = record(v) && count(v["version"]) ? list(v["sets"], (set) => list(set, placed)) : null;
+  return record(v) && count(v["version"]) && sets !== null ? { version: v["version"], sets } : undefined;
 }
 
 export function readCluster(v: unknown): Cluster | null {

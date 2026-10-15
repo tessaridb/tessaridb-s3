@@ -41,6 +41,8 @@ impl From<DriveSpace> for DriveView {
 pub(super) struct MemberView {
     node: String,
     endpoint: String,
+    /// Its failure domain; absent when it names none and is a domain of its own.
+    zone: Option<String>,
     /// Whether it answered a signed probe just now; this node answers by serving the request.
     answering: bool,
     /// Its data drive's space; absent when it did not answer or stores no data.
@@ -138,6 +140,7 @@ pub(super) async fn view(
     MemberView {
         node: member.node.as_str().to_owned(),
         endpoint: member.endpoint,
+        zone: member.zone.map(|zone| zone.as_str().to_owned()),
         answering,
         drive: drive.map(DriveView::from),
     }

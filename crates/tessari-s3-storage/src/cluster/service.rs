@@ -1,33 +1,37 @@
-//! Topology rules: a node registers itself, and the first layout is the one every node computes from the same
-//! registrations — whichever proposal commits first is the layout, and a node that lost the race reads it back.
+//! Topology rules: a node registers itself with its zone; the first layout is the one every node computes from the
+//! same registrations — whichever proposal commits first is the layout, and a node that lost the race reads it
+//! back — and `layout_current` names the version new objects are written under. Versions never change once
+//! created, so each is read from the store once.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use tessari_s3_constants::LAYOUT_PROPOSE_ATTEMPTS;
-use tessari_s3_core::erasure::{Code, Layout, LayoutNode};
-use tessari_s3_infrastructure::tessaridb::RefusalClass;
-use tessari_s3_types::NodeId;
+use tessari_s3_core::erasure::{Code, Layout};
+use tessari_s3_types::{NodeId, Zone};
 
-use super::entity::LayoutEntity;
-use super::repository::{ClusterRepository, Proposed};
+use super::layouts::{Layouts, current_of, version_of};
+use super::repository::ClusterRepository;
 use super::tessaridb::TessariCluster;
 use crate::data::DriveSpace;
 use crate::peers::RemoteShards;
 use crate::{Error, Result};
 
-/// A registered node and where its internal surface answers.
+/// A registered node, where its internal surface answers, and its failure domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
     /// The node.
     pub node: NodeId,
     /// `host:port` of its internal surface.
     pub endpoint: String,
+    /// Its zone; `None`: a domain of its own.
+    pub zone: Option<Zone>,
 }
 
 /// Topology operations.
 #[derive(Clone)]
 pub struct ClusterService {
     repository: TessariCluster,
+    layouts: Layouts,
     /// The client reaching other members, on a cluster member only.
     peers: Option<RemoteShards>,
 }
@@ -35,9 +39,10 @@ pub struct ClusterService {
 impl ClusterService {
     /// The service over `repository`.
     #[must_use]
-    pub const fn new(repository: TessariCluster) -> Self {
+    pub fn new(repository: TessariCluster) -> Self {
         Self {
             repository,
+            layouts: Arc::default(),
             peers: None,
         }
     }
@@ -73,12 +78,14 @@ impl ClusterService {
         }
     }
 
-    /// Registers `node` at `endpoint`, or refreshes its registration.
+    /// Registers `node` at `endpoint` in `zone`, or refreshes its registration.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
-    pub async fn register(&self, node: &NodeId, endpoint: &str) -> Result<()> {
-        self.repository.register(node.as_str(), endpoint).await
+    pub async fn register(&self, node: &NodeId, endpoint: &str, zone: Option<&Zone>) -> Result<()> {
+        self.repository
+            .register(node.as_str(), endpoint, zone.map(Zone::as_str))
+            .await
     }
 
     /// Registered nodes in id order.
@@ -89,121 +96,44 @@ impl ClusterService {
         members(&self.repository).await
     }
 
-    /// The cluster's layout under `code`: the stored one, or the first one once enough nodes have registered
-    /// (`None` until then).
+    /// The layout new objects are written under: the one the current version names, or the first one once enough
+    /// nodes in enough zones have registered (`None` until then).
     ///
     /// # Errors
-    /// [`crate::Error::LayoutMismatch`] when the stored layout uses another code; the store's refusal or outage.
-    pub async fn layout(&self, code: Code) -> Result<Option<Layout>> {
-        layout_of(&self.repository, code).await
+    /// [`crate::Error::LayoutMismatch`] when a stored layout uses another code; the store's refusal or outage.
+    pub async fn current(&self, code: Code) -> Result<Option<Layout>> {
+        current_of(&self.repository, &self.layouts, code).await
+    }
+
+    /// Layout `version`, which objects written under it name.
+    ///
+    /// # Errors
+    /// [`crate::Error::Malformed`] when no such layout exists; [`crate::Error::LayoutMismatch`]; the store's refusal
+    /// or outage.
+    pub async fn version(&self, code: Code, version: u32) -> Result<Layout> {
+        version_of(&self.repository, &self.layouts, code, version).await
     }
 }
 
 /// Registered nodes in id order.
-async fn members(repository: &impl ClusterRepository) -> Result<Vec<Member>> {
+pub(super) async fn members(repository: &impl ClusterRepository) -> Result<Vec<Member>> {
+    let malformed = |reason| Error::Malformed {
+        record: "node",
+        reason,
+    };
     repository
         .nodes()
         .await?
         .into_iter()
         .map(|entity| {
-            let node = NodeId::new(&entity.node).map_err(|_| Error::Malformed {
-                record: "node",
-                reason: "node id",
-            })?;
             Ok(Member {
-                node,
+                node: NodeId::new(&entity.node).map_err(|_| malformed("node id"))?,
                 endpoint: entity.endpoint,
+                zone: entity
+                    .zone
+                    .map(|zone| Zone::new(&zone).map_err(|_| malformed("zone")))
+                    .transpose()?,
             })
         })
         .collect()
 }
-
-/// The stored first layout, or this node's proposal for it; a proposal that lost the race reads back the winner.
-async fn layout_of(repository: &impl ClusterRepository, code: Code) -> Result<Option<Layout>> {
-    if let Some(stored) = repository.layout(FIRST_VERSION).await? {
-        return held(&stored, code).map(Some);
-    }
-    let members = members(repository).await?;
-    let Some(proposal) = Layout::first(
-        code,
-        members
-            .into_iter()
-            .map(|member| LayoutNode::new(member.node, None)),
-    ) else {
-        return Ok(None);
-    };
-    let entity = LayoutEntity {
-        version: FIRST_VERSION,
-        data: i64::from(code.data()),
-        parity: i64::from(code.parity()),
-        nodes: proposal
-            .sets()
-            .iter()
-            .flatten()
-            .map(|member| member.node().as_str().to_owned())
-            .collect(),
-    };
-    match propose(repository, &entity).await? {
-        Proposed::Created => Ok(Some(proposal)),
-        // Another node's proposal committed first; it is the layout, whatever this node computed.
-        Proposed::Exists => match repository.layout(FIRST_VERSION).await? {
-            Some(stored) => held(&stored, code).map(Some),
-            None => Err(Error::Malformed {
-                record: "layout",
-                reason: "refused as existing, then not found",
-            }),
-        },
-    }
-}
-
-/// Proposes `entity`, again when the store answers `retry`: another node's proposal committed after this one's
-/// snapshot, and the next attempt is answered that the layout exists. Bounded, so a store that keeps answering
-/// `retry` is reported rather than waited on.
-async fn propose(repository: &impl ClusterRepository, entity: &LayoutEntity) -> Result<Proposed> {
-    let mut attempt: u32 = 1;
-    loop {
-        match repository.propose(entity).await {
-            Err(Error::Meta(error))
-                if error.is_class(RefusalClass::Retry) && attempt < LAYOUT_PROPOSE_ATTEMPTS =>
-            {
-                tracing::debug!(attempt, error = %error, "layout proposal contended; proposing again");
-                attempt = attempt.saturating_add(1);
-            }
-            outcome => return outcome,
-        }
-    }
-}
-
-/// The only version SG5 creates; later versions are an operator's act.
-const FIRST_VERSION: i64 = 1;
-
-/// A stored layout as this node may use it: under the code it is configured with, and well formed.
-fn held(stored: &LayoutEntity, code: Code) -> Result<Layout> {
-    if stored.data != i64::from(code.data()) || stored.parity != i64::from(code.parity()) {
-        return Err(Error::LayoutMismatch {
-            stored_data: stored.data,
-            stored_parity: stored.parity,
-            data: code.data(),
-            parity: code.parity(),
-        });
-    }
-    let malformed = |reason| Error::Malformed {
-        record: "layout",
-        reason,
-    };
-    let version = u32::try_from(stored.version).map_err(|_| malformed("version"))?;
-    let nodes = stored
-        .nodes
-        .iter()
-        .map(|id| {
-            NodeId::new(id)
-                .map(|node| LayoutNode::new(node, None))
-                .map_err(|_| malformed("node id"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Layout::new(version, code, vec![nodes]).map_err(|_| malformed("shape"))
-}
-
-#[cfg(test)]
-#[path = "service_tests.rs"]
-mod tests;

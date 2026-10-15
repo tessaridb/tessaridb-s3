@@ -2,7 +2,7 @@
 //! cluster it cannot serve.
 
 use tessari_s3_constants::{CLUSTER_SECRET_MIN_LEN, DEFAULT_HEAL_INTERVAL_SECS};
-use tessari_s3_types::{Code, NodeId, SecretKey};
+use tessari_s3_types::{Code, NodeId, SecretKey, Zone};
 
 use crate::config::{ClusterSettings, parse_positive};
 use crate::tls::InternalTls;
@@ -50,7 +50,8 @@ fn internal_tls(get: &impl Fn(&str) -> Option<String>) -> Result<Option<Internal
 }
 
 /// `TESSARIDB_S3_ERASURE` with `_NODE_ID`, `_INTERNAL_LISTEN`, `_INTERNAL_ADVERTISE`, `_CLUSTER_SECRET` and
-/// `TESSARIDB_S3_DATA_DIR`; no code means a node on its own, which may still have a data directory.
+/// `TESSARIDB_S3_DATA_DIR`, and optionally `_ZONE`; no code means a node on its own, which may still have a data
+/// directory.
 pub(crate) fn cluster_settings(
     get: &impl Fn(&str) -> Option<String>,
 ) -> Result<Option<ClusterSettings>> {
@@ -59,6 +60,7 @@ pub(crate) fn cluster_settings(
             .iter()
             .take(4)
             .chain(TLS.iter())
+            .chain(std::iter::once(&"TESSARIDB_S3_ZONE"))
             .any(|key| get(key).is_some());
         return if stray {
             Err(Error::InvalidConfig {
@@ -103,6 +105,16 @@ pub(crate) fn cluster_settings(
             "shorter than 32 bytes",
         ));
     }
+    let zone = get("TESSARIDB_S3_ZONE")
+        .map(|zone| {
+            Zone::new(zone.trim()).map_err(|_| {
+                invalid(
+                    "TESSARIDB_S3_ZONE",
+                    "1 to 32 lowercase letters, digits and inner hyphens",
+                )
+            })
+        })
+        .transpose()?;
     let heal_interval_secs = parse_positive(
         get("TESSARIDB_S3_HEAL_INTERVAL_SECS"),
         "TESSARIDB_S3_HEAL_INTERVAL_SECS",
@@ -116,6 +128,7 @@ pub(crate) fn cluster_settings(
         internal_listen,
         internal_advertise,
         secret: SecretKey::new(secret),
+        zone,
         heal_interval_secs,
         tls: internal_tls(get)?,
     }))

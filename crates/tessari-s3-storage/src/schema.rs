@@ -17,8 +17,9 @@ use crate::Result;
 /// object's (`upload`, `parts`); when the object is overwritten or deleted, `parts_released` removes them, and each
 /// removal queues its file. Each open upload also has a `pending` record whose id orders the uploads as
 /// ListMultipartUploads lists them; whatever deletes the upload drops it in the same transaction (`upload_closed`).
-/// The cluster's topology lives here too: `s3_nodes` (one record per node, refreshed as it registers) and `layouts`
-/// (one record per layout version, created once and never rewritten). On a cluster member every data id is
+/// The cluster's topology lives here too: `s3_nodes` (one record per node and its zone, refreshed as it registers),
+/// `layouts` (one record per layout version — its erasure sets, each node with its zone — created once and never
+/// rewritten) and `layout_current:'cluster'` (the version new objects are written under). On a cluster member every data id is
 /// erasure-coded and `shard_sets` records the layout its shards were placed under, from the transaction that queues
 /// the id until reclamation; the `heal_queue` hands out the data ids acknowledged with fewer than every shard durable
 /// (or found damaged by a read), one healer at a time, and the `heal_claims` space holds the expiring claim of the
@@ -107,9 +108,10 @@ DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
 DEFINE INDEX IF NOT EXISTS by_pending_initiated ON pending FIELDS initiated;
 DEFINE EVENT IF NOT EXISTS upload_closed ON uploads FOR DELETE WHEN $before.position != NONE \
 THEN { LET $listed = $before.position; DELETE pending:$listed; };
-DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUIRED, seen datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS s3_nodes (node string REQUIRED, endpoint string REQUIRED, zone string, seen datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS layouts (\
- version int REQUIRED, data int REQUIRED, parity int REQUIRED, nodes array REQUIRED, created datetime REQUIRED);
+ version int REQUIRED, data int REQUIRED, parity int REQUIRED, sets array REQUIRED, created datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS layout_current (version int REQUIRED);
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS data ON heal_queue TYPE uuid REQUIRED;

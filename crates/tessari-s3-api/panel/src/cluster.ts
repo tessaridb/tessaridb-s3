@@ -16,12 +16,19 @@ function layoutCard(cluster: Cluster): HTMLElement {
     const why = cluster.erasure === null ? "This node stores objects on its own." : "The layout is fixed once enough members have registered.";
     return el("section", { class: "card" }, el("h2", {}, "Layout"), el("p", { class: "muted" }, why));
   }
+  const { version, sets } = cluster.layout;
   return el(
     "section",
     { class: "card" },
     el("h2", {}, "Layout"),
-    el("p", { class: "muted" }, `Version ${cluster.layout.version}. Shard 1 of every object goes to the first node, shard 2 to the second, and so on.`),
-    el("ol", {}, ...cluster.layout.nodes.map((node) => el("li", {}, mono(node)))),
+    el(
+      "p",
+      { class: "muted" },
+      `Version ${version}. Each object goes to one erasure set, chosen from its data id, and each node of that set holds one of its shards; no set keeps more shards in one zone than it can lose.`,
+    ),
+    ...sets.map((set, i) =>
+      el("div", {}, el("h3", {}, sets.length === 1 ? "Erasure set" : `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member) => el("li", {}, mono(member.node), member.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member.zone}`))))),
+    ),
   );
 }
 

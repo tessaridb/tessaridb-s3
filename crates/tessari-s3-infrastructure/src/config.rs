@@ -76,6 +76,8 @@ pub struct ClusterSettings {
     pub internal_advertise: String,
     /// `TESSARIDB_S3_CLUSTER_SECRET` — the key internal requests are signed with (at least 32 bytes).
     pub secret: SecretKey,
+    /// `TESSARIDB_S3_ZONE` — the failure domain this node is in; `None`: a domain of its own.
+    pub zone: Option<tessari_s3_types::Zone>,
     /// `TESSARIDB_S3_HEAL_INTERVAL_SECS` — time between healing passes (positive).
     pub heal_interval_secs: u64,
     /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS; `None` speaks in the
