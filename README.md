@@ -253,29 +253,29 @@ compared.
 
 ## Performance
 
-These are the first measured numbers, with the conditions they were taken under. They describe one laptop, not a
+These are measured numbers for `0.0.1-alpha`, with the conditions they were taken under. They describe one laptop, not a
 production deployment.
 
-The set-up was six `tessaridb-s3` processes as one 4+2 cluster on a single Apple-silicon Mac (10 CPUs). All six
-data directories sat on its one internal SSD. The metadata store was a fresh TessariDB `0.34.0-beta` node in Docker
-Desktop. Every request went through one node, the release build was used, and reads hit a warm page cache. The
+The set-up was six `tessaridb-s3` processes as one 4+2 cluster on a single Apple-silicon Mac (10 CPUs), speaking
+mutual TLS to each other. All six data directories sat on its one internal SSD. The metadata store was a fresh
+TessariDB `0.34.2-beta` node in Docker Desktop. Every request went through one node, the release build was used, and reads hit a warm page cache. The
 table gives the median of three runs. In every run, each GET returned exactly the bytes that were PUT.
 
 | | 4 KiB | 1 MiB | 64 MiB |
 |---|---|---|---|
-| PUT, one client | 81 ms | 83 ms | 525 ms |
-| PUT, most per second | 24 (from 4 clients) | 24 | 3.5 (≈ 220 MiB/s) |
-| GET, one client | 2.3 ms | 2.7 ms | 59 ms |
-| GET, most per second | ≈ 2,200 | ≈ 1,640 (MiB/s) | ≈ 34 (≈ 2,150 MiB/s) |
-| HEAD, most per second | ≈ 16,000 | ≈ 15,500 | ≈ 8,600 |
-| DELETE, one client / most per second | 3.9 ms / ≈ 850 | 3.9 ms / ≈ 820 | 4.1 ms / ≈ 710 |
+| PUT, one client | 74 ms | 76 ms | 503 ms |
+| PUT, most per second | 25 (from 16 clients) | 24 | 4.3 (≈ 277 MiB/s) |
+| GET, one client | 2.4 ms | 3.0 ms | 68 ms |
+| GET, most per second | ≈ 1,690 | ≈ 1,390 (MiB/s) | ≈ 30 (≈ 1,900 MiB/s) |
+| HEAD, most per second | ≈ 15,200 | ≈ 14,400 | ≈ 10,900 |
+| DELETE, one client / most per second | 2.9 ms / ≈ 1,510 | 3.1 ms / ≈ 1,390 | 3.2 ms / ≈ 1,310 |
 
-On this machine, writes are limited by the drive. Every PUT syncs its six shard files, and on macOS each sync
-flushes the whole drive's cache. Six "nodes" sharing one drive therefore wait on each other. With the data
-directories moved to a RAM disk, the same 4 KiB PUT took 18 ms and reached 149 per second. A cluster whose nodes have
-their own drives is not limited this way, but it has not been measured yet.
+On this machine, writes are limited by the drive. Every PUT syncs its six shard files, and on macOS each sync flushes
+the whole drive's cache. Six "nodes" sharing one drive therefore wait on each other. On an earlier build (before
+internal TLS), with the data directories moved to a RAM disk, the 4 KiB PUT took 18 ms and reached 149 per second. A
+cluster whose nodes have their own drives is not limited this way, but it has not been measured yet.
 
-With one node of the six stopped, every request still succeeded. Reads took about twice as long, because a missing
+On that earlier build, with one node of the six stopped, every request still succeeded. Reads took about twice as long, because a missing
 shard is rebuilt from parity on every read. Writes were about 10 % faster, because there was one shard file fewer
 to sync.
 
