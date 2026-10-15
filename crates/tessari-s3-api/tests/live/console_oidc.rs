@@ -7,7 +7,7 @@
 use serde_json::Value;
 use tessari_s3_api::{ApiState, ConsoleState};
 use tessari_s3_core::authz::{Role, SpaceName};
-use tessari_s3_infrastructure::OidcSettings;
+use tessari_s3_infrastructure::{KeySignIn, OidcSettings};
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::users::NewUser;
 use tessari_s3_types::SecretKey;
@@ -23,6 +23,17 @@ pub(crate) async fn console_with(
     provider: &Provider,
     webhook: Option<String>,
 ) -> (ConsoleState, Storage) {
+    let (mut consoles, storage) = consoles_with(provider, webhook, &[KeySignIn::All]).await;
+    (consoles.remove(0), storage)
+}
+
+/// One console per entry of `modes`, all over one fresh store and one root credential, so a session issued by one
+/// is presented to another as it would be after a restart with the other setting.
+pub(crate) async fn consoles_with(
+    provider: &Provider,
+    webhook: Option<String>,
+    modes: &[KeySignIn],
+) -> (Vec<ConsoleState>, Storage) {
     let mut config = live_config(test_node(), None, &scratch_dir());
     let console = config.console.as_mut().expect("a console");
     // These tests start more sign-ins a minute, from one address, than the default limit lets through.
@@ -34,6 +45,7 @@ pub(crate) async fn console_with(
         redirect_uri: REDIRECT.to_owned(),
         mfa_amr: vec!["mfa".to_owned()],
         break_glass_webhook: webhook,
+        key_sign_in: KeySignIn::All,
     });
     let storage = prepared(&config).await;
     let alpha = SpaceName::new("alpha").expect("a space name");
@@ -52,10 +64,23 @@ pub(crate) async fn console_with(
             .await
             .expect("user");
     }
-    let console = ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
-        .expect("built")
-        .expect("a console is configured");
-    (console, storage)
+    let consoles = modes
+        .iter()
+        .map(|mode| {
+            let mut config = config.clone();
+            if let Some(oidc) = config
+                .console
+                .as_mut()
+                .and_then(|console| console.oidc.as_mut())
+            {
+                oidc.key_sign_in = *mode;
+            }
+            ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
+                .expect("built")
+                .expect("a console is configured")
+        })
+        .collect();
+    (consoles, storage)
 }
 
 /// Starts a sign-in: the provider's authorization URL and the state in it.
@@ -274,4 +299,5 @@ async fn without_an_identity_provider_there_is_no_such_route() {
     let methods = send(&console, "GET", "/api/v1/auth/methods", None, None).await;
     assert_eq!(methods.status, 200);
     assert_eq!(methods.json()["provider"], Value::Bool(false));
+    assert_eq!(methods.json()["keys"], Value::from("all"));
 }

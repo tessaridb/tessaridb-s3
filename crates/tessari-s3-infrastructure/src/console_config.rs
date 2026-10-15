@@ -41,6 +41,17 @@ pub struct OidcSettings {
     pub mfa_amr: Vec<String>,
     /// `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK` — where a root sign-in is announced as it happens, if anywhere.
     pub break_glass_webhook: Option<String>,
+    /// `TESSARIDB_S3_CONSOLE_KEY_SIGN_IN` — which access keys still open a console session beside the provider.
+    pub key_sign_in: KeySignIn,
+}
+
+/// Which access keys open a console session where an identity provider is configured. The S3 API is not affected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeySignIn {
+    /// `all` — a user's key and the root key, as without a provider.
+    All,
+    /// `root` — people sign in through the provider only; the root key remains, as the emergency path.
+    Root,
 }
 
 const LISTEN: &str = "TESSARIDB_S3_CONSOLE_LISTEN";
@@ -97,4 +108,4 @@ fn read(key: &'static str, path: &str) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 #[path = "console_config_tests.rs"]
-mod tests;
+pub(crate) mod tests;

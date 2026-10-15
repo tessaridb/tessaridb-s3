@@ -22,7 +22,7 @@ pub mod tls;
 mod webhook;
 
 pub use config::{ClusterSettings, S3Config};
-pub use console_config::{ConsoleSettings, OidcSettings};
+pub use console_config::{ConsoleSettings, KeySignIn, OidcSettings};
 pub use error::{Error, Result};
 pub use kafka::KafkaProducer;
 pub use notify_config::{NotifyEndpoint, NotifyTarget};

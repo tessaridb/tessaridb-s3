@@ -2267,11 +2267,15 @@
   //! What the sign-in page is told before anyone signs in: whether this node offers signing in through an identity
   //! provider, besides signing in with a key.
   function readMethods(v) {
-    if (typeof v !== "object" || v === null || !("provider" in v)) {
+    if (typeof v !== "object" || v === null || !("provider" in v) || !("keys" in v)) {
       return null;
     }
     const provider = v.provider;
-    return typeof provider === "boolean" ? { provider } : null;
+    const keys2 = v.keys;
+    if (typeof provider !== "boolean" || keys2 !== "all" && keys2 !== "root") {
+      return null;
+    }
+    return { provider, keys: keys2 };
   }
   var PROVIDER_SIGN_IN = "/api/v1/auth/oidc/start?fresh=true";
 
@@ -2280,17 +2284,33 @@
   //! node's root key or a key issued to a user. The secret goes to the server once; what the browser keeps is an
   //! HttpOnly session cookie it cannot read, and the fields are cleared as soon as the answer arrives. Beside a
   //! provider the root key is the emergency path: the server asks for a reason, and the form then shows that field.
-  async function providerChoice() {
+  async function providerChoice(keyForm) {
     const methods = await call("GET", "/auth/methods", readMethods);
     if (!methods.ok || !methods.value.provider) {
       return null;
     }
-    return el(
-      "div",
-      {},
-      el("a", { class: "button primary provider", href: PROVIDER_SIGN_IN }, "Sign in with your organisation"),
-      el("p", { class: "muted" }, "or with an access key")
-    );
+    const provider = el("a", { class: "button primary provider", href: PROVIDER_SIGN_IN }, "Sign in with your organisation");
+    if (methods.value.keys === "all") {
+      return {
+        choice: el("div", {}, provider, el("p", { class: "muted" }, "or with an access key")),
+        intro: "Sign in through your organisation. An access key also works: one issued to your user, or this node's root key in an emergency."
+      };
+    }
+    for (const part of keyForm) {
+      part.hidden = true;
+    }
+    const emergency = el("button", { type: "button", class: "link" }, "Emergency sign-in with the root key");
+    emergency.addEventListener("click", () => {
+      for (const part of keyForm) {
+        part.hidden = false;
+      }
+      emergency.hidden = true;
+      keyForm[0]?.querySelector("input")?.focus();
+    });
+    return {
+      choice: el("div", {}, provider, el("p", { class: "muted" }, emergency)),
+      intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
+    };
   }
   function signIn(main2, done) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
@@ -2343,11 +2363,11 @@
     });
     fill(main2, el("div", { class: "gate" }, form));
     key.input.focus();
-    void providerChoice().then((offered) => {
+    void providerChoice([key.row, secret.row, submit]).then((offered) => {
       if (offered !== null) {
-        fill(intro, "Sign in through your organisation. An access key also works: one issued to your user, or this node's root key in an emergency.");
+        fill(intro, offered.intro);
         submit.classList.remove("primary");
-        fill(choice, offered);
+        fill(choice, offered.choice);
       }
     });
   }

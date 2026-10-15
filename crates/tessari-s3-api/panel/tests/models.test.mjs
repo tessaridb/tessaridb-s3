@@ -126,9 +126,12 @@ test("failed renditions are read with their queue, tries and last error, and a s
 
 test("the sign-in methods say whether a provider is offered, and nothing else is read as one", async () => {
   const { readMethods } = await import("../src/signin-model.ts");
-  assert.deepEqual(readMethods({ provider: true }), { provider: true });
-  assert.deepEqual(readMethods({ provider: false }), { provider: false });
-  assert.equal(readMethods({ provider: "yes" }), null);
+  assert.deepEqual(readMethods({ provider: true, keys: "all" }), { provider: true, keys: "all" });
+  assert.deepEqual(readMethods({ provider: true, keys: "root" }), { provider: true, keys: "root" });
+  assert.deepEqual(readMethods({ provider: false, keys: "all" }), { provider: false, keys: "all" });
+  assert.equal(readMethods({ provider: true, keys: "none" }), null);
+  assert.equal(readMethods({ provider: true }), null);
+  assert.equal(readMethods({ provider: "yes", keys: "all" }), null);
   assert.equal(readMethods({}), null);
   assert.equal(readMethods(null), null);
 });

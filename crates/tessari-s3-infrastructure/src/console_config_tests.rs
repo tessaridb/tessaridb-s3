@@ -1,7 +1,7 @@
 use crate::Error;
 use crate::config::tests::{CREDENTIALS, load};
 
-fn with(extra: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+pub(crate) fn with(extra: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
     let mut vars = CREDENTIALS.to_vec();
     vars.extend_from_slice(extra);
     vars
@@ -88,7 +88,7 @@ fn console_settings_without_a_listen_address_are_refused_rather_than_ignored() {
     }
 }
 
-const OIDC: [(&str, &str); 5] = [
+pub(crate) const OIDC: [(&str, &str); 5] = [
     ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101"),
     (
         "TESSARIDB_S3_CONSOLE_OIDC_ISSUER",

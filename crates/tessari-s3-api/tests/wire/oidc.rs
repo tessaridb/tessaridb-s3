@@ -19,6 +19,7 @@ fn settings(provider: &Provider) -> OidcSettings {
         redirect_uri: REDIRECT.to_owned(),
         mfa_amr: vec!["mfa".to_owned()],
         break_glass_webhook: None,
+        key_sign_in: tessari_s3_infrastructure::KeySignIn::All,
     }
 }
 

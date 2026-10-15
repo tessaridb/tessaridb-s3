@@ -1155,6 +1155,14 @@ button.icon-action.danger {
   margin-block-end: var(--s-2);
 }
 
+.gate button.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .gate button.primary,
 .gate .provider {
   inline-size: 100%;

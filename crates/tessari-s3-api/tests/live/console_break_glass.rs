@@ -11,10 +11,11 @@ use axum::routing::post;
 use serde_json::Value;
 
 use crate::console::{Seen, send};
-use crate::console_oidc::console_with;
+use crate::console_oidc::{console_with, consoles_with};
 use crate::oidc_provider::Provider;
 use crate::users::user;
 use crate::{ACCESS_KEY, IGNORED, SECRET};
+use tessari_s3_infrastructure::KeySignIn;
 
 /// A webhook on a loopback port that keeps what it is sent; `/down` answers every alert with a 500.
 struct Receiver {
@@ -179,4 +180,74 @@ async fn an_alert_that_fails_does_not_bar_the_emergency_path_and_the_record_says
     let recorded = operations(&console, &token).await;
     assert_eq!(recorded.len(), 1, "{recorded:?}");
     assert_eq!(recorded[0]["outcome"], "alert_failed");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn with_key_sign_in_set_to_root_a_users_key_opens_no_console_session_and_root_still_does() {
+    let _why = IGNORED;
+    let provider = Provider::start().await;
+    let (consoles, storage) =
+        consoles_with(&provider, None, &[KeySignIn::All, KeySignIn::Root]).await;
+    let (all, root_only) = (&consoles[0], &consoles[1]);
+    let issued = storage
+        .users()
+        .issue_key(&user("ann"))
+        .await
+        .expect("issued")
+        .expect("ann");
+    let ann = |secret: &str| {
+        format!(
+            "{{\"access_key_id\":\"{}\",\"secret_access_key\":\"{secret}\"}}",
+            issued.access_key_id
+        )
+    };
+    let methods = send(root_only, "GET", "/api/v1/auth/methods", None, None).await;
+    assert_eq!(methods.json()["keys"], Value::from("root"));
+    let before = send(
+        all,
+        "POST",
+        "/api/v1/session",
+        None,
+        Some(&ann(issued.secret.expose())),
+    )
+    .await;
+    assert_eq!(before.status, 200);
+    let earlier = before.cookie().expect("a session under all");
+
+    let refused = send(
+        root_only,
+        "POST",
+        "/api/v1/session",
+        None,
+        Some(&ann(issued.secret.expose())),
+    )
+    .await;
+    assert_eq!(refused.status, 403);
+    assert_eq!(refused.code().as_deref(), Some("key_sign_in_disabled"));
+    assert!(refused.cookie().is_none(), "no session for a user's key");
+    // The credential is checked first: a wrong secret is the ordinary refusal and says nothing about the setting.
+    let wrong = send(
+        root_only,
+        "POST",
+        "/api/v1/session",
+        None,
+        Some(&ann("not-the-secret")),
+    )
+    .await;
+    assert_eq!(wrong.status, 401);
+    // A session a user's key opened before the switch ends at its next request.
+    let carried = send(root_only, "GET", "/api/v1/session", Some(&earlier), None).await;
+    assert_eq!(carried.status, 401);
+
+    let emergency = send(
+        root_only,
+        "POST",
+        "/api/v1/session",
+        None,
+        Some(&root(Some("ticket 9"))),
+    )
+    .await;
+    assert_eq!(emergency.status, 200);
+    assert_eq!(max_age(&emergency), Some("900"));
 }

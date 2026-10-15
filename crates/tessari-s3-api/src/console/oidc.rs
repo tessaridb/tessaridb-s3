@@ -19,6 +19,7 @@ use tessari_s3_constants::{
 };
 use tessari_s3_core::authz::UserName;
 use tessari_s3_core::console::Subject;
+use tessari_s3_infrastructure::KeySignIn;
 use tessari_s3_infrastructure::oidc::{OidcClient, OidcError};
 use tessari_s3_storage::identities::PendingLogin;
 
@@ -55,15 +56,21 @@ pub(super) fn routes() -> axum::Router<ConsoleState> {
         )
 }
 
-/// How one may sign in here, for the sign-in page: with a key always, and through the provider when one is configured.
+/// How one may sign in here, for the sign-in page: through the provider when one is configured, and with which keys.
 #[derive(Serialize)]
 pub(super) struct Methods {
     provider: bool,
+    /// `all` — any live access key; `root` — only the root key, as the emergency path.
+    keys: &'static str,
 }
 
 pub(super) async fn methods(State(state): State<ConsoleState>) -> Json<Methods> {
     Json(Methods {
         provider: state.oidc().is_some(),
+        keys: match state.key_sign_in() {
+            KeySignIn::All => "all",
+            KeySignIn::Root => "root",
+        },
     })
 }
 

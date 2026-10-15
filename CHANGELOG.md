@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- `TESSARIDB_S3_CONSOLE_KEY_SIGN_IN=root` makes the console provider-only: beside an identity provider, a user's access
+  key no longer opens a console session (refused with `key_sign_in_disabled`; an earlier session ends at its next
+  request), and the root key remains as the break-glass path. The default `all` keeps every key; the S3 API is not
+  affected. `GET /api/v1/auth/methods` now also answers `keys`.
 - The console's sign-in page offers the identity provider as its main action when one is configured, learned from the
   new `GET /api/v1/auth/methods`; it asks for a reason when a root sign-in needs one and explains a
   `reauthentication_required` refusal.

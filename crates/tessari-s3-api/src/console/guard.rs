@@ -63,7 +63,8 @@ pub(super) async fn require_session(
         Subject::Key(key_id) => state
             .principal_for(key_id)
             .await?
-            .map(|(principal, _)| principal),
+            .map(|(principal, _)| principal)
+            .filter(|principal| state.key_may_sign_in(principal)),
         Subject::User(name) => match state.user_principal(name).await? {
             Some(principal) if !ended(&state, name, session.issued).await? => Some(principal),
             _ => None,

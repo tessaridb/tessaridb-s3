@@ -130,6 +130,12 @@ impl OidcClient {
         &self.inner.settings.issuer
     }
 
+    /// Which access keys still open a console session beside this provider.
+    #[must_use]
+    pub fn key_sign_in(&self) -> crate::KeySignIn {
+        self.inner.settings.key_sign_in
+    }
+
     /// The provider's settings.
     pub(crate) fn settings(&self) -> &OidcSettings {
         &self.inner.settings

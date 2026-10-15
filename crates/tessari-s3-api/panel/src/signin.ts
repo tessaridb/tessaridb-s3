@@ -9,18 +9,35 @@ import { ignored } from "./models.ts";
 import { heading, refusal } from "./screen.ts";
 import { PROVIDER_SIGN_IN, readMethods } from "./signin-model.ts";
 
-/** The provider's sign-in, offered above the key form when the node has one; nothing when it has none or did not say. */
-async function providerChoice(): Promise<HTMLElement | null> {
+/** The provider's sign-in, offered above the key form when the node has one; nothing when it has none or did not say.
+ *  Where only the root key opens a session, the form is folded away behind the emergency path's own link. */
+async function providerChoice(keyForm: readonly HTMLElement[]): Promise<{ readonly choice: HTMLElement; readonly intro: string } | null> {
   const methods = await call("GET", "/auth/methods", readMethods);
   if (!methods.ok || !methods.value.provider) {
     return null;
   }
-  return el(
-    "div",
-    {},
-    el("a", { class: "button primary provider", href: PROVIDER_SIGN_IN }, "Sign in with your organisation"),
-    el("p", { class: "muted" }, "or with an access key"),
-  );
+  const provider = el("a", { class: "button primary provider", href: PROVIDER_SIGN_IN }, "Sign in with your organisation");
+  if (methods.value.keys === "all") {
+    return {
+      choice: el("div", {}, provider, el("p", { class: "muted" }, "or with an access key")),
+      intro: "Sign in through your organisation. An access key also works: one issued to your user, or this node's root key in an emergency.",
+    };
+  }
+  for (const part of keyForm) {
+    part.hidden = true;
+  }
+  const emergency = el("button", { type: "button", class: "link" }, "Emergency sign-in with the root key");
+  emergency.addEventListener("click", () => {
+    for (const part of keyForm) {
+      part.hidden = false;
+    }
+    emergency.hidden = true;
+    keyForm[0]?.querySelector("input")?.focus();
+  });
+  return {
+    choice: el("div", {}, provider, el("p", { class: "muted" }, emergency)),
+    intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency.",
+  };
 }
 
 /** Draws the sign-in form into `main`; `done` runs once a session exists. */
@@ -76,12 +93,12 @@ export function signIn(main: HTMLElement, done: () => void): void {
   });
   fill(main, el("div", { class: "gate" }, form));
   key.input.focus();
-  void providerChoice().then((offered) => {
+  void providerChoice([key.row, secret.row, submit]).then((offered) => {
     if (offered !== null) {
       // One primary action: the organisation's sign-in; a key is the other way in.
-      fill(intro, "Sign in through your organisation. An access key also works: one issued to your user, or this node's root key in an emergency.");
+      fill(intro, offered.intro);
       submit.classList.remove("primary");
-      fill(choice, offered);
+      fill(choice, offered.choice);
     }
   });
 }

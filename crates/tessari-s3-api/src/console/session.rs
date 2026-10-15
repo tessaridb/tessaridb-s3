@@ -18,9 +18,24 @@ use tessari_s3_constants::{
 
 use tessari_s3_core::authz::{Action, Decision, Principal, authorize};
 use tessari_s3_core::console::{Session, Subject};
+use tessari_s3_infrastructure::KeySignIn;
+use tessari_s3_infrastructure::oidc::OidcClient;
 
 use super::ConsoleState;
 use super::error::ConsoleError;
+
+impl ConsoleState {
+    /// Which access keys open a console session here.
+    pub(super) fn key_sign_in(&self) -> KeySignIn {
+        self.oidc().map_or(KeySignIn::All, OidcClient::key_sign_in)
+    }
+
+    /// Whether `principal`, holding an access key, may hold a console session: root always, a user's key only where
+    /// key sign-in is not restricted to root.
+    pub(super) fn key_may_sign_in(&self, principal: &Principal) -> bool {
+        matches!(principal, Principal::Root) || self.key_sign_in() == KeySignIn::All
+    }
+}
 
 #[derive(Deserialize)]
 pub(super) struct SignIn {
@@ -100,6 +115,13 @@ pub(super) async fn sign_in(
             return Err(ConsoleError::unauthorized());
         }
     };
+    // Checked after the credential, so the setting is told only to whoever holds the key.
+    if !state.key_may_sign_in(&principal) {
+        return Err(ConsoleError::refused(
+            "key_sign_in_disabled",
+            "this console signs people in through its identity provider; access keys other than root do not open a session",
+        ));
+    }
     // Beside an identity provider, people sign in through it; the root credential is then the emergency path.
     let lifetime = if matches!(principal, Principal::Root) && state.oidc().is_some() {
         let expires = now.saturating_add(CONSOLE_BREAK_GLASS_SECS);
