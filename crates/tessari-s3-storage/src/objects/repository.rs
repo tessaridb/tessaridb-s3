@@ -47,6 +47,8 @@ pub(crate) struct Head {
     pub(crate) current: bool,
     /// Whether the bucket asked for its writes to be acknowledged by its region's majority alone.
     pub(crate) local: bool,
+    /// The bucket's replication configuration; `None` while it has none.
+    pub(crate) replication: Option<tessari_s3_core::replication::Configuration>,
 }
 
 /// The version a write or a delete adds.
@@ -80,6 +82,9 @@ pub(crate) struct VersionPlan {
     /// Whether the change is acknowledged by the bucket's region's majority (`ACKNOWLEDGE LOCAL MAJORITY`) rather
     /// than the namespace's.
     pub(crate) local: bool,
+    /// The bucket the version this change adds is replicated into: stamped `PENDING` on the version, which is what
+    /// lets the store's own event queue its replication task in this commit.
+    pub(crate) replicate: Option<String>,
 }
 
 /// What removes an object or a version: a request, or the bucket's lifecycle rules (S3 ref 11 M5 event names).

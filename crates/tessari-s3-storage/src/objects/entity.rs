@@ -145,6 +145,11 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
             Some(Value::String(id)) => Some(id.clone()),
             Some(_) => return Err(malformed("version_id")),
         },
+        replication: match fields.get("replication_status") {
+            None | Some(Value::None) => None,
+            Some(Value::String(status)) => Some(status.clone()),
+            Some(_) => return Err(malformed("replication_status")),
+        },
     };
     Ok((incarnation(fields)?, object))
 }

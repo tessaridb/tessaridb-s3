@@ -46,6 +46,10 @@ const LIFECYCLE_BODY: &[u8] =
 const NOTIFICATION_BODY: &[u8] = b"<NotificationConfiguration><QueueConfiguration>\
 <Queue>arn:tessaridb:sqs:::hooks</Queue><Event>s3:ObjectCreated:*</Event></QueueConfiguration>\
 </NotificationConfiguration>";
+const REPLICATION_BODY: &[u8] = b"<ReplicationConfiguration><Role>r</Role><Rule><ID>r</ID><Priority>1</Priority>\
+<Status>Enabled</Status><Filter><Prefix></Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status>\
+</DeleteMarkerReplication><Destination><Bucket>arn:aws:s3:::ann-copies</Bucket></Destination></Rule>\
+</ReplicationConfiguration>";
 const VERSIONING_BODY: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
@@ -117,6 +121,27 @@ fn table(upload: &str) -> Vec<Probe> {
             "DELETE",
             "/ann-photos",
             &[("lifecycle", None)],
+        ),
+        Probe {
+            body: REPLICATION_BODY,
+            ..probe(
+                Operation::PutBucketReplication,
+                "PUT",
+                "/ann-photos",
+                &[("replication", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketReplication,
+            "GET",
+            "/ann-photos",
+            &[("replication", None)],
+        ),
+        probe(
+            Operation::DeleteBucketReplication,
+            "DELETE",
+            "/ann-photos",
+            &[("replication", None)],
         ),
         probe(Operation::ListObjects, "GET", "/ann-photos", &[]),
         probe(

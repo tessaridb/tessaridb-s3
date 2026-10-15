@@ -236,6 +236,9 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     if let Some(version) = &object.version {
         set(headers, "x-amz-version-id", version);
     }
+    if let Some(status) = &object.replication {
+        set(headers, "x-amz-replication-status", status);
+    }
     let checksum_mode = call
         .headers
         .get("x-amz-checksum-mode")

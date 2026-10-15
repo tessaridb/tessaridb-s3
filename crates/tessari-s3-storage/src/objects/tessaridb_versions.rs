@@ -76,7 +76,7 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
     let script = format!(
         "BEGIN; {} SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
          SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;",
-        bucket_read(pool, "versioning, notify, media, acknowledge")
+        bucket_read(pool, "versioning, notify, media, acknowledge, replication")
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();
     let _begin = answers.next();
@@ -86,6 +86,13 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
         if ["notify", "media"].iter().any(|field| !matches!(fields.get(*field), None | Some(Value::None))));
     let local = matches!(&bucket_record, Some(Value::Object(fields))
         if fields.get("acknowledge") == Some(&Value::String(crate::buckets::LOCAL.to_owned())));
+    let replication = match &bucket_record {
+        Some(Value::Object(fields)) => match fields.get("replication") {
+            None | Some(Value::None) => None,
+            Some(stored) => Some(crate::buckets::replication::from_value(stored)?),
+        },
+        _ => None,
+    };
     let state = match bucket_record {
         Some(Value::Object(fields)) => match fields.get("versioning") {
             None | Some(Value::None) => None,
@@ -114,6 +121,7 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
         null,
         notifies,
         current,
+        replication,
     })
 }
 
@@ -142,7 +150,19 @@ pub(super) fn statements(
         parameters.push(("v_null".to_owned(), Value::Bytes(record_id(&prefix, seq))));
     }
     if let Some(version) = &plan.create {
-        let fields = "version_id: $v_version_id, seq: $v_seq, modified: $now";
+        // A version to replicate is stamped `PENDING` with its destination; the store's `replication_queued` event
+        // queues its task in this commit.
+        let fields = match &plan.replicate {
+            Some(destination) => {
+                parameters.push((
+                    "v_replicate_to".to_owned(),
+                    Value::String(destination.clone()),
+                ));
+                "version_id: $v_version_id, seq: $v_seq, modified: $now, replication_status: 'PENDING', \
+                 replicate_to: $v_replicate_to"
+            }
+            None => "version_id: $v_version_id, seq: $v_seq, modified: $now",
+        };
         // A null version's sequence is kept at the key's own address, where `head` reads it by identity.
         if version.version_id == NULL {
             script.push_str("CREATE version_nulls:$v_key_at = { seq: $v_seq }; ");

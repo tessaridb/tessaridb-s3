@@ -38,6 +38,10 @@ use crate::Result;
 /// message per change in the change's own commit, named after the change's data (never a generated identity, which
 /// would make concurrent writers contend). A version removed by its id is stamped with its message's name and event
 /// in the removal's fence, and `version_removed` appends it. Its position is the event's sequencer.
+/// `replication_tasks` is the replication outbox, a topic: a version written into a bucket whose rule for its key
+/// replicates it is stamped `replication_status = 'PENDING'` with the destination (`replicate_to`), and the
+/// `replication_queued` event appends its task in the version's own commit, named after the bucket incarnation, the
+/// key's sequence and the key, so a version is queued exactly once.
 /// `lifecycle_runs` holds one record per bucket with lifecycle rules, written in the commit that writes them and due
 /// again an interval after each pass; a claim hands a bucket to one node at a time.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
@@ -207,6 +211,16 @@ DEFINE EVENT OR REPLACE version_removed ON versions FOR DELETE WHEN $before.remo
 THEN { LET $named = $before.removal; \
 CREATE object_events:$named = { bucket_name: $before.bucket_name, key: $before.key, event: $before.removal_event, \
 version_id: $before.version_id, at: time::now() }; };
+DEFINE FIELD IF NOT EXISTS replication_status ON objects TYPE string;
+DEFINE FIELD IF NOT EXISTS replication_status ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS replicate_to ON versions TYPE string;
+DEFINE TOPIC IF NOT EXISTS replication_tasks RETAIN 30d;
+DEFINE EVENT OR REPLACE replication_queued ON versions FOR CREATE WHEN $after.replicate_to != NONE \
+THEN { LET $named = string::concat('p-', string::concat(type::string($after.incarnation), string::concat('/', \
+string::concat(type::string($after.seq), string::concat('/', $after.key))))); \
+CREATE replication_tasks:$named = { bucket_name: $after.bucket_name, key: $after.key, \
+version_id: $after.version_id, seq: $after.seq, marker: $after.marker, destination: $after.replicate_to, \
+at: $after.modified }; };
 DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;

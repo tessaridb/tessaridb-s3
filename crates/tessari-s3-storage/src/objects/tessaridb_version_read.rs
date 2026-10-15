@@ -17,7 +17,7 @@ pub(crate) enum Found {
     /// A version holding an object, and its record id (for its parts).
     Object {
         incarnation: [u8; 16],
-        object: StoredObject,
+        object: Box<StoredObject>,
         at: Vec<u8>,
     },
     /// A delete marker and when it was written.
@@ -76,7 +76,7 @@ impl TessariObjects {
         let (incarnation, object) = read(&record)?;
         Ok(Some(Found::Object {
             incarnation,
-            object,
+            object: Box::new(object),
             at,
         }))
     }

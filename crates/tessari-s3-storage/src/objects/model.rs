@@ -72,6 +72,8 @@ pub struct StoredObject {
     pub content: Content,
     /// The version id, once the bucket has been versioned (`null` for a null version); none before that.
     pub version: Option<String>,
+    /// Its replication status (`PENDING`, `COMPLETED`, `FAILED` or `REPLICA`); none when it is not replicated.
+    pub replication: Option<String>,
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.

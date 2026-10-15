@@ -106,7 +106,7 @@ impl ObjectService {
             WriteCondition::IfMatch(etag) => Guard::Etag(etag.clone()),
         };
         for _ in 0..VERSION_WRITE_ATTEMPTS {
-            let plan = versions::plan(&self.repository.head(bucket, key).await?, false)?;
+            let plan = versions::plan(&self.repository.head(bucket, key).await?, key, false)?;
             match self
                 .repository
                 .write(bucket, key, incarnation, object, &guard, &plan)
@@ -188,7 +188,7 @@ impl ObjectService {
         match (condition, live, stale) {
             (WriteCondition::IfMatch(_), false, _) => Ok(Written::NoSuchKey),
             (WriteCondition::IfNoneMatch, false, Some(stale)) => {
-                let plan = versions::plan(&self.repository.head(bucket, key).await?, false)?;
+                let plan = versions::plan(&self.repository.head(bucket, key).await?, key, false)?;
                 match self
                     .repository
                     .write(

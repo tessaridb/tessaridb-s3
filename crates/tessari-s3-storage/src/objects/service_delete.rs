@@ -155,7 +155,7 @@ impl ObjectService {
         };
         let guard = Guard::Etag(etag.to_owned());
         for _ in 0..VERSION_WRITE_ATTEMPTS {
-            let plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
+            let plan = versions::plan(&self.repository.head(bucket, key).await?, key, true)?;
             if self
                 .repository
                 .remove_if(bucket, key, incarnation, etag, None, &plan)
@@ -201,8 +201,10 @@ impl ObjectService {
             return Ok(false);
         };
         for _ in 0..VERSION_WRITE_ATTEMPTS {
-            let mut plan = versions::plan(&self.repository.head(bucket, key).await?, true)?;
+            let mut plan = versions::plan(&self.repository.head(bucket, key).await?, key, true)?;
             plan.removal = Removal::Lifecycle;
+            // A delete marker a lifecycle rule adds is not replicated (S3 ref 11 M4: only a request's marker is).
+            plan.replicate = None;
             if self
                 .repository
                 .remove_if(bucket, key, incarnation, etag, Some(modified), &plan)

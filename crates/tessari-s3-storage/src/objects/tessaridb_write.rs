@@ -52,12 +52,20 @@ pub(super) async fn write(
     };
     parameters.push(("notify".to_owned(), Value::Bool(plan.notify)));
     parameters.push(("op".to_owned(), Value::String(op.to_owned())));
+    // A version being replicated answers its status on the current object too.
+    let replication = if plan.replicate.is_some() {
+        ", replication_status: 'PENDING'"
+    } else {
+        ""
+    };
     let stamp = match &plan.label {
         Some(label) => {
             parameters.push(("label".to_owned(), Value::String(label.clone())));
-            "{ modified: $now, version_id: $label, notify: $notify, op: $op }"
+            format!(
+                "{{ modified: $now, version_id: $label, notify: $notify, op: $op{replication} }}"
+            )
         }
-        None => "{ modified: $now, notify: $notify, op: $op }",
+        None => format!("{{ modified: $now, notify: $notify, op: $op{replication} }}"),
     };
     let statement = match guard {
         Guard::None => {
