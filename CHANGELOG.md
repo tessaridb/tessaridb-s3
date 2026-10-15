@@ -5,6 +5,7 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- A console key form submitted twice at once no longer answers one of the two with an internal error.
 - Cluster members are admitted, not trusted: a node joins only as a founding member
   (`TESSARIDB_S3_FOUNDING_MEMBERS`), when root approves it in the console, or with a one-time join token
   (`TESSARIDB_S3_JOIN_TOKEN`), and root removes nodes for good. Internal mutual TLS is now required, each node's

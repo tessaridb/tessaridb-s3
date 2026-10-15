@@ -200,6 +200,14 @@ pub const CONSOLE_REASON_MAX_CHARS: usize = 500;
 /// token first issued and never a second secret; past it the token is forgotten and a submission issues anew.
 pub const KEY_ISSUE_TOKEN_SECS: i64 = 86_400;
 
+/// How many times a key issue that lost the race on its form token reads the token again before drawing a new key id.
+/// The winner's commit is not readable until its group of commits is synced, so the loser waits for it rather than
+/// taking an unseen token for a taken id.
+pub const KEY_ISSUE_SETTLE_READS: u32 = 8;
+
+/// Milliseconds before the first of those reads; each wait doubles, so the last read comes ~0.6 s after the first.
+pub const KEY_ISSUE_SETTLE_FIRST_MS: u64 = 5;
+
 /// The most access keys one user's console listing returns.
 pub const USER_KEYS_LISTED_MAX: usize = 1_000;
 

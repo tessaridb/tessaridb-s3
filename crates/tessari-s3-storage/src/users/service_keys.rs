@@ -1,7 +1,9 @@
 //! A user's full keys as the console manages them: issued at most once per form token, listed without secrets, and
 //! revoked only by the user they belong to.
 
-use tessari_s3_constants::{KEY_ISSUE_TOKEN_SECS, USER_KEYS_LISTED_MAX};
+use tessari_s3_constants::{
+    KEY_ISSUE_SETTLE_FIRST_MS, KEY_ISSUE_SETTLE_READS, KEY_ISSUE_TOKEN_SECS, USER_KEYS_LISTED_MAX,
+};
 use tessari_s3_core::authz::UserName;
 use tessari_s3_types::Timestamp;
 
@@ -49,11 +51,28 @@ impl UserService {
                 }));
             }
             // Taken: either the token (a racing submission won, and its key is the answer) or the id (draw again).
-            if let Some(prior) = self.repository.get_issue(token).await? {
+            if let Some(prior) = self.settled_issue(token).await? {
                 return Ok(Self::prior(&prior, user));
             }
         }
         Err(Error::Randomness)
+    }
+
+    /// The issue `token` names, read until the submission that won it is readable: its commit is refused to the
+    /// loser before it can be read, so one read straight after the refusal can miss it. `None` when it never lands —
+    /// the winner did not commit, or the id was what collided — and a new id is drawn.
+    async fn settled_issue(&self, token: &IssueToken) -> Result<Option<IssueEntity>> {
+        let mut wait = KEY_ISSUE_SETTLE_FIRST_MS;
+        for read in 1..=KEY_ISSUE_SETTLE_READS {
+            if let Some(prior) = self.repository.get_issue(token).await? {
+                return Ok(Some(prior));
+            }
+            if read < KEY_ISSUE_SETTLE_READS {
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                wait = wait.saturating_mul(2);
+            }
+        }
+        Ok(None)
     }
 
     fn prior(prior: &IssueEntity, user: &UserName) -> IssuedOnce {
