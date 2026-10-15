@@ -102,7 +102,7 @@ section records which TessariDB version its metadata runs on.
   `NoncurrentDays` beyond the newest `NewerNoncurrentVersions`, removes a delete marker left as its key's only
   version, and aborts multipart uploads older than `DaysAfterInitiation`. A period ends at the next midnight UTC after
   its days are up. An object rewritten after the pass judged it is not expired, even with the same bytes.
-- The compose file and the process tests run TessariDB `0.34.0-beta`; the whole live suite passes against it.
+- The compose file and the process tests run TessariDB `0.34.2-beta`; the whole live suite passes against it.
 - Bucket lifecycle configuration: PutBucketLifecycleConfiguration, GetBucketLifecycleConfiguration
   (`NoSuchLifecycleConfiguration` when none) and DeleteBucketLifecycle. Rules filter by prefix and say Expiration
   (`Days`, `Date` at midnight UTC, or `ExpiredObjectDeleteMarker`), `NoncurrentVersionExpiration` (with
