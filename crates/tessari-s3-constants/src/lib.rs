@@ -232,6 +232,13 @@ pub const MOVE_BATCH: usize = 100;
 /// died holding a claim, and does not come back, keeps the others off that id.
 pub const HEAL_CLAIM_SECS: u64 = 120;
 
+/// Attempts at taking or handing back a claim while the store answers `retry` (a write to the claim committed
+/// meanwhile); every other refusal ends it at once.
+pub const CLAIM_RETRY_ATTEMPTS: u32 = 8;
+
+/// The first wait before a claim is asked again after a `retry`, in milliseconds, doubled per attempt.
+pub const CLAIM_RETRY_BACKOFF_MS: u64 = 20;
+
 /// Hand-outs after which a data id still listed for healing is reported at risk: a heal that failed this many times
 /// will not succeed by itself.
 pub const HEAL_AT_RISK_ATTEMPTS: i64 = 10;

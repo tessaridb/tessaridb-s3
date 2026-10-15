@@ -1,8 +1,10 @@
 //! [`ShardSetRepository`] over TessariDB. Every value is bound; the pool sends the namespace and database with each
 //! unit of work.
 
-use tessari_s3_constants::{HEAL_CLAIM_SECS, HEAL_RETRY_SECS};
-use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
+use tessari_s3_constants::{
+    CLAIM_RETRY_ATTEMPTS, CLAIM_RETRY_BACKOFF_MS, HEAL_CLAIM_SECS, HEAL_RETRY_SECS,
+};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 
 use super::repository::{ShardSet, ShardSetRepository};
 use crate::answers::first_record;
@@ -131,7 +133,7 @@ impl ShardSetRepository for TessariShardSets {
              SET heal_claims:$data = $holder IF = $holder EXPIRE {HEAL_CLAIM_SECS}s;"
         );
         let mut taken = false;
-        for answer in self.pool.run(&script, parameters).await? {
+        for answer in self.run_retrying(&script, parameters).await? {
             match answer {
                 Answer::Value {
                     value: Value::Bool(wrote),
@@ -152,13 +154,38 @@ impl ShardSetRepository for TessariShardSets {
         let mut parameters = data(id);
         parameters.push(("holder".to_owned(), Value::String(holder.to_owned())));
         // Conditional on still holding it, and leaving an expiring key: a bare write would make the claim permanent.
-        self.pool
-            .run(
-                "SET heal_claims:$data = 'free' IF = $holder EXPIRE 1ms;",
-                parameters,
-            )
-            .await?;
+        self.run_retrying(
+            "SET heal_claims:$data = 'free' IF = $holder EXPIRE 1ms;",
+            parameters,
+        )
+        .await?;
         Ok(())
+    }
+}
+
+impl TessariShardSets {
+    /// Runs a claim script again while the store answers `retry`: another write to the claim committed after this
+    /// one's snapshot, and the store leaves asking again to the caller. Both claim scripts give the same outcome when
+    /// run twice, so a repeat is safe.
+    async fn run_retrying(
+        &self,
+        script: &str,
+        parameters: Vec<(String, Value)>,
+    ) -> Result<Vec<Answer>> {
+        let mut attempt: u32 = 1;
+        loop {
+            match self.pool.run(script, parameters.clone()).await {
+                Err(error)
+                    if error.is_class(RefusalClass::Retry) && attempt < CLAIM_RETRY_ATTEMPTS =>
+                {
+                    tracing::debug!(attempt, error = %error, "a claim met a concurrent write; asking again");
+                    tokio::time::sleep(crate::backoff::backoff(attempt, CLAIM_RETRY_BACKOFF_MS))
+                        .await;
+                    attempt = attempt.saturating_add(1);
+                }
+                outcome => return outcome.map_err(Into::into),
+            }
+        }
     }
 }
 
