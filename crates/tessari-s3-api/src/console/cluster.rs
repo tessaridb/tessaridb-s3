@@ -66,9 +66,10 @@ pub(super) async fn cluster(
             .map(|layout| LayoutView {
                 version: layout.version(),
                 nodes: layout
-                    .nodes()
+                    .sets()
                     .iter()
-                    .map(|node| node.as_str().to_owned())
+                    .flatten()
+                    .map(|member| member.node().as_str().to_owned())
                     .collect(),
             }),
         None => None,

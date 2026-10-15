@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use tessari_s3_constants::LAYOUT_PROPOSE_ATTEMPTS;
 use tessari_s3_core::erasure::Code;
 use tessari_s3_infrastructure::tessaridb::{MetaError, RefusalClass};
-use tessari_s3_types::NodeId;
 
 use super::layout_of;
 use crate::Result;
@@ -62,7 +61,10 @@ async fn a_proposal_that_lost_the_race_takes_the_winners_layout() {
         .await
         .expect("asked")
         .expect("a layout");
-    let names: Vec<&str> = layout.nodes().iter().map(NodeId::as_str).collect();
+    let names: Vec<&str> = layout.sets()[0]
+        .iter()
+        .map(|member| member.node().as_str())
+        .collect();
     assert_eq!(
         names,
         ["n1", "n2", "n3"],

@@ -12,6 +12,7 @@ mod node_id;
 mod object_key;
 mod secret;
 mod timestamp;
+mod zone;
 
 pub use bucket_name::BucketName;
 pub use category::ErrorCategory;
@@ -24,3 +25,4 @@ pub use node_id::NodeId;
 pub use object_key::ObjectKey;
 pub use secret::SecretKey;
 pub use timestamp::Timestamp;
+pub use zone::Zone;

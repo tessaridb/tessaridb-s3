@@ -5,7 +5,7 @@ mod layout;
 mod placement;
 mod stripe;
 
-pub use layout::{Layout, LayoutError};
+pub use layout::{Layout, LayoutError, LayoutNode};
 pub use placement::{PlacementKey, placement};
 pub use stripe::{StripeError, Stripes};
 pub use tessari_s3_types::{Code, CodeError};

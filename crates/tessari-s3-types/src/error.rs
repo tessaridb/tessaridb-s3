@@ -32,6 +32,9 @@ pub enum Error {
     /// A cluster node id outside its alphabet (configuration, never a client request).
     #[error("a node id is 1 to 63 lowercase letters, digits and inner hyphens")]
     InvalidNodeId,
+    /// A failure-domain name outside its alphabet (configuration, never a client request).
+    #[error("a zone is 1 to 32 lowercase letters, digits and inner hyphens")]
+    InvalidZone,
 }
 
 impl Error {
@@ -44,7 +47,8 @@ impl Error {
             | Self::ObjectKeyTooLong { .. }
             | Self::InvalidUploadId
             | Self::InvalidPartNumber
-            | Self::InvalidNodeId => ErrorCategory::Validation,
+            | Self::InvalidNodeId
+            | Self::InvalidZone => ErrorCategory::Validation,
         }
     }
 }

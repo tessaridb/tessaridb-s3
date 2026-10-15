@@ -16,10 +16,7 @@ impl NodeId {
     /// # Errors
     /// [`Error::InvalidNodeId`].
     pub fn new(id: &str) -> Result<Self> {
-        let alphanumeric = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
-        let edges = id.bytes().next().is_some_and(alphanumeric)
-            && id.bytes().next_back().is_some_and(alphanumeric);
-        if id.len() > MAX_LEN || !edges || !id.bytes().all(|b| alphanumeric(b) || b == b'-') {
+        if !short_name(id, MAX_LEN) {
             return Err(Error::InvalidNodeId);
         }
         Ok(Self(id.to_owned()))
@@ -30,6 +27,15 @@ impl NodeId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Whether `name` is 1 to `max` bytes of lowercase letters, digits and inner hyphens — the alphabet of every
+/// cluster name that becomes a record id or a path segment.
+pub(crate) fn short_name(name: &str, max: usize) -> bool {
+    let alphanumeric = |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit();
+    let edges = name.bytes().next().is_some_and(alphanumeric)
+        && name.bytes().next_back().is_some_and(alphanumeric);
+    name.len() <= max && edges && name.bytes().all(|b| alphanumeric(b) || b == b'-')
 }
 
 #[cfg(test)]

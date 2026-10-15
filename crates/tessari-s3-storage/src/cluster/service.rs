@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use tessari_s3_constants::LAYOUT_PROPOSE_ATTEMPTS;
-use tessari_s3_core::erasure::{Code, Layout};
+use tessari_s3_core::erasure::{Code, Layout, LayoutNode};
 use tessari_s3_infrastructure::tessaridb::RefusalClass;
 use tessari_s3_types::NodeId;
 
@@ -124,7 +124,12 @@ async fn layout_of(repository: &impl ClusterRepository, code: Code) -> Result<Op
         return held(&stored, code).map(Some);
     }
     let members = members(repository).await?;
-    let Some(proposal) = Layout::first(code, members.into_iter().map(|member| member.node)) else {
+    let Some(proposal) = Layout::first(
+        code,
+        members
+            .into_iter()
+            .map(|member| LayoutNode::new(member.node, None)),
+    ) else {
         return Ok(None);
     };
     let entity = LayoutEntity {
@@ -132,9 +137,10 @@ async fn layout_of(repository: &impl ClusterRepository, code: Code) -> Result<Op
         data: i64::from(code.data()),
         parity: i64::from(code.parity()),
         nodes: proposal
-            .nodes()
+            .sets()
             .iter()
-            .map(|node| node.as_str().to_owned())
+            .flatten()
+            .map(|member| member.node().as_str().to_owned())
             .collect(),
     };
     match propose(repository, &entity).await? {
@@ -189,9 +195,13 @@ fn held(stored: &LayoutEntity, code: Code) -> Result<Layout> {
     let nodes = stored
         .nodes
         .iter()
-        .map(|id| NodeId::new(id).map_err(|_| malformed("node id")))
+        .map(|id| {
+            NodeId::new(id)
+                .map(|node| LayoutNode::new(node, None))
+                .map_err(|_| malformed("node id"))
+        })
         .collect::<Result<Vec<_>>>()?;
-    Layout::new(version, code, nodes).map_err(|_| malformed("shape"))
+    Layout::new(version, code, vec![nodes]).map_err(|_| malformed("shape"))
 }
 
 #[cfg(test)]

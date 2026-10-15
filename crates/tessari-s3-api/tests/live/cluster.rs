@@ -90,7 +90,10 @@ async fn racing_nodes_agree_on_one_first_layout() {
     }
     let first = answers[0].clone();
     assert!(answers.iter().all(|answer| *answer == first), "{answers:?}");
-    let names: Vec<&str> = first.nodes().iter().map(NodeId::as_str).collect();
+    let names: Vec<&str> = first.sets()[0]
+        .iter()
+        .map(|member| member.node().as_str())
+        .collect();
     assert_eq!((first.version(), names), (1, vec!["n1", "n3", "n5"]));
     cluster
         .register(&node("n0"), "x:1")
