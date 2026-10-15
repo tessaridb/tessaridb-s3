@@ -1,7 +1,9 @@
 //! The cluster half of the configuration: read together or not at all, because a node with some of it would join a
 //! cluster it cannot serve.
 
-use tessari_s3_constants::{CLUSTER_SECRET_MIN_LEN, DEFAULT_HEAL_INTERVAL_SECS};
+use tessari_s3_constants::{
+    CLUSTER_SECRET_MIN_LEN, DEFAULT_HEAL_INTERVAL_SECS, DEFAULT_MOVE_BYTES_PER_SEC,
+};
 use tessari_s3_types::{Code, NodeId, SecretKey, Zone};
 
 use crate::config::{ClusterSettings, parse_positive};
@@ -122,6 +124,15 @@ pub(crate) fn cluster_settings(
     .map_or(Ok(DEFAULT_HEAL_INTERVAL_SECS), |secs| {
         u64::try_from(secs).map_err(|_| invalid("TESSARIDB_S3_HEAL_INTERVAL_SECS", "too large"))
     })?;
+    let move_bytes_per_sec = match get("TESSARIDB_S3_MOVE_BYTES_PER_SEC") {
+        None => DEFAULT_MOVE_BYTES_PER_SEC,
+        Some(text) => text.trim().parse().map_err(|_| {
+            invalid(
+                "TESSARIDB_S3_MOVE_BYTES_PER_SEC",
+                "not a whole number of bytes",
+            )
+        })?,
+    };
     Ok(Some(ClusterSettings {
         node,
         code,
@@ -130,6 +141,7 @@ pub(crate) fn cluster_settings(
         secret: SecretKey::new(secret),
         zone,
         heal_interval_secs,
+        move_bytes_per_sec,
         tls: internal_tls(get)?,
     }))
 }

@@ -80,6 +80,8 @@ pub struct ClusterSettings {
     pub zone: Option<tessari_s3_types::Zone>,
     /// `TESSARIDB_S3_HEAL_INTERVAL_SECS` — time between healing passes (positive).
     pub heal_interval_secs: u64,
+    /// `TESSARIDB_S3_MOVE_BYTES_PER_SEC` — how many bytes a second moving data onto a new layout may copy; `0` pauses it.
+    pub move_bytes_per_sec: u64,
     /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS; `None` speaks in the
     /// clear.
     pub tls: Option<crate::tls::InternalTls>,

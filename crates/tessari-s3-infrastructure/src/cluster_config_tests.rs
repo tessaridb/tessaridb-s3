@@ -96,6 +96,33 @@ fn healing_runs_every_minute_unless_told_otherwise() {
 }
 
 #[test]
+fn moving_data_is_throttled_to_32_mib_a_second_unless_told_otherwise_and_0_pauses_it() {
+    let cluster = |vars: &[(&'static str, &'static str)]| {
+        load(vars).map(|config| config.cluster.expect("clustered").move_bytes_per_sec)
+    };
+    assert_eq!(cluster(&with(&CLUSTER)), Ok(32 * 1024 * 1024));
+    for (text, bytes) in [("1048576", 1_048_576), ("0", 0)] {
+        let mut set = with(&CLUSTER);
+        set.push(("TESSARIDB_S3_MOVE_BYTES_PER_SEC", text));
+        assert_eq!(cluster(&set), Ok(bytes));
+    }
+    let mut bad = with(&CLUSTER);
+    bad.push(("TESSARIDB_S3_MOVE_BYTES_PER_SEC", "fast-please"));
+    let refused = cluster(&bad);
+    assert!(matches!(
+        refused,
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_MOVE_BYTES_PER_SEC",
+            ..
+        })
+    ));
+    assert!(
+        !format!("{refused:?}").contains("fast-please"),
+        "the value is not echoed"
+    );
+}
+
+#[test]
 fn internal_tls_is_three_files_read_together_or_none() {
     let dir = std::env::temp_dir().join(format!("tessari-s3-tls-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("dir");

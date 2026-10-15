@@ -2,7 +2,7 @@
 //! before its retire leaves none of its old shards, and a later layout does not switch an id whose retire is pending.
 
 use crate::erasure::count;
-use crate::erasure_moves::{BEFORE, NEW_SET, applied, grown, layout_of, spread};
+use crate::erasure_moves::{BEFORE, NEW_SET, UNPACED, applied, grown, layout_of, spread};
 use crate::erasure_reads::{read_back, striped, written};
 use crate::{IGNORED, call};
 
@@ -17,14 +17,14 @@ async fn a_shard_the_new_set_keeps_on_its_node_is_neither_copied_nor_retired() {
     let first = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!((first.examined, first.moved), (1, 1));
     let second = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(second.retired, 1);
@@ -42,7 +42,7 @@ async fn an_object_deleted_before_its_retire_leaves_no_old_shard_behind() {
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     let deleted = call(&member.state, "DELETE", "/shards/big", vec![], b"").await;
@@ -61,7 +61,7 @@ async fn an_object_deleted_before_its_retire_leaves_no_old_shard_behind() {
     let pass = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(pass.retired, 1);
@@ -78,14 +78,14 @@ async fn a_second_layout_waits_for_the_first_moves_retire() {
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     applied(&member, &[&["n1", "n2", "n3", "n4", "n5", "n6"]]).await;
     let early = member
         .storage
         .objects()
-        .move_layouts(3600, 100)
+        .move_layouts(3600, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(
@@ -101,7 +101,7 @@ async fn a_second_layout_waits_for_the_first_moves_retire() {
     let due = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!((due.retired, due.moved), (1, 1));
@@ -109,7 +109,7 @@ async fn a_second_layout_waits_for_the_first_moves_retire() {
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(spread(&member), BEFORE);

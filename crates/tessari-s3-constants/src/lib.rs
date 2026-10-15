@@ -165,6 +165,10 @@ pub const REAP_BATCH: usize = 1000;
 /// Seconds between healing passes on a cluster member, when `TESSARIDB_S3_HEAL_INTERVAL_SECS` is unset.
 pub const DEFAULT_HEAL_INTERVAL_SECS: u64 = 60;
 
+/// Bytes a second moving data onto a new layout copies, when `TESSARIDB_S3_MOVE_BYTES_PER_SEC` is unset: 32 MiB, a
+/// share of a drive's bandwidth that leaves the rest to the requests being served.
+pub const DEFAULT_MOVE_BYTES_PER_SEC: u64 = 32 * 1024 * 1024;
+
 /// Seconds a console session lasts from sign-in; there is no refresh — the operator signs in again.
 pub const CONSOLE_SESSION_SECS: i64 = 3_600;
 
@@ -217,6 +221,9 @@ pub const CONSOLE_OBJECTS_PAGE_DEFAULT: usize = 100;
 
 /// Data ids one healing pass looks at.
 pub const HEAL_BATCH: usize = 100;
+
+/// Data ids a mover pass looks at, after the retires that are due.
+pub const MOVE_BATCH: usize = 100;
 
 /// Seconds a node's claim on one data id lasts — taken by a healer before it checks and rewrites shards, and by a
 /// reclaimer before it removes them, so one node at a time works on an id. A lease, not a mutex: past it another node

@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- An applied layout is put into effect: each cluster member moves objects written under an older layout onto it —
+  copying and verifying the shards whose node changes before switching the object, and removing the old shards once
+  the reclaim grace has passed — at most `TESSARIDB_S3_MOVE_BYTES_PER_SEC` (default 32 MiB) a second.
 - Root changes a cluster's layout through the console: staged over the current version (`PUT
   /api/v1/cluster/layout/staged`, judged against the registered nodes and their zones) and applied as the next version
   (`POST /api/v1/cluster/layout/apply`), refused when the layout or the staging changed meanwhile. Both need a fresh

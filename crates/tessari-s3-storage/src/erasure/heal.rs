@@ -9,6 +9,7 @@ use tessari_s3_constants::{HEAL_AT_RISK_ATTEMPTS, SHARD_QUEUE_BLOCKS};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use super::pace::Pace;
 use super::read::ErasureReader;
 use super::repository::ShardSetRepository;
 use super::senders::{self, ShardShape};
@@ -107,16 +108,18 @@ impl ErasureWrites {
             return Ok(Outcome::AtRisk);
         }
         tracing::info!(data = %crate::data::hex(id), shards = ?broken, "rebuilding shards");
-        self.rebuild(&reader, &sources, &broken).await?;
+        self.rebuild(&reader, &sources, &broken, None).await?;
         Ok(Outcome::Whole)
     }
 
-    /// Writes shards `broken` to `sources` from the stripes `reader` decodes, each through the shard commit.
+    /// Writes shards `broken` to `sources` from the stripes `reader` decodes, each through the shard commit, keeping
+    /// to `pace` when one is given.
     pub(super) async fn rebuild(
         &self,
         reader: &ErasureReader,
         sources: &[Destination],
         broken: &[usize],
+        mut pace: Option<&mut Pace>,
     ) -> Result<()> {
         let block_len =
             u32::try_from(reader.stripes().block_len()).map_err(|_| Error::InvalidShard {
@@ -172,10 +175,15 @@ impl ErasureWrites {
                 .map_err(|_| Error::InvalidShard {
                     reason: "stripe does not encode",
                 })?;
+            let mut sent = 0_u64;
             for (shard, queue) in &queues {
                 let block = blocks.get(*shard).cloned().unwrap_or_default();
+                sent = sent.saturating_add(u64::try_from(block.len()).unwrap_or(u64::MAX));
                 // A writer that stopped has already failed; its error is collected below, and the others go on.
                 let _stopped = queue.send_timeout(Bytes::from(block), self.stall()).await;
+            }
+            if let Some(pace) = pace.as_deref_mut() {
+                pace.spend(sent).await;
             }
         }
         // Closing the queues ends each shard, which its writer then commits.

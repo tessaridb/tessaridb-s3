@@ -4,11 +4,16 @@
 //! reclaim grace, so a read that resolved the old placement before the switch still finds them. Every step is
 //! re-derived from the store, so a pass cut short anywhere is finished by the next one, on any node.
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 
+use futures_util::future::{Either, select};
+use tessari_s3_constants::HEAL_CLAIM_SECS;
 use tessari_s3_core::erasure::Layout;
 
 use super::moves_repository::LayoutMoveRepository;
+use super::pace::Pace;
 use super::read::ErasureReader;
 use super::repository::ShardSetRepository;
 use super::upload::Destination;
@@ -20,7 +25,8 @@ use crate::{Error, Result};
 impl ErasureWrites {
     /// Removes the shards earlier moves left behind once their retire is `grace_secs` old, then moves up to `limit`
     /// data ids written under an older layout onto the current one; each id under this node's claim, and an id
-    /// another node holds is left to it. A move or retire that fails part way is logged and left for the next pass.
+    /// another node holds is left to it. The copies keep to `budget` bytes a second over the whole pass. A move or
+    /// retire that fails part way is logged and left for the next pass.
     ///
     /// # Errors
     /// [`Error::NoLayout`], or the metadata store's refusal or outage while listing, claiming or switching.
@@ -28,8 +34,10 @@ impl ErasureWrites {
         self: &Arc<Self>,
         grace_secs: u64,
         limit: usize,
+        budget: NonZeroU64,
     ) -> Result<Moved> {
         let mut done = Moved::default();
+        let mut pace = Pace::new(budget);
         for (id, old) in self.sets.due_retires(grace_secs, limit).await? {
             if !self.sets.claim(id, self.holder()).await? {
                 done.held = done.held.saturating_add(1);
@@ -51,7 +59,7 @@ impl ErasureWrites {
                 done.held = done.held.saturating_add(1);
                 continue;
             }
-            let moved = self.move_one(id, &current).await;
+            let moved = self.move_one(id, &current, &mut pace).await;
             self.unclaim_logged(id).await;
             match moved {
                 Ok(true) => done.moved = done.moved.saturating_add(1),
@@ -66,7 +74,12 @@ impl ErasureWrites {
 
     /// Copies the shards of data `id` whose node changes under `current`, verifies each copy, and switches the id;
     /// `false` when the id is gone or already moved, read again under the claim.
-    async fn move_one(self: &Arc<Self>, id: [u8; 16], current: &Layout) -> Result<bool> {
+    async fn move_one(
+        self: &Arc<Self>,
+        id: [u8; 16],
+        current: &Layout,
+        pace: &mut Pace,
+    ) -> Result<bool> {
         let Some(set) = self.sets.shard_set(id).await? else {
             return Ok(false);
         };
@@ -82,7 +95,15 @@ impl ErasureWrites {
             let targets = self.destinations(id, current).await?;
             let sources = self.destinations(id, &old).await?;
             let reader = ErasureReader::new(Arc::clone(self), id, set.size, sources)?;
-            self.rebuild(&reader, &targets, &changed).await?;
+            {
+                let copy = std::pin::pin!(self.rebuild(&reader, &targets, &changed, Some(pace)));
+                let renewal = std::pin::pin!(self.renew(id));
+                // The copy can outlast the claim's lease at a low budget, so the claim is renewed while it runs; a
+                // claim another node took meanwhile stops the copy, and nothing is switched.
+                match select(copy, renewal).await {
+                    Either::Left((copied, _)) | Either::Right((copied, _)) => copied?,
+                }
+            }
             let copies = ErasureReader::new(Arc::clone(self), id, set.size, targets)?;
             for &index in &changed {
                 if !copies.intact(index).await {
@@ -93,6 +114,19 @@ impl ErasureWrites {
             }
         }
         self.sets.switch(id, set.layout, current.version()).await
+    }
+
+    /// Renews this node's claim on data `id` every third of its lease, until the claim is another node's.
+    async fn renew(&self, id: [u8; 16]) -> Result<()> {
+        let mut ticks = tokio::time::interval(Duration::from_secs(HEAL_CLAIM_SECS / 3));
+        // The first tick is immediate, and the claim was just taken.
+        ticks.tick().await;
+        loop {
+            ticks.tick().await;
+            if !self.sets.claim(id, self.holder()).await? {
+                return Err(Error::Held);
+            }
+        }
     }
 
     /// Removes the shards of data `id` that layout `old` placed on a node its present layout does not use for the

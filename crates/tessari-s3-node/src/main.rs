@@ -1,7 +1,7 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
 //! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
-//! configured, the healer on a cluster member, the upload reaper and the usage scanner), the API state and router,
+//! configured, the healer and the mover on a cluster member, the upload reaper and the usage scanner), the API state and router,
 //! the listener — and, on a node of a cluster, the internal shard listener — then serving until SIGINT or SIGTERM,
 //! after which in-flight requests and the daemons' current runs get the configured grace period before the process
 //! exits.
@@ -18,8 +18,8 @@ use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
-    Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, NotifyWorker, Reclaimer,
-    UploadReaper, UsageScanner, VideoWorker, run,
+    Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, Mover, NotifyWorker,
+    Reclaimer, UploadReaper, UsageScanner, VideoWorker, run,
 };
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::media::TaskQueue;
@@ -90,6 +90,14 @@ async fn main() -> anyhow::Result<()> {
             Duration::from_secs(cluster.heal_interval_secs),
         );
         daemons.spawn(run(Arc::new(healer), stop_rx.clone()));
+        let mover = Mover::new(
+            storage.objects().clone(),
+            Duration::from_secs(cluster.heal_interval_secs),
+            config.reclaim_grace_secs,
+            cluster.move_bytes_per_sec,
+            stop_rx.clone(),
+        );
+        daemons.spawn(run(Arc::new(mover), stop_rx.clone()));
     }
     // Uploads can be opened without a data directory, so the reaper always runs.
     let reaper = UploadReaper::new(

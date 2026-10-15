@@ -139,13 +139,19 @@ impl ObjectService {
     }
 
     /// Moves up to `limit` data ids written under an older layout onto the current one, and first removes the shards
-    /// earlier moves left behind once they are `grace_secs` old; nothing off a cluster.
+    /// earlier moves left behind once they are `grace_secs` old, copying at most `budget` bytes a second; nothing off
+    /// a cluster.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
-    pub async fn move_layouts(&self, grace_secs: u64, limit: usize) -> Result<Moved> {
+    pub async fn move_layouts(
+        &self,
+        grace_secs: u64,
+        limit: usize,
+        budget: std::num::NonZeroU64,
+    ) -> Result<Moved> {
         match &self.erasure {
-            Some(writes) => writes.move_pass(grace_secs, limit).await,
+            Some(writes) => writes.move_pass(grace_secs, limit, budget).await,
             None => Ok(Moved::default()),
         }
     }

@@ -2,6 +2,8 @@
 //! placement puts elsewhere, verifies them, switches the object to the new layout, and only later — a pass after, past
 //! the reclaim grace — removes the shards the old placement left behind. A crash at any point resumes from the store.
 
+use std::num::NonZeroU64;
+
 use tessari_s3_core::erasure::Code;
 use tessari_s3_infrastructure::tessaridb::{Answer, Number, Value};
 use tessari_s3_storage::Storage;
@@ -96,6 +98,9 @@ pub(crate) async fn layout_of(member: &Member) -> i64 {
     }
 }
 
+/// A budget no test object reaches: the copy is not paced.
+pub(crate) const UNPACED: NonZeroU64 = NonZeroU64::MAX;
+
 pub(crate) const NEW_SET: [&str; 6] = ["n7", "n8", "n9", "n10", "n11", "n12"];
 pub(crate) const BEFORE: [usize; 12] = [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0];
 const AFTER: [usize; 12] = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1];
@@ -112,7 +117,7 @@ async fn every_shard_moves_onto_a_new_set_and_the_old_nodes_are_emptied_a_pass_l
     let first = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!((first.examined, first.moved, first.retired), (1, 1, 0));
@@ -127,7 +132,7 @@ async fn every_shard_moves_onto_a_new_set_and_the_old_nodes_are_emptied_a_pass_l
     let second = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!((second.examined, second.moved, second.retired), (0, 0, 1));
@@ -146,7 +151,7 @@ async fn a_move_cut_short_on_either_side_of_the_switch_finishes_from_the_store()
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     // As if the node stopped after copying and before switching: the object is back on version 1, no retire.
@@ -170,7 +175,7 @@ async fn a_move_cut_short_on_either_side_of_the_switch_finishes_from_the_store()
     .with_reclaim_grace(member.config.reclaim_grace_secs);
     let again = restarted
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(
@@ -181,7 +186,7 @@ async fn a_move_cut_short_on_either_side_of_the_switch_finishes_from_the_store()
     assert_eq!(layout_of(&member).await, 2);
     let last = restarted
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(
@@ -204,7 +209,7 @@ async fn an_object_another_node_holds_is_left_on_its_layout() {
     let pass = member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!((pass.examined, pass.moved, pass.held), (1, 0, 1));
@@ -222,13 +227,13 @@ async fn growing_to_two_sets_leaves_each_shard_only_where_the_new_placement_want
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     member
         .storage
         .objects()
-        .move_layouts(0, 100)
+        .move_layouts(0, 100, UNPACED)
         .await
         .expect("a pass");
     assert_eq!(layout_of(&member).await, 2);

@@ -5,6 +5,7 @@ mod heal;
 mod mover;
 mod moves_repository;
 mod moves_tessaridb;
+mod pace;
 mod read;
 mod repository;
 mod senders;
