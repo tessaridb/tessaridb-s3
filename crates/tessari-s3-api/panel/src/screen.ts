@@ -33,6 +33,8 @@ function next(failure: Failure): string {
       return "Try again in a moment.";
     case "precondition_failed":
       return "Reload it and check it before acting.";
+    case "reauthentication_required":
+      return "Sign out, sign in again, then repeat this: changes like this need a sign-in from the last five minutes.";
     case "action_not_recorded":
       return "The action was carried out. Tell whoever audits this node; the server log holds the record.";
     default:

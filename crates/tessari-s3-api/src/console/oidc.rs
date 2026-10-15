@@ -7,12 +7,13 @@
 
 use std::net::SocketAddr;
 
+use axum::Json;
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, SET_COOKIE};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tessari_s3_constants::{
     CONSOLE_FRESH_AUTH_SECS, CONSOLE_OIDC_LOGIN_SECS, CONSOLE_SESSION_SECS,
 };
@@ -45,12 +46,25 @@ pub(super) struct Return {
 /// back-channel logout.
 pub(super) fn routes() -> axum::Router<ConsoleState> {
     axum::Router::new()
+        .route("/api/v1/auth/methods", get(methods))
         .route("/api/v1/auth/oidc/start", get(start))
         .route("/api/v1/auth/oidc/callback", get(callback))
         .route(
             "/api/v1/auth/oidc/backchannel-logout",
             post(super::logout::backchannel),
         )
+}
+
+/// How one may sign in here, for the sign-in page: with a key always, and through the provider when one is configured.
+#[derive(Serialize)]
+pub(super) struct Methods {
+    provider: bool,
+}
+
+pub(super) async fn methods(State(state): State<ConsoleState>) -> Json<Methods> {
+    Json(Methods {
+        provider: state.oidc().is_some(),
+    })
 }
 
 fn admit(state: &ConsoleState, client: &SocketAddr) -> Result<(), ConsoleError> {

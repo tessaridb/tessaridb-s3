@@ -113,6 +113,8 @@ async fn a_linked_person_signs_in_as_the_user_once_per_state() {
         .link(&user("ann"), &provider.issuer, SUBJECT)
         .await
         .expect("linked");
+    let methods = send(&console, "GET", "/api/v1/auth/methods", None, None).await;
+    assert_eq!(methods.json()["provider"], Value::Bool(true));
     let (url, state) = start(&console).await;
     provider.grant(&url, "code-ann", Shape::Good);
     let signed = callback(&console, &format!("code=code-ann&state={state}")).await;
@@ -268,4 +270,8 @@ async fn without_an_identity_provider_there_is_no_such_route() {
         .expect("a console is configured");
     let answer = send(&console, "GET", "/api/v1/auth/oidc/start", None, None).await;
     assert_eq!(answer.status, 404);
+    // The sign-in page asks, without a session, whether to offer the provider.
+    let methods = send(&console, "GET", "/api/v1/auth/methods", None, None).await;
+    assert_eq!(methods.status, 200);
+    assert_eq!(methods.json()["provider"], Value::Bool(false));
 }

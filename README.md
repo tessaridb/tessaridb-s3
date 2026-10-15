@@ -164,6 +164,12 @@ must be linked to a user (`PUT /api/v1/users/{user}/identity` with the provider'
 that user, recorded like any change). Every refused return is the same `401`; the reason is in the node's log. The
 session holds the user, not a key, and ends at its next request once the user is disabled.
 
+The sign-in page asks `GET /api/v1/auth/methods` (no session needed; `{"provider": true|false}`) and, with a provider
+configured, offers "Sign in with your organisation" as its main action — it starts at
+`/api/v1/auth/oidc/start?fresh=true`, so a person arriving there may act on privileged pages right away — with the
+access-key form below it. A root sign-in the server answers with `reason_required` opens a reason field on the same
+form, and a privileged act refused with `reauthentication_required` tells the operator to sign in again.
+
 Beside an identity provider, signing in with the root credential is the emergency path. It owes a `reason`, and the
 session lasts 15 minutes instead of an hour. The sign-in is recorded in the action record (`break_glass_sign_in`)
 before the session exists; a record that cannot be written refuses the sign-in. When a webhook is configured, the

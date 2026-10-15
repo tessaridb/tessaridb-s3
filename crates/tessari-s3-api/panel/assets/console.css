@@ -971,13 +971,15 @@ button:disabled {
   cursor: progress;
 }
 
-button.primary {
+button.primary,
+.button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
 }
 
-button.primary:hover {
+button.primary:hover,
+.button.primary:hover {
   background: var(--accent-hover);
 }
 
@@ -1153,7 +1155,8 @@ button.icon-action.danger {
   margin-block-end: var(--s-2);
 }
 
-.gate button.primary {
+.gate button.primary,
+.gate .provider {
   inline-size: 100%;
   margin-block-start: var(--s-2);
 }

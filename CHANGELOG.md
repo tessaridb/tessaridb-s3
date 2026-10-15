@@ -5,6 +5,9 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- The console's sign-in page offers the identity provider as its main action when one is configured, learned from the
+  new `GET /api/v1/auth/methods`; it asks for a reason when a root sign-in needs one and explains a
+  `reauthentication_required` refusal.
 - Console sign-in through an OpenID Connect provider (`TESSARIDB_S3_CONSOLE_OIDC_*`): authorization code with PKCE,
   the ID token verified against the provider's keys with a fixed algorithm list, a second factor required through
   `amr`, and the identity linked to a user by an operator (`PUT`/`DELETE /api/v1/users/{user}/identity`, recorded).
