@@ -40,6 +40,8 @@ mod media;
 mod meta_pool;
 mod metadata;
 mod multipart;
+mod namespaces;
+mod namespaces_dropped;
 mod no_bytes;
 mod notifications;
 mod notify_delivery;
@@ -158,13 +160,13 @@ pub(crate) async fn fresh_console_with(
     )
 }
 
-/// The configuration of a node over a fresh namespace, its console configured too.
+/// The configuration of a node over a fresh namespace, removed when the test ends; its console configured too.
 pub(crate) fn live_config(
     meta_addresses: String,
     replication: Option<&str>,
     data_dir: &std::path::Path,
 ) -> S3Config {
-    let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
+    let namespace = namespaces::name();
     let mut vars = vec![
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET.to_owned()),
@@ -193,8 +195,11 @@ pub(crate) fn live_config(
     if let Some(replication) = replication {
         vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));
     }
-    S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
-        .expect("live configuration")
+    let config =
+        S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+            .expect("live configuration");
+    namespaces::removed_at_end(&config.meta);
+    config
 }
 
 /// The account the server signs in as for `config`'s namespace: created by the test node's owner as an editor of that

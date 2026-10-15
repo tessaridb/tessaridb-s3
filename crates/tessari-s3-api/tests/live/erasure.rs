@@ -100,9 +100,10 @@ async fn peer(config: &S3Config) -> Peer {
 
 /// A cluster member `n1` with peers `n2`..`n6` registered, in a fresh namespace.
 pub(crate) async fn member() -> Member {
-    let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
+    let namespace = crate::namespaces::name();
     let dir = scratch_dir();
     let config = configuration(&namespace, &dir);
+    crate::namespaces::removed_at_end(&config.meta);
     let storage = Storage::clustered(
         MetaPool::new(config.meta.clone()).expect("pool"),
         config.data_dir.clone(),
