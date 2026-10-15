@@ -2,10 +2,14 @@
 //! other piece of metadata.
 
 mod entity;
+#[cfg(test)]
+mod fake;
 mod layouts;
 mod repository;
 mod service;
+mod staging;
 mod tessaridb;
 
 pub use service::{ClusterService, Member};
+pub use staging::{Apply, Stage, StagedLayout};
 pub use tessaridb::TessariCluster;

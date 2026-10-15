@@ -1,10 +1,11 @@
-//! Topology in TessariDB: `s3_nodes:<node id>` per node, `layouts:<version>` per layout and `layout_current:'cluster'`
-//! naming the version new objects are written under; every value is bound.
+//! Topology in TessariDB: `s3_nodes:<node id>` per node, `layouts:<version>` per layout, `layout_current:'cluster'`
+//! naming the version new objects are written under and `layout_staged:'cluster'` the change an operator proposes;
+//! every value is bound.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 
-use super::entity::{LayoutEntity, NodeEntity};
-use super::repository::{ClusterRepository, Proposed};
+use super::entity::{LayoutEntity, NodeEntity, StagedEntity};
+use super::repository::{Applied, ClusterRepository, Proposed};
 use crate::answers::first_record;
 use crate::{Error, Result};
 
@@ -139,6 +140,76 @@ impl ClusterRepository for TessariCluster {
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(Proposed::Created),
             Err(error) if error.is_class(RefusalClass::Conflict) => Ok(Proposed::Exists),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn staged(&self) -> Result<Option<StagedEntity>> {
+        let answers = self
+            .pool
+            .run(
+                "SELECT id, base, sets FROM ONLY layout_staged:'cluster';",
+                Vec::new(),
+            )
+            .await?;
+        first_record(answers.into_iter().next())?
+            .as_ref()
+            .map(StagedEntity::from_value)
+            .transpose()
+    }
+
+    async fn stage(&self, staged: &StagedEntity) -> Result<()> {
+        let parameters = vec![
+            ("id".to_owned(), Value::String(staged.id.clone())),
+            (
+                "base".to_owned(),
+                Value::Number(Number::Integer(staged.base)),
+            ),
+            ("sets".to_owned(), staged.sets_value()),
+        ];
+        self.pool
+            .run(
+                "UPSERT layout_staged:'cluster' SET id = $id, base = $base, sets = $sets, \
+                 staged = time::now();",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn unstage(&self) -> Result<()> {
+        self.pool
+            .run("DELETE layout_staged:'cluster';", Vec::new())
+            .await?;
+        Ok(())
+    }
+
+    async fn apply(&self, base: i64, id: &str, layout: &LayoutEntity) -> Result<Applied> {
+        let parameters = vec![
+            ("base".to_owned(), Value::Number(Number::Integer(base))),
+            ("id".to_owned(), Value::String(id.to_owned())),
+            (
+                "version".to_owned(),
+                Value::Number(Number::Integer(layout.version)),
+            ),
+            (
+                "data".to_owned(),
+                Value::Number(Number::Integer(layout.data)),
+            ),
+            (
+                "parity".to_owned(),
+                Value::Number(Number::Integer(layout.parity)),
+            ),
+            ("sets".to_owned(), layout.sets_value()),
+        ];
+        // Both conditions are compare-and-set: either one failing discards the whole transaction.
+        let script = "BEGIN; UPDATE layout_current:'cluster' SET version = $version WHERE version = $base; \
+                      UPDATE layout_staged:'cluster' SET id = $id WHERE id = $id; \
+                      CREATE layouts:$version = { version: $version, data: $data, parity: $parity, sets: $sets, \
+                      created: time::now() }; DELETE layout_staged:'cluster'; COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(Applied::Applied),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(Applied::Refused),
             Err(error) => Err(error.into()),
         }
     }

@@ -11,6 +11,7 @@ use tessari_s3_types::{NodeId, Zone};
 
 use super::layouts::{Layouts, current_of, version_of};
 use super::repository::ClusterRepository;
+use super::staging::{Apply, Stage, StagedLayout, apply_of, stage_of, staged_of};
 use super::tessaridb::TessariCluster;
 use crate::data::DriveSpace;
 use crate::peers::RemoteShards;
@@ -112,6 +113,38 @@ impl ClusterService {
     /// or outage.
     pub async fn version(&self, code: Code, version: u32) -> Result<Layout> {
         version_of(&self.repository, &self.layouts, code, version).await
+    }
+
+    /// The layout an operator staged, waiting to be applied.
+    ///
+    /// # Errors
+    /// [`crate::Error::Malformed`] for a staged record this node cannot read; the store's refusal or outage.
+    pub async fn staged(&self, code: Code) -> Result<Option<StagedLayout>> {
+        staged_of(&self.repository, code).await
+    }
+
+    /// Stages `sets` of registered nodes as the next layout, replacing anything staged before.
+    ///
+    /// # Errors
+    /// [`crate::Error::LayoutMismatch`] when the current layout uses another code; the store's refusal or outage.
+    pub async fn stage(&self, code: Code, sets: Vec<Vec<NodeId>>) -> Result<Stage> {
+        stage_of(&self.repository, &self.layouts, code, sets).await
+    }
+
+    /// Discards the staged layout, if any.
+    ///
+    /// # Errors
+    /// The store's refusal or outage.
+    pub async fn unstage(&self) -> Result<()> {
+        self.repository.unstage().await
+    }
+
+    /// Applies the staged layout named `id` as the next version.
+    ///
+    /// # Errors
+    /// [`crate::Error::Malformed`] for a staged record this node cannot read; the store's refusal or outage.
+    pub async fn apply(&self, code: Code, id: &str) -> Result<Apply> {
+        apply_of(&self.repository, &self.layouts, code, id).await
     }
 }
 

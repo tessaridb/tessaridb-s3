@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use super::entity::{LayoutEntity, NodeEntity};
+use super::entity::{LayoutEntity, NodeEntity, StagedEntity};
 use crate::Result;
 
 /// The outcome of creating a layout version.
@@ -12,6 +12,15 @@ pub(crate) enum Proposed {
     Created,
     /// Another node's proposal for the version committed first.
     Exists,
+}
+
+/// The outcome of applying a staged layout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Applied {
+    /// The layout became the current version and the staged record is gone.
+    Applied,
+    /// The current version is no longer the base, or the staged record is no longer the one named; nothing written.
+    Refused,
 }
 
 /// Topology queries; no rule beyond what a query states.
@@ -31,4 +40,18 @@ pub(crate) trait ClusterRepository: Send + Sync {
     fn layout(&self, version: i64) -> impl Future<Output = Result<Option<LayoutEntity>>> + Send;
     /// Creates the FIRST layout and points the current version at it, in one transaction, unless either exists.
     fn propose(&self, layout: &LayoutEntity) -> impl Future<Output = Result<Proposed>> + Send;
+    /// The staged layout, if any.
+    fn staged(&self) -> impl Future<Output = Result<Option<StagedEntity>>> + Send;
+    /// Writes `staged`, replacing any staged before.
+    fn stage(&self, staged: &StagedEntity) -> impl Future<Output = Result<()>> + Send;
+    /// Removes the staged layout, if any.
+    fn unstage(&self) -> impl Future<Output = Result<()>> + Send;
+    /// In one transaction, while the current version is still `base` and the staged record is still `id`: creates
+    /// `layout`, makes it current and removes the staged record.
+    fn apply(
+        &self,
+        base: i64,
+        id: &str,
+        layout: &LayoutEntity,
+    ) -> impl Future<Output = Result<Applied>> + Send;
 }

@@ -12,6 +12,7 @@ mod access_probe;
 mod access_window;
 mod buckets;
 mod cluster;
+mod cluster_staging;
 mod complete;
 mod confined_account;
 mod console;

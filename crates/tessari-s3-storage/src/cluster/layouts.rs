@@ -131,7 +131,7 @@ async fn propose(repository: &impl ClusterRepository, entity: &LayoutEntity) -> 
 }
 
 /// `layout` as stored.
-fn entity_of(layout: &Layout) -> LayoutEntity {
+pub(super) fn entity_of(layout: &Layout) -> LayoutEntity {
     LayoutEntity {
         version: i64::from(layout.version()),
         data: i64::from(layout.code().data()),
@@ -152,7 +152,7 @@ fn entity_of(layout: &Layout) -> LayoutEntity {
 }
 
 /// A stored layout as this node may use it: under the code it is configured with, and well formed.
-fn held(stored: &LayoutEntity, code: Code) -> Result<Layout> {
+pub(super) fn held(stored: &LayoutEntity, code: Code) -> Result<Layout> {
     if stored.data != i64::from(code.data()) || stored.parity != i64::from(code.parity()) {
         return Err(Error::LayoutMismatch {
             stored_data: stored.data,

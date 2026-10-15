@@ -37,6 +37,17 @@ pub(crate) struct LayoutEntity {
     pub(crate) sets: Vec<Vec<MemberEntity>>,
 }
 
+/// `layout_staged:'cluster'`: the layout an operator proposes, waiting to be applied over version `base`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StagedEntity {
+    /// Minted when staged; an apply names it, so a layout staged again meanwhile is not applied unseen.
+    pub(crate) id: String,
+    /// The current version it was staged over.
+    pub(crate) base: i64,
+    /// Its erasure sets, each node with the zone it was registered in when staged.
+    pub(crate) sets: Vec<Vec<MemberEntity>>,
+}
+
 fn malformed(record: &'static str, reason: &'static str) -> Error {
     Error::Malformed { record, reason }
 }
@@ -100,33 +111,60 @@ impl LayoutEntity {
     /// [`Error::Malformed`].
     pub(crate) fn from_value(value: &Value) -> Result<Self> {
         let fields = fields(value, "layout")?;
-        let sets = match fields.get("sets") {
-            Some(Value::Array(sets)) => sets
-                .iter()
-                .map(|set| match set {
-                    Value::Array(members) => members.iter().map(MemberEntity::from_value).collect(),
-                    _ => Err(malformed("layout", "sets")),
-                })
-                .collect::<Result<Vec<_>>>()?,
-            _ => return Err(malformed("layout", "sets")),
-        };
         Ok(Self {
             version: integer(fields.get("version"), "version")?,
             data: integer(fields.get("data"), "data")?,
             parity: integer(fields.get("parity"), "parity")?,
-            sets,
+            sets: sets_of(fields.get("sets"), "layout")?,
         })
     }
 
     /// The `sets` value written: `[[{ node, zone? }, …], …]`.
     pub(crate) fn sets_value(&self) -> Value {
-        Value::Array(
-            self.sets
-                .iter()
-                .map(|set| Value::Array(set.iter().map(MemberEntity::to_value).collect()))
-                .collect(),
-        )
+        sets_value(&self.sets)
     }
+}
+
+impl StagedEntity {
+    /// Reads a record's value.
+    ///
+    /// # Errors
+    /// [`Error::Malformed`].
+    pub(crate) fn from_value(value: &Value) -> Result<Self> {
+        let fields = fields(value, "layout_staged")?;
+        Ok(Self {
+            id: text(fields.get("id"), "layout_staged", "id")?,
+            base: integer(fields.get("base"), "base")?,
+            sets: sets_of(fields.get("sets"), "layout_staged")?,
+        })
+    }
+
+    /// The `sets` value written, as a layout's.
+    pub(crate) fn sets_value(&self) -> Value {
+        sets_value(&self.sets)
+    }
+}
+
+/// `[[{ node, zone? }, …], …]` read back.
+fn sets_of(value: Option<&Value>, record: &'static str) -> Result<Vec<Vec<MemberEntity>>> {
+    match value {
+        Some(Value::Array(sets)) => sets
+            .iter()
+            .map(|set| match set {
+                Value::Array(members) => members.iter().map(MemberEntity::from_value).collect(),
+                _ => Err(malformed(record, "sets")),
+            })
+            .collect(),
+        _ => Err(malformed(record, "sets")),
+    }
+}
+
+fn sets_value(sets: &[Vec<MemberEntity>]) -> Value {
+    Value::Array(
+        sets.iter()
+            .map(|set| Value::Array(set.iter().map(MemberEntity::to_value).collect()))
+            .collect(),
+    )
 }
 
 impl MemberEntity {
