@@ -13,8 +13,11 @@ export type Status = {
   readonly erasure: string | null;
   readonly members: readonly Member[] | null;
   readonly heal_backlog: Backlog | null;
+  /** How this region's replication stands; null when the viewer may not see it or the store did not answer. */
+  readonly replication: Replication | null;
   readonly drive: Drive | null;
 };
+export type Replication = { readonly backlog: number; readonly in_flight: number; readonly failed: number };
 /** A bucket's figures as last measured: logical bytes and the bytes on the drives (with erasure overhead on a
  * cluster). */
 export type BucketUsage = {
@@ -178,11 +181,18 @@ export function readStatus(v: unknown): Status | null {
       : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"])
         ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] }
         : undefined;
+  const sent = v["replication"];
+  const replication =
+    sent === null
+      ? null
+      : record(sent) && count(sent["backlog"]) && count(sent["in_flight"]) && count(sent["failed"])
+        ? { backlog: sent["backlog"], in_flight: sent["in_flight"], failed: sent["failed"] }
+        : undefined;
   const space = drive(v["drive"]);
-  if ((v["members"] !== null && members === null) || heal === undefined || space === undefined) {
+  if ((v["members"] !== null && members === null) || heal === undefined || replication === undefined || space === undefined) {
     return null;
   }
-  return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space };
+  return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, replication, drive: space };
 }
 
 const bucketUsage = (v: unknown): BucketUsage | null =>

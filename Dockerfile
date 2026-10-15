@@ -6,7 +6,8 @@
 # carries one executable and what it needs at run time.
 
 # ── build ───────────────────────────────────────────────────────────────────
-FROM rust:1.98-slim-bookworm AS build
+# Debian 13 like the image it feeds, so the binary links the C library it runs on.
+FROM rust:1.98-slim-trixie@sha256:4cd829461bd5c4d511c32e269da9cb8929223b666519d8004e35fc8d1d771ab7 AS build
 
 WORKDIR /src
 COPY . .
@@ -16,24 +17,17 @@ COPY . .
 # build output, so no Node is needed here.
 RUN cargo build --release --locked -p tessari-s3-node --bin tessaridb-s3
 
+# The data directory, owned by the runtime image's `nonroot` user (65532): the
+# image below has no shell to create it.
+RUN mkdir -p /out/var/lib/tessaridb-s3/data
+
 # ── run ─────────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# Distroless: the C runtime and CA certificates, no shell, no package manager.
+FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe66b49b5f365771716ea688ad40b6c6f1c2
 
-# `bash` for the health check, which speaks HTTP over `/dev/tcp` instead of
-# adding an HTTP client. The upgrade takes the base's security fixes published
-# after it was built.
-RUN apt-get update \
- && apt-get upgrade -y --no-install-recommends \
- && apt-get install -y --no-install-recommends bash \
- && rm -rf /var/lib/apt/lists/* \
- && useradd --system --uid 10001 --home-dir /var/lib/tessaridb-s3 --shell /usr/sbin/nologin s3 \
- && mkdir -p /var/lib/tessaridb-s3/data \
- && chown -R s3:s3 /var/lib/tessaridb-s3
-
+COPY --from=build --chown=65532:65532 /out/var/lib/tessaridb-s3 /var/lib/tessaridb-s3
 COPY --from=build /src/target/release/tessaridb-s3 /usr/local/bin/tessaridb-s3
-COPY docker/healthcheck.sh /usr/local/bin/tessaridb-s3-healthcheck
 COPY LICENSE /usr/share/doc/tessaridb-s3/LICENSE
-RUN chmod 0755 /usr/local/bin/tessaridb-s3-healthcheck
 
 # Defaults that make a container reachable: `0.0.0.0`, because a container's
 # loopback answers nothing outside it. Everything else the server reads —
@@ -47,11 +41,14 @@ ENV TESSARIDB_S3_LISTEN=0.0.0.0:9100 \
 VOLUME ["/var/lib/tessaridb-s3"]
 EXPOSE 9100/tcp 9101/tcp
 
-USER s3
+USER nonroot
 WORKDIR /var/lib/tessaridb-s3
 
+# `tessaridb-s3 health` sends an unsigned `GET /` to the local listener and
+# passes on any HTTP status line — the server's own answer, after its request
+# pipeline ran — so a server listening but wedged fails it.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["/usr/local/bin/tessaridb-s3-healthcheck"]
+  CMD ["/usr/local/bin/tessaridb-s3", "health"]
 
 # No init process: the server handles SIGTERM and SIGINT itself (draining
 # in-flight requests for TESSARIDB_S3_SHUTDOWN_GRACE_SECS), and the only child

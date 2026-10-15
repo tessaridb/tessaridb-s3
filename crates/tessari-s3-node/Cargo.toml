@@ -11,6 +11,7 @@ name = "tessaridb-s3"
 path = "src/main.rs"
 
 [dependencies]
+tessari-s3-constants.workspace = true
 tessari-s3-observability.workspace = true
 tessari-s3-infrastructure.workspace = true
 tessari-s3-core.workspace = true

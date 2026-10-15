@@ -7,7 +7,7 @@ import { el, fill, mono, row, table } from "./dom.ts";
 import { amount, moment, share, size } from "./format.ts";
 import { icon, type IconName } from "./icons.ts";
 import { meter, used } from "./meter.ts";
-import { readStatus, readUsage, type Backlog, type Drive, type Member, type Status, type Usage } from "./models.ts";
+import { readStatus, readUsage, type Backlog, type Drive, type Member, type Replication, type Status, type Usage } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, type Screen } from "./screen.ts";
 
@@ -32,6 +32,21 @@ export function healing(heal: Backlog | null): HTMLElement {
     return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip bad" }, risk), " Healing keeps failing for these: too few shards can be read."));
   }
   return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
+}
+
+/** The Replication tile: versions waiting to reach their destination region, being sent, or given up. */
+function replicationTile(replication: Replication | null): HTMLElement | null {
+  if (replication === null) {
+    return null;
+  }
+  if (replication.failed > 0) {
+    const failed = `${amount(replication.failed)} failed`;
+    return tile("layers", "Replication", amount(replication.backlog), el("span", {}, el("span", { class: "chip bad" }, failed), " Given up after 10 tries; these versions are FAILED."));
+  }
+  if (replication.backlog === 0) {
+    return tile("layers", "Replication", el("span", { class: "chip ok" }, "Caught up"), "Every replicated version has reached its destination.");
+  }
+  return tile("layers", "Replication", amount(replication.backlog), el("span", {}, el("span", { class: "chip warn" }, `${amount(replication.in_flight)} sending`), " Versions waiting to reach their destination region."));
 }
 
 /** Whether a member answered just now, as text and colour. */
@@ -136,6 +151,7 @@ export async function status(screen: Screen): Promise<void> {
       membersTile(node.members),
       tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
       healing(node.heal_backlog),
+      replicationTile(node.replication),
       storedTile(usage),
       diskTile(node),
       tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),

@@ -3,7 +3,12 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
-## Unreleased
+## 0.0.1-alpha — 2026-10-16
+
+First release; image `tessaridb/s3`. Metadata on TessariDB `0.34.2-beta`.
+
+- Image: distroless and non-root; `tessaridb-s3 health` is its health check. The console shows the replication
+  backlog and fails a region over or restores it.
 
 - Bucket replication: Get, Put and DeleteBucketReplication (the `Filter` form). Each version a rule covers is queued
   in its own commit and sent by any node to the destination region's endpoint (`TESSARIDB_S3_ADVERTISE`) as the

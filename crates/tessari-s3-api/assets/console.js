@@ -57,11 +57,13 @@
     const members = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
     const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"]) ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] } : void 0;
+    const sent = v["replication"];
+    const replication = sent === null ? null : record(sent) && count(sent["backlog"]) && count(sent["in_flight"]) && count(sent["failed"]) ? { backlog: sent["backlog"], in_flight: sent["in_flight"], failed: sent["failed"] } : void 0;
     const space2 = drive(v["drive"]);
-    if (v["members"] !== null && members === null || heal === void 0 || space2 === void 0) {
+    if (v["members"] !== null && members === null || heal === void 0 || replication === void 0 || space2 === void 0) {
       return null;
     }
-    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, drive: space2 };
+    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, replication, drive: space2 };
   }
   var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] } : null;
   function readUsage(v) {
@@ -933,8 +935,8 @@
       opener.focus();
     };
     const route = `/users/${encodeURIComponent(user2.name)}/keys`;
-    const done3 = el("button", { type: "button", class: "quiet" }, "Close");
-    done3.addEventListener("click", back);
+    const done4 = el("button", { type: "button", class: "quiet" }, "Close");
+    done4.addEventListener("click", back);
     const revoke = (key, button) => {
       const ask = el("div", {});
       button.after(ask);
@@ -967,12 +969,12 @@
       if (!answer.ok) {
         const shown = settle(screen, answer);
         if (shown !== null) {
-          fill(region, refusal(shown), done3);
+          fill(region, refusal(shown), done4);
         }
         return;
       }
       if (answer.value.length === 0) {
-        fill(region, el("p", {}, `${user2.name} has no access keys.`), done3);
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done4);
         return;
       }
       const rows = answer.value.map((key) => {
@@ -980,7 +982,7 @@
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
-      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done3);
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done4);
     };
     void show();
   }
@@ -991,7 +993,7 @@
   //! sealed and will not hand it back), listing and revoking keys, disabling or
   //! enabling the user, and granting or removing access to one bucket. Every
   //! change takes a reason.
-  function shownOnce(key, done3) {
+  function shownOnce(key, done4) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1003,7 +1005,7 @@
         said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done3);
+    finish.addEventListener("click", done4);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -1014,9 +1016,9 @@
       said
     );
   }
-  function alreadyIssued(id, done3) {
+  function alreadyIssued(id, done4) {
     const finish = el("button", { type: "button", class: "primary" }, "Close");
-    finish.addEventListener("click", done3);
+    finish.addEventListener("click", done4);
     queueMicrotask(() => finish.focus());
     return el(
       "div",
@@ -1121,7 +1123,7 @@
       opener.focus();
     };
     const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done3 = (words) => {
+    const done4 = (words) => {
       announce(words);
       back();
     };
@@ -1141,7 +1143,7 @@
       event.preventDefault();
       const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
       if (answer.ok) {
-        done3(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+        done4(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1149,7 +1151,7 @@
     remove.addEventListener("click", async () => {
       const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
       if (answer.ok) {
-        done3(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+        done4(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1791,7 +1793,7 @@
     });
     return form;
   }
-  function shownOnce2(node, token, expires, done3) {
+  function shownOnce2(node, token, expires, done4) {
     const copy = el("button", { type: "button" }, "Copy token");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1803,7 +1805,7 @@
         said.textContent = "Copying is not allowed here; select the token and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done3);
+    finish.addEventListener("click", done4);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -1998,6 +2000,160 @@
     return card;
   }
 
+  // src/regions-model.ts
+  //! Region failover as the console sees it: each region an operator ever failed
+  //! over, under which epoch, and where its writes go while it is failed over.
+  var REGION = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+  function readRegion(v) {
+    if (!record(v) || !text(v["region"]) || !count(v["epoch"]) || !flag(v["failed_over"]) || !(v["promoted"] === null || text(v["promoted"])) || !text(v["reason"]) || !text(v["by"]) || !text(v["at"])) {
+      return null;
+    }
+    if (v["failed_over"] !== (v["promoted"] !== null)) {
+      return null;
+    }
+    return {
+      region: v["region"],
+      epoch: v["epoch"],
+      failed_over: v["failed_over"],
+      promoted: v["promoted"],
+      reason: v["reason"],
+      by: v["by"],
+      at: v["at"]
+    };
+  }
+  function readRegions(v) {
+    return record(v) ? list(v["regions"], readRegion) : null;
+  }
+  function isRegionName(typed) {
+    return REGION.test(typed.trim());
+  }
+
+  // src/cluster-regions.ts
+  //! Region failover: every region an operator failed over, under which epoch and
+  //! to where; and, for an operator, failing a region over to another and
+  //! restoring it. A failed-over region refuses client writes and still takes the
+  //! replicas that catch it up. The server wants a reason and a recent sign-in for
+  //! every change, and records each attempt.
+  var BASE2 = "/regions";
+  function done3(screen, failure, said) {
+    if (failure === null) {
+      announce(said);
+      screen.redraw();
+      return null;
+    }
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function stateChip2(region) {
+    return region.failed_over ? el("span", { class: "chip bad" }, "Failed over") : el("span", { class: "chip ok" }, "Taking writes");
+  }
+  function restoreButton(screen, region, area) {
+    const button = el("button", { type: "button" }, "Restore…");
+    button.addEventListener(
+      "click",
+      () => fill(
+        area,
+        confirmation(
+          `region-restore-${region.region}`,
+          mono(region.region),
+          "The region takes client writes again, under the next epoch. Restore it once it has caught up from the promoted region and clients may write here again.",
+          "Restore",
+          async (reason) => {
+            const answer = await call("POST", `${BASE2}/restore`, ignored, { region: region.region, reason });
+            return done3(screen, answer.ok ? null : answer, `Restored ${region.region}.`);
+          },
+          () => fill(area)
+        )
+      )
+    );
+    return button;
+  }
+  function regionRows(screen, regions, area) {
+    if (regions.length === 0) {
+      return empty("No region has been failed over.");
+    }
+    const operate = screen.may?.operate === true;
+    const head2 = ["Region", "State", "Writes go to", "Epoch", "Reason", "By", "When", ...operate ? [""] : []];
+    return table(
+      "Region failover",
+      head2,
+      regions.map(
+        (region) => row(
+          mono(region.region),
+          stateChip2(region),
+          region.promoted === null ? "—" : mono(region.promoted),
+          String(region.epoch),
+          region.reason,
+          region.by,
+          moment(region.at),
+          ...operate ? [region.failed_over ? restoreButton(screen, region, area) : ""] : []
+        )
+      )
+    );
+  }
+  function failOverForm(screen, area) {
+    const failed2 = field("failover-region", "Region to fail over", { autocomplete: "off", spellcheck: "false", required: "" });
+    const promoted = field("failover-promoted", "Region its writes go to", { autocomplete: "off", spellcheck: "false", required: "" }, "A region holding replica buckets of this one's.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "failover-title" },
+      el("p", { id: "failover-title" }, el("strong", {}, "Fail a region over")),
+      failed2.row,
+      promoted.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "danger" }, "Fail over…")),
+      said
+    );
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const [from, to] = [failed2.input.value.trim(), promoted.input.value.trim()];
+      for (const [input, value] of [[failed2.input, from], [promoted.input, to]]) {
+        input.toggleAttribute("aria-invalid", !isRegionName(value));
+      }
+      if (!isRegionName(from) || !isRegionName(to)) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "A region is lowercase letters, digits and single hyphens, beginning with a letter."));
+        return;
+      }
+      if (from === to) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "A region is failed over to another region."));
+        return;
+      }
+      fill(said);
+      fill(
+        area,
+        confirmation(
+          "region-failover",
+          el("span", {}, mono(from), " → ", mono(to)),
+          `Every node of ${from} refuses client writes until it is restored; reads go on, and replicas from ${to} still arrive. Point clients at ${to}'s buckets.`,
+          "Fail over",
+          async (reason) => {
+            const answer = await call("POST", `${BASE2}/failover`, ignored, { region: from, promoted: to, reason });
+            return done3(screen, answer.ok ? null : answer, `Failed ${from} over to ${to}.`);
+          },
+          () => fill(area)
+        )
+      );
+    });
+    return form;
+  }
+  async function regionsCard(screen) {
+    const answer = await call("GET", BASE2, readRegions);
+    const area = el("div", {});
+    const card = el("section", { class: "card" }, el("h2", {}, "Regions"));
+    if (answer.ok) {
+      card.append(regionRows(screen, answer.value, area), area);
+    } else {
+      card.append(refusal(answer));
+    }
+    if (screen.may?.operate === true) {
+      card.append(failOverForm(screen, area));
+    }
+    return card;
+  }
+
   // src/meter.ts
   //! How full a drive is: a bar on a zero baseline whose length is the used share,
   //! with the figures beside it in text, so the bar's colour is never the only
@@ -2049,6 +2205,19 @@
       return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip bad" }, risk), " Healing keeps failing for these: too few shards can be read."));
     }
     return tile("pulse", "Healing", counted, el("span", {}, el("span", { class: "chip warn" }, "Waiting"), " Members heal these objects in the background."));
+  }
+  function replicationTile(replication) {
+    if (replication === null) {
+      return null;
+    }
+    if (replication.failed > 0) {
+      const failed2 = `${amount(replication.failed)} failed`;
+      return tile("layers", "Replication", amount(replication.backlog), el("span", {}, el("span", { class: "chip bad" }, failed2), " Given up after 10 tries; these versions are FAILED."));
+    }
+    if (replication.backlog === 0) {
+      return tile("layers", "Replication", el("span", { class: "chip ok" }, "Caught up"), "Every replicated version has reached its destination.");
+    }
+    return tile("layers", "Replication", amount(replication.backlog), el("span", {}, el("span", { class: "chip warn" }, `${amount(replication.in_flight)} sending`), " Versions waiting to reach their destination region."));
   }
   function state(member2) {
     return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
@@ -2136,6 +2305,7 @@
         membersTile(node.members),
         tile("layers", "Erasure code", node.erasure === null ? "None" : mono(node.erasure), node.erasure === null ? "Whole objects on one node" : "Data + parity shards per object"),
         healing(node.heal_backlog),
+        replicationTile(node.replication),
         storedTile(usage),
         diskTile(node),
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
@@ -2148,7 +2318,7 @@
   // src/cluster.ts
   //! The cluster: its members with whether each answers and its disk, the
   //! layout objects are placed by and its erasure code, the healing backlog,
-  //! the metadata nodes, which nodes are admitted, and a layout change staged or to stage. Only a key that
+  //! the metadata nodes, which nodes are admitted, which regions are failed over, and a layout change staged or to stage. Only a key that
   //! may see the cluster is shown this view; the server refuses everyone else.
   var TITLE4 = "Cluster";
   function layoutCard(cluster2) {
@@ -2191,6 +2361,7 @@
     const view = answer.value;
     const staging = view.layout === null ? null : await stagingCard(screen);
     const admission = view.erasure === null ? null : await admissionCard(screen);
+    const regions = await regionsCard(screen);
     if (!screen.live()) {
       return;
     }
@@ -2207,6 +2378,7 @@
       ),
       view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),
       admission,
+      regions,
       layoutCard(view),
       staging
     );
@@ -2322,17 +2494,17 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${detail.etag}.`,
           "Delete object",
           async (why) => {
-            const done3 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
-            if (done3.ok) {
+            const done4 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
+            if (done4.ok) {
               announce(`Deleted ${key} from ${bucket2}.`);
               location.hash = back;
               return null;
             }
-            if (done3.status === 401) {
+            if (done4.status === 401) {
               screen.signIn();
               return null;
             }
-            return deleteRefusal(done3);
+            return deleteRefusal(done4);
           },
           () => {
             fill(asking);
@@ -2386,9 +2558,9 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
           "Delete object",
           async (reason) => {
-            const done3 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
-            if (!done3.ok) {
-              const shown = settle(screen, done3);
+            const done4 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done4.ok) {
+              const shown = settle(screen, done4);
               return shown === null ? null : deleteRefusal(shown);
             }
             close();
@@ -2789,7 +2961,7 @@
       intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
     };
   }
-  function signIn(main2, done3) {
+  function signIn(main2, done4) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
     const secret = field("secret-key", "Secret access key", { type: "password", autocomplete: "current-password", required: "" });
     const reason = field("reason", "Reason", { autocomplete: "off" }, "Why the root key, now: it is recorded and announced.");
@@ -2825,7 +2997,7 @@
       if (answer.ok) {
         key.input.value = "";
         reason.input.value = "";
-        done3();
+        done4();
         return;
       }
       if (answer.code === "reason_required") {

@@ -7,6 +7,7 @@
 //! exits.
 
 mod console;
+mod health;
 mod internal;
 mod membership;
 
@@ -29,6 +30,10 @@ use tokio::task::JoinSet;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
+    // The container's health check: no shell in the image, so the binary asks itself.
+    if std::env::args().nth(1).as_deref() == Some("health") {
+        return health::run().await;
+    }
     tessari_s3_observability::init();
     let config = S3Config::from_env()?;
     tracing::info!(

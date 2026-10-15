@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readBuckets, readCapabilities, readFailedRenditions, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
-const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, drive: own });
+const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, replication: null, drive: own });
 
 test("a member says whether it answered and how full its drive is", () => {
   const read = readStatus(status([{ node: "n1", endpoint: "127.0.0.1:1", zone: "eu-1a", answering: true, drive }, { node: "n2", endpoint: "127.0.0.1:2", zone: null, answering: false, drive: null }]));
@@ -142,4 +142,12 @@ test("the sign-in methods say whether a provider is offered, and nothing else is
   assert.equal(readMethods({ provider: "yes", keys: "all" }), null);
   assert.equal(readMethods({}), null);
   assert.equal(readMethods(null), null);
+});
+
+test("replication is read as its three counts, or as nothing to show", () => {
+  const counts = { backlog: 22, in_flight: 3, failed: 0 };
+  assert.deepEqual(readStatus({ ...status(null), replication: counts })?.replication, counts);
+  assert.equal(readStatus(status(null))?.replication, null);
+  assert.equal(readStatus({ ...status(null), replication: { backlog: 1, in_flight: 0 } }), null);
+  assert.equal(readStatus({ ...status(null), replication: undefined }), null, "the server always says it, null when there is none");
 });
