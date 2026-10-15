@@ -4,6 +4,7 @@
 mod cluster_config;
 mod config;
 mod console_config;
+pub mod credential;
 mod error;
 mod iam_config;
 mod kafka;

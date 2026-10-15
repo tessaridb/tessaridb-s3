@@ -56,6 +56,9 @@ openidconnect = { version = "4.0.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# Asks a peer certificate whether it names the node it speaks for (the check every TLS client makes of a host);
+# already under rustls.
+rustls-webpki = { version = "0.103", default-features = false, features = ["std", "ring"] }
 # Verifies a notification destination's certificate against the platform's trust store; already under the HTTP client.
 rustls-platform-verifier = "0.7"
 # Kafka destinations for bucket notifications: a tokio-native client, without compression codecs (no C libraries).
