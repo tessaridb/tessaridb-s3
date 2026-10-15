@@ -371,3 +371,36 @@ fn a_region_that_cannot_name_its_database_is_refused() {
     vars.push(("TESSARIDB_S3_REGION", "eu-west-1"));
     assert_eq!(load(&vars).expect("loads").region, "eu-west-1");
 }
+
+#[test]
+fn the_advertised_endpoint_is_an_http_url_naming_a_host() {
+    let with = |value: &str| {
+        let mut vars = CREDENTIALS.to_vec();
+        vars.push(("TESSARIDB_S3_ADVERTISE", value));
+        load(&vars)
+    };
+    assert_eq!(load(&CREDENTIALS).expect("loads").advertise, None);
+    for (given, kept) in [
+        ("https://s3.eu.example.test", "https://s3.eu.example.test"),
+        ("http://127.0.0.1:9100/", "http://127.0.0.1:9100"),
+    ] {
+        assert_eq!(with(given).expect("loads").advertise.as_deref(), Some(kept));
+    }
+    for refused in [
+        "s3.example.test",
+        "ftp://host",
+        "https://",
+        "https://host/path",
+    ] {
+        assert!(
+            matches!(
+                with(refused),
+                Err(Error::InvalidConfig {
+                    key: "TESSARIDB_S3_ADVERTISE",
+                    ..
+                })
+            ),
+            "{refused}"
+        );
+    }
+}

@@ -20,7 +20,7 @@ use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
     Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, Mover, NotifyWorker,
-    Reclaimer, UploadReaper, UsageScanner, VideoWorker, run,
+    Reclaimer, Replicator, UploadReaper, UsageScanner, VideoWorker, run,
 };
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::media::TaskQueue;
@@ -108,6 +108,18 @@ async fn main() -> anyhow::Result<()> {
         Duration::from_secs(config.reclaim_interval_secs),
     );
     daemons.spawn(run(Arc::new(lifecycle), stop_rx.clone()));
+    // Replication: this node records where its region's S3 surface is reached, then sends the region's queued
+    // versions through the group, every node taking turns on it.
+    let replication = storage.replication();
+    if let Some(endpoint) = &config.advertise {
+        replication.advertise(&config.region, endpoint).await?;
+    }
+    replication.define().await?;
+    let replicator = Replicator::new(
+        storage.clone(),
+        tessari_s3_infrastructure::ReplicaClient::new()?,
+    );
+    daemons.spawn(run(Arc::new(replicator), stop_rx.clone()));
     // Each declared destination reads the event topic through its own group, on every node: the group's record
     // takes the nodes in turns, so an event goes to one of them at a time.
     // The database's own topic is the default destination and always delivered to; declared ones are alternatives.

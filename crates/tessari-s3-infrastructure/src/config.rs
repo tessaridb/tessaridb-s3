@@ -53,6 +53,9 @@ pub struct S3Config {
     /// `TESSARIDB_S3_FFMPEG` — the ffmpeg this node runs for video renditions and posters; unset, it takes no video
     /// tasks.
     pub ffmpeg: Option<std::path::PathBuf>,
+    /// `TESSARIDB_S3_ADVERTISE` — the URL this node's S3 surface is reached at, `http(s)://host[:port]`, which it
+    /// records for its region so other regions can send replicas there; unset, it records none.
+    pub advertise: Option<String>,
     /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
     pub cluster: Option<ClusterSettings>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
@@ -219,6 +222,9 @@ impl S3Config {
                     })?,
             },
             ffmpeg: get("TESSARIDB_S3_FFMPEG").map(|path| std::path::PathBuf::from(path.trim())),
+            advertise: get("TESSARIDB_S3_ADVERTISE")
+                .map(|url| advertised(&url))
+                .transpose()?,
             data_dir: get("TESSARIDB_S3_DATA_DIR")
                 .map(|dir| std::path::PathBuf::from(dir.trim()))
                 .ok_or(Error::MissingConfig {
@@ -253,3 +259,19 @@ pub(crate) fn parse_positive(text: Option<String>, key: &'static str) -> Result<
 #[cfg(test)]
 #[path = "config_tests.rs"]
 pub(crate) mod tests;
+
+/// `url` as an advertised S3 endpoint: `http://` or `https://`, a host, no path; a trailing `/` is dropped.
+fn advertised(url: &str) -> Result<String> {
+    let url = url.trim().trim_end_matches('/');
+    let host = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .filter(|host| !host.is_empty() && !host.contains('/'));
+    match host {
+        Some(_) => Ok(url.to_owned()),
+        None => Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_ADVERTISE",
+            reason: "an http:// or https:// URL naming a host and no path",
+        }),
+    }
+}

@@ -13,6 +13,7 @@ mod mover;
 mod notify;
 mod reaper;
 mod reclaimer;
+mod replicator;
 mod runner;
 mod usage;
 
@@ -27,5 +28,6 @@ pub use mover::Mover;
 pub use notify::{Destination, NotifyWorker};
 pub use reaper::UploadReaper;
 pub use reclaimer::Reclaimer;
+pub use replicator::Replicator;
 pub use runner::{Runs, run};
 pub use usage::UsageScanner;

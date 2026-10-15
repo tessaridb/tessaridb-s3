@@ -17,3 +17,10 @@ pub const REPLICATION_RETRY_STEP_SECS: u64 = 5;
 
 /// Longest wait between two tries of one replication.
 pub const REPLICATION_RETRY_MAX_SECS: u64 = 600;
+
+/// Seconds a replicator waits to connect to a destination region's S3 surface; the transfer itself is bounded by the
+/// group's hold ([`REPLICATION_ACK_DEADLINE_SECS`]).
+pub const REPLICATION_CONNECT_TIMEOUT_SECS: u64 = 10;
+
+/// Seconds between replication runs when the last found nothing.
+pub const REPLICATION_POLL_SECS: u64 = 1;
