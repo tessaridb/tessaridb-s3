@@ -94,6 +94,12 @@ pub const INTERNAL_TLS_HANDSHAKE_SECS: u64 = 10;
 /// Seconds a node waits on a peer that has stopped sending mid-answer before calling it unavailable.
 pub const PEER_READ_TIMEOUT_SECS: u64 = 30;
 
+/// Shortest life of a cluster join token: one minute, time enough to start the node it was issued for.
+pub const JOIN_TOKEN_MIN_SECS: u64 = 60;
+
+/// Longest life of a cluster join token: one day; an unused token is a standing way in.
+pub const JOIN_TOKEN_MAX_SECS: u64 = 86_400;
+
 /// Shortest cluster secret accepted, in bytes: it keys HMAC-SHA256 over every internal request and the placement
 /// hash, so it carries at least the 256 bits of the MAC it keys.
 pub const CLUSTER_SECRET_MIN_LEN: usize = 32;

@@ -18,6 +18,7 @@ use crate::erasure::ErasureWrites;
 use crate::identities::{IdentityService, TessariIdentities};
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::media::{MediaService, TessariMedia};
+use crate::members::{MembershipService, TessariMembers};
 use crate::multipart::{MultipartService, TessariMultipart};
 use crate::notifications::{NotificationService, TessariNotifications};
 use crate::objects::{ObjectService, TessariObjects};
@@ -34,6 +35,7 @@ pub struct Storage {
     objects: ObjectService,
     multipart: MultipartService,
     cluster: ClusterService,
+    members: MembershipService,
     shards: ShardService,
     actions: ActionService,
     usage: UsageService,
@@ -57,6 +59,7 @@ impl Storage {
             buckets: BucketService::new(TessariBuckets::new(pool.clone())),
             multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
             cluster: ClusterService::new(TessariCluster::new(pool.clone())),
+            members: MembershipService::new(TessariMembers::new(pool.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
             usage: UsageService::new(TessariUsage::new(pool.clone())),
             users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
@@ -152,6 +155,12 @@ impl Storage {
     #[must_use]
     pub const fn cluster(&self) -> &ClusterService {
         &self.cluster
+    }
+
+    /// Which nodes an operator admitted to the cluster, and which were removed.
+    #[must_use]
+    pub const fn members(&self) -> &MembershipService {
+        &self.members
     }
 
     /// This node's shards of erasure-coded objects.

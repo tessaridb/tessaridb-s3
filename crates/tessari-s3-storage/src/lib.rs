@@ -11,6 +11,7 @@ mod error;
 pub mod identities;
 pub mod lifecycle;
 pub mod media;
+pub mod members;
 pub mod multipart;
 pub mod notifications;
 pub mod objects;
