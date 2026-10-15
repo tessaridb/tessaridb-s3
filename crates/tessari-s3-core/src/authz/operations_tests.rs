@@ -43,6 +43,19 @@ fn copies_also_need_the_source_readable() {
 }
 
 #[test]
+fn writing_a_replica_under_its_source_version_id_needs_who_administers_the_bucket() {
+    assert_eq!(
+        required_naming_version(Operation::PutObject).map(|needs| needs.primary),
+        Some(Need::ConfigureBucket)
+    );
+    assert_eq!(
+        required(Operation::PutObject).map(|needs| needs.primary),
+        Some(Need::WriteObject),
+        "control: an ordinary write needs write access"
+    );
+}
+
+#[test]
 fn deleting_a_version_needs_who_administers_the_bucket() {
     assert_eq!(
         required_naming_version(Operation::DeleteObject).map(|needs| needs.primary),

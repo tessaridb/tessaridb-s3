@@ -85,6 +85,22 @@ pub(crate) struct VersionPlan {
     /// The bucket the version this change adds is replicated into: stamped `PENDING` on the version, which is what
     /// lets the store's own event queue its replication task in this commit.
     pub(crate) replicate: Option<String>,
+    /// Whether the version this change adds is a replica another bucket sent: it keeps the id it was sent with, is
+    /// stamped `REPLICA`, and is never replicated again.
+    pub(crate) replica: bool,
+}
+
+impl VersionPlan {
+    /// The replication status the version this change adds is stamped with, if any.
+    pub(crate) const fn replication_status(&self) -> Option<&'static str> {
+        if self.replica {
+            Some("REPLICA")
+        } else if self.replicate.is_some() {
+            Some("PENDING")
+        } else {
+            None
+        }
+    }
 }
 
 /// What removes an object or a version: a request, or the bucket's lifecycle rules (S3 ref 11 M5 event names).

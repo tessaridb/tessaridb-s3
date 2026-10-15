@@ -54,6 +54,10 @@ pub enum ErrorCode {
     BucketAlreadyOwnedByYou,
     /// 409: the name is taken by a bucket the caller does not own.
     BucketAlreadyExists,
+    /// 409: the request is not valid with the bucket's current state.
+    InvalidBucketState,
+    /// 409: a conflicting operation on the resource came first.
+    OperationAborted,
     /// 403: the request is not allowed.
     AccessDenied,
     /// 400: the body does not match its declared digest.
@@ -123,6 +127,8 @@ impl ErrorCode {
             Self::EntityTooSmall => "EntityTooSmall",
             Self::ServiceUnavailable => "ServiceUnavailable",
             Self::NoSuchBucket => "NoSuchBucket",
+            Self::InvalidBucketState => "InvalidBucketState",
+            Self::OperationAborted => "OperationAborted",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
             Self::MalformedXml => "MalformedXML",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
@@ -166,7 +172,11 @@ impl ErrorCode {
             | Self::MissingSecurityHeader
             | Self::UnsupportedSignature => 400,
             Self::InternalError => 500,
-            Self::BucketAlreadyOwnedByYou | Self::BucketAlreadyExists | Self::BucketNotEmpty => 409,
+            Self::BucketAlreadyOwnedByYou
+            | Self::BucketAlreadyExists
+            | Self::BucketNotEmpty
+            | Self::InvalidBucketState
+            | Self::OperationAborted => 409,
             Self::IllegalLocationConstraintException
             | Self::MalformedXml
             | Self::MaxMessageLengthExceeded => 400,
@@ -256,6 +266,8 @@ mod tests {
                 409,
             ),
             (ErrorCode::BucketAlreadyExists, "BucketAlreadyExists", 409),
+            (ErrorCode::InvalidBucketState, "InvalidBucketState", 409),
+            (ErrorCode::OperationAborted, "OperationAborted", 409),
             (ErrorCode::BadDigest, "BadDigest", 400),
             (ErrorCode::EntityTooLarge, "EntityTooLarge", 400),
             (ErrorCode::IncompleteBody, "IncompleteBody", 400),

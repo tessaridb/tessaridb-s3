@@ -95,12 +95,15 @@ pub const fn required(operation: Operation) -> Option<Required> {
     }
 }
 
-/// What `operation` needs when the request names a version (`versionId`): deleting a version is permanent — the one
-/// loss versioning exists to prevent — so it needs who administers the bucket; anything else needs what it always does.
+/// What `operation` needs when the request names a version (`versionId`, or a replica's source version): deleting a
+/// version is permanent — the one loss versioning exists to prevent — and a replica writes a version id of its
+/// sender's choosing, so both need who administers the bucket; anything else needs what it always does.
 #[must_use]
 pub const fn required_naming_version(operation: Operation) -> Option<Required> {
     match operation {
         Operation::DeleteObject => on(Need::ConfigureBucket),
+        // A replica write keeps the version id its source gave it, so the writer chooses the bucket's history.
+        Operation::PutObject => on(Need::ConfigureBucket),
         other => required(other),
     }
 }

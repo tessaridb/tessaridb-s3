@@ -7,7 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::auth::PayloadHash;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Digests};
-use tessari_s3_storage::objects::{Content, NewObject, Written};
+use tessari_s3_storage::objects::{Content, NewObject, WriteCondition, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use super::data;
@@ -103,6 +103,14 @@ pub(crate) fn check(
 /// `PUT /{bucket}/{key}`.
 pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
+    // A replica is the source's version as it was: it carries no condition of its own.
+    if super::replica::replica_version(call)?.is_some() && headers.condition != WriteCondition::None
+    {
+        return Err(Error::new(
+            ErrorCode::InvalidRequest,
+            "a replica write carries no condition",
+        ));
+    }
     let length = declared_length(call)?;
     if length > SINGLE_PUT_MAX {
         return Err(Error::new(
@@ -160,14 +168,28 @@ async fn commit(
         content,
     };
     let bucket = call.bucket()?;
-    match call
-        .state
-        .storage()
-        .objects()
-        .put(bucket, key, &object, &headers.condition)
-        .await?
-    {
-        Written::Committed { version, .. } => {
+    let objects = call.state.storage().objects();
+    let written = match super::replica::replica_version(call)? {
+        Some(version_id) => {
+            match super::replica::refused(
+                objects
+                    .put_replica(bucket, key, &object, version_id)
+                    .await?,
+            ) {
+                Some(error) => return Err(error),
+                None => Ok(Some(version_id.to_owned())),
+            }
+        }
+        None => match objects
+            .put(bucket, key, &object, &headers.condition)
+            .await?
+        {
+            Written::Committed { version, .. } => Ok(version),
+            refused => Err(refused),
+        },
+    };
+    match written {
+        Ok(version) => {
             let mut response = with_version(empty_response(StatusCode::OK), version.as_deref());
             let response_headers = response.headers_mut();
             if let Ok(value) = HeaderValue::from_str(&etag) {
@@ -181,7 +203,7 @@ async fn commit(
             }
             Ok(response)
         }
-        refused => Err(not_written(&refused)),
+        Err(refused) => Err(not_written(&refused)),
     }
 }
 

@@ -150,19 +150,23 @@ pub(super) fn statements(
         parameters.push(("v_null".to_owned(), Value::Bytes(record_id(&prefix, seq))));
     }
     if let Some(version) = &plan.create {
-        // A version to replicate is stamped `PENDING` with its destination; the store's `replication_queued` event
-        // queues its task in this commit.
-        let fields = match &plan.replicate {
-            Some(destination) => {
-                parameters.push((
-                    "v_replicate_to".to_owned(),
-                    Value::String(destination.clone()),
-                ));
-                "version_id: $v_version_id, seq: $v_seq, modified: $now, replication_status: 'PENDING', \
-                 replicate_to: $v_replicate_to"
-            }
-            None => "version_id: $v_version_id, seq: $v_seq, modified: $now",
-        };
+        // A version to replicate is stamped `PENDING` with its destination, which the store's `replication_queued`
+        // event queues in this commit; a replica is stamped `REPLICA` and has no destination.
+        let mut fields = "version_id: $v_version_id, seq: $v_seq, modified: $now".to_owned();
+        if let Some(status) = plan.replication_status() {
+            fields.push_str(", replication_status: $v_replication_status");
+            parameters.push((
+                "v_replication_status".to_owned(),
+                Value::String(status.to_owned()),
+            ));
+        }
+        if let Some(destination) = &plan.replicate {
+            fields.push_str(", replicate_to: $v_replicate_to");
+            parameters.push((
+                "v_replicate_to".to_owned(),
+                Value::String(destination.clone()),
+            ));
+        }
         // A null version's sequence is kept at the key's own address, where `head` reads it by identity.
         if version.version_id == NULL {
             script.push_str("CREATE version_nulls:$v_key_at = { seq: $v_seq }; ");

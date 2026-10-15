@@ -25,6 +25,8 @@ mod data;
 mod delete;
 #[path = "list.rs"]
 mod list;
+#[path = "service_replica.rs"]
+mod replica;
 #[path = "service_version_list.rs"]
 mod version_list;
 #[path = "service_version_read.rs"]

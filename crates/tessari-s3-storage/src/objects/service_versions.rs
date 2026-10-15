@@ -64,6 +64,7 @@ pub(super) fn plan(head: &Head, key: &ObjectKey, delete: bool) -> Result<Version
         removal: Removal::Request,
         local: head.local,
         replicate,
+        replica: false,
     })
 }
 

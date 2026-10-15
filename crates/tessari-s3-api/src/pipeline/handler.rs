@@ -100,7 +100,10 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         &principal,
         &addressed,
         &parts.headers,
-        query.iter().any(|(name, _)| name == "versionId"),
+        query.iter().any(|(name, _)| name == "versionId")
+            || parts
+                .headers
+                .contains_key(crate::routes::objects::REPLICA_VERSION),
     )
     .await?;
     let call = Call {

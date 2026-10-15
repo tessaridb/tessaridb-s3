@@ -7,6 +7,7 @@ mod delete_many;
 pub(crate) mod headers;
 pub(crate) mod put;
 mod read;
+mod replica;
 pub(crate) mod source;
 
 use axum::body::Body;
@@ -23,6 +24,7 @@ pub(crate) use copy::copy;
 pub(crate) use delete_many::delete_many;
 pub(crate) use put::put;
 pub(crate) use read::read;
+pub(crate) use replica::REPLICA_VERSION;
 
 /// The key an object operation addresses. Dispatch guarantees one; its absence is a defect.
 pub(crate) fn key<'a>(call: &'a Call<'_>) -> Result<&'a ObjectKey> {
@@ -47,6 +49,9 @@ pub(crate) async fn delete(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
                 "conditional deletes are not implemented",
             ));
         }
+    }
+    if let Some(version_id) = replica::replica_version(call)? {
+        return replica::delete(call, key, version_id).await;
     }
     if call.query.iter().any(|(name, _)| name == "versionId") {
         return delete_version(call, key).await;

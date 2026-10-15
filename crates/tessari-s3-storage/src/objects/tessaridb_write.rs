@@ -52,11 +52,13 @@ pub(super) async fn write(
     };
     parameters.push(("notify".to_owned(), Value::Bool(plan.notify)));
     parameters.push(("op".to_owned(), Value::String(op.to_owned())));
-    // A version being replicated answers its status on the current object too.
-    let replication = if plan.replicate.is_some() {
-        ", replication_status: 'PENDING'"
-    } else {
-        ""
+    // A version being replicated, or a replica, answers its status on the current object too.
+    let replication = match plan.replication_status() {
+        Some(status) => {
+            parameters.push(("replication".to_owned(), Value::String(status.to_owned())));
+            ", replication_status: $replication"
+        }
+        None => "",
     };
     let stamp = match &plan.label {
         Some(label) => {

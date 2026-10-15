@@ -50,6 +50,13 @@ pub(crate) async fn put(call: &Call<'_>, body: Body) -> Result<Response<Body>> {
     }
     // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
     crate::routes::buckets::resident(call).await?;
+    // Replication sends versions by id, so a bucket that replicates keeps versioning on (S3 ref 11 M4).
+    if state == Versioning::Suspended && existing(call).await?.replication.is_some() {
+        return Err(Error::new(
+            ErrorCode::InvalidBucketState,
+            "versioning cannot be suspended while the bucket has a replication configuration",
+        ));
+    }
     if !call
         .state
         .storage()

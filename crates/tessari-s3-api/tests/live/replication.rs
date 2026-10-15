@@ -1,9 +1,13 @@
 //! A bucket's replication configuration: stored whole, read back, removed, and refused as S3 refuses it; a version
-//! its rule covers is stamped `PENDING` and its task queued in `replication_tasks` in the version's own commit.
+//! its rule covers is stamped `PENDING` and its task queued in `replication_tasks` in the version's own commit; a
+//! replica keeps its source version id, once, in its place in the key's history, and is never sent on.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Value};
 
-use crate::{IGNORED, Seen, call, fresh};
+use tessari_s3_core::authz::{Access, Role};
+
+use crate::access::{grant, user_with_key};
+use crate::{IGNORED, Seen, call, call_as, call_with, fresh, fresh_with, scratch_dir};
 
 const ENABLED: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
@@ -297,4 +301,202 @@ async fn a_version_its_rule_covers_is_pending_and_its_task_queued_in_the_same_co
         queued.contains(&(marker, "copies".to_owned(), true)),
         "{queued:?}"
     );
+}
+
+const REPLICA: &str = "x-tessaridb-replica-version-id";
+
+/// A version id this server issues for sequence `seq`.
+fn sequence_id(seq: u64, nonce: u64) -> String {
+    format!("{seq:016x}{nonce:016x}")
+}
+
+async fn replica_put(state: &tessari_s3_api::ApiState, path: &str, id: &str, bytes: &[u8]) -> Seen {
+    call_with(state, "PUT", path, vec![], vec![(REPLICA, id)], bytes).await
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_replica_keeps_its_source_version_id_once_in_its_place_and_is_never_sent_on() {
+    let _why = IGNORED;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    for bucket in ["mirror", "further"] {
+        assert_eq!(
+            call(&state, "PUT", &format!("/{bucket}"), vec![], b"")
+                .await
+                .status,
+            200
+        );
+        assert_eq!(
+            call(
+                &state,
+                "PUT",
+                &format!("/{bucket}"),
+                vec![("versioning", None)],
+                ENABLED
+            )
+            .await
+            .status,
+            200
+        );
+    }
+    // The destination replicates `logs/` itself: a replica arriving there must still not be sent on.
+    let configured = call(
+        &state,
+        "PUT",
+        "/mirror",
+        vec![("replication", None)],
+        configuration("further", "").as_bytes(),
+    )
+    .await;
+    assert_eq!(configured.status, 200, "{}", configured.body);
+
+    let five = sequence_id(5, 0xabcd);
+    let stored = replica_put(&state, "/mirror/logs/a", &five, b"five").await;
+    assert_eq!(stored.status, 200, "{}", stored.body);
+    assert_eq!(header(&stored, "x-amz-version-id"), Some(five.as_str()));
+    let head = call(&state, "HEAD", "/mirror/logs/a", vec![], b"").await;
+    assert_eq!(
+        (
+            header(&head, "x-amz-version-id"),
+            header(&head, "x-amz-replication-status")
+        ),
+        (Some(five.as_str()), Some("REPLICA"))
+    );
+    assert_eq!(tasks(&planter, "logs/a").await, Vec::new(), "never sent on");
+
+    // Sent again, even with other bytes: the version is already here and is kept as it was.
+    let again = replica_put(&state, "/mirror/logs/a", &five, b"later").await;
+    assert_eq!(again.status, 200, "{}", again.body);
+    let read = |id: String| {
+        let state = &state;
+        async move {
+            call(
+                state,
+                "GET",
+                "/mirror/logs/a",
+                vec![("versionId", Some(id.as_str()))],
+                b"",
+            )
+            .await
+        }
+    };
+    assert_eq!(read(five.clone()).await.body, "five");
+
+    // An older version lands behind the current one.
+    let three = sequence_id(3, 0x1);
+    assert_eq!(
+        replica_put(&state, "/mirror/logs/a", &three, b"three")
+            .await
+            .status,
+        200
+    );
+    assert_eq!(read(three).await.body, "three");
+    let current = call(&state, "GET", "/mirror/logs/a", vec![], b"").await;
+    assert_eq!(
+        (current.body.as_str(), header(&current, "x-amz-version-id")),
+        ("five", Some(five.as_str()))
+    );
+
+    // Another version at sequence 5, and an id this server never issues, are refused.
+    let taken = replica_put(&state, "/mirror/logs/a", &sequence_id(5, 0x2), b"x").await;
+    assert_eq!(
+        (taken.status, taken.code.as_deref()),
+        (409, Some("OperationAborted"))
+    );
+    let null = replica_put(&state, "/mirror/logs/a", "null", b"x").await;
+    assert_eq!(
+        (null.status, null.code.as_deref()),
+        (400, Some("InvalidArgument"))
+    );
+
+    // A replica delete marker under its own id hides the object; a local write then follows it in the history.
+    let six = sequence_id(6, 0x6);
+    let marked = call_with(
+        &state,
+        "DELETE",
+        "/mirror/logs/a",
+        vec![],
+        vec![(REPLICA, six.as_str())],
+        b"",
+    )
+    .await;
+    assert_eq!(marked.status, 204, "{}", marked.body);
+    assert_eq!(
+        (
+            header(&marked, "x-amz-delete-marker"),
+            header(&marked, "x-amz-version-id")
+        ),
+        (Some("true"), Some(six.as_str()))
+    );
+    assert_eq!(
+        call(&state, "HEAD", "/mirror/logs/a", vec![], b"")
+            .await
+            .status,
+        404
+    );
+    let local = call(&state, "PUT", "/mirror/logs/a", vec![], b"seven").await;
+    assert_eq!(local.status, 200);
+    assert!(
+        header(&local, "x-amz-version-id").is_some_and(|id| id.starts_with("0000000000000007")),
+        "{:?}",
+        header(&local, "x-amz-version-id")
+    );
+    assert_eq!(
+        tasks(&planter, "logs/a").await.len(),
+        1,
+        "a local write is replicated as usual"
+    );
+
+    // A bucket that replicates keeps versioning on.
+    let suspended = call(
+        &state,
+        "PUT",
+        "/mirror",
+        vec![("versioning", None)],
+        b"<VersioningConfiguration><Status>Suspended</Status></VersioningConfiguration>",
+    )
+    .await;
+    assert_eq!(
+        (suspended.status, suspended.code.as_deref()),
+        (409, Some("InvalidBucketState"))
+    );
+
+    // Writing objects is not choosing their history.
+    let storage = state.storage();
+    let bob = user_with_key(storage, "bob", "default", Role::Member, false).await;
+    grant(
+        storage,
+        "bob",
+        "mirror",
+        Access {
+            read: true,
+            write: true,
+        },
+    )
+    .await;
+    let refused = call_as(
+        &state,
+        bob.pair(),
+        "PUT",
+        "/mirror/logs/b",
+        vec![],
+        vec![(REPLICA, sequence_id(1, 1).as_str())],
+        b"b",
+    )
+    .await;
+    assert_eq!(
+        (refused.status, refused.code.as_deref()),
+        (403, Some("AccessDenied"))
+    );
+    let control = call_as(
+        &state,
+        bob.pair(),
+        "PUT",
+        "/mirror/logs/b",
+        vec![],
+        vec![],
+        b"b",
+    )
+    .await;
+    assert_eq!(control.status, 200, "control: bob writes objects");
 }

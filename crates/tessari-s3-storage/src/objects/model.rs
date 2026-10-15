@@ -257,6 +257,21 @@ pub enum VersionRemoved {
     NoSuchBucket,
 }
 
+/// What a replica write ended in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Replicated {
+    /// The replica is stored.
+    Stored,
+    /// That version was already here; nothing was written.
+    Kept,
+    /// Another version holds the replica's sequence here.
+    Conflict,
+    /// The bucket does not exist.
+    NoSuchBucket,
+    /// The version id is not one a replica can carry (`null`, or not an id this server issues).
+    NotAVersionId,
+}
+
 /// What a delete conditional on the object's ETag ended in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemovedIf {
