@@ -80,24 +80,21 @@ impl MemberRepository for TessariMembers {
             .collect()
     }
 
-    async fn grant(&self, grant: &Grant<'_>) -> Result<bool> {
-        let mut parameters = vec![
-            string("node", grant.node),
-            optional("fingerprint", grant.fingerprint),
-            optional("digest", grant.token.map(|(digest, _)| digest)),
-            string("reason", grant.reason),
-            string("by", grant.by),
-        ];
-        if let Some((_, secs)) = grant.token {
-            parameters.push(("ttl".to_owned(), lifetime(secs)));
-        }
-        let fields = fields(grant.token.is_some());
+    async fn create(&self, grant: &Grant<'_>) -> Result<bool> {
+        let (parameters, fields) = grant_parts(grant);
         let create = format!("CREATE s3_members:$node = {{ node: $node, {fields} }};");
-        match self.pool.run(&create, parameters.clone()).await {
-            Ok(_) => return Ok(true),
-            Err(error) if error.is_class(RefusalClass::Conflict) => {}
-            Err(error) => return Err(error.into()),
+        match self.pool.run(&create, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
         }
+    }
+
+    async fn grant(&self, grant: &Grant<'_>) -> Result<bool> {
+        if self.create(grant).await? {
+            return Ok(true);
+        }
+        let (parameters, fields) = grant_parts(grant);
         // It exists, and records are never deleted: replace it unless it is a tombstone.
         let update =
             format!("UPDATE s3_members:$node MERGE {{ {fields} }} WHERE state = 'approved';");
@@ -139,4 +136,19 @@ impl MemberRepository for TessariMembers {
             Err(error) => Err(error.into()),
         }
     }
+}
+
+/// The parameters `grant` binds and the fields it writes.
+fn grant_parts(grant: &Grant<'_>) -> (Vec<(String, Value)>, String) {
+    let mut parameters = vec![
+        string("node", grant.node),
+        optional("fingerprint", grant.fingerprint),
+        optional("digest", grant.token.map(|(digest, _)| digest)),
+        string("reason", grant.reason),
+        string("by", grant.by),
+    ];
+    if let Some((_, secs)) = grant.token {
+        parameters.push(("ttl".to_owned(), lifetime(secs)));
+    }
+    (parameters, fields(grant.token.is_some()))
 }

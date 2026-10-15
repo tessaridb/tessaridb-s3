@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use tessari_s3_api::{ApiState, InternalState, serve_internal};
 use tessari_s3_infrastructure::S3Config;
-use tessari_s3_infrastructure::credential::speaks_for_itself;
 use tessari_s3_infrastructure::tls::server_config;
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
@@ -13,7 +12,7 @@ use tokio::sync::watch;
 /// anything is served, stopped with the S3 surface. `None` on a node of its own.
 ///
 /// # Errors
-/// The node's own certificate is not issued for it, its TLS material does not load, or the address cannot be bound.
+/// Its TLS material does not load, or the address cannot be bound.
 pub(crate) async fn surface(
     config: &S3Config,
     storage: &Storage,
@@ -22,7 +21,6 @@ pub(crate) async fn surface(
     let Some(cluster) = &config.cluster else {
         return Ok(None);
     };
-    speaks_for_itself(&cluster.tls, &cluster.node)?;
     let state = InternalState::new(
         ApiState::system_clock(),
         storage.clone(),

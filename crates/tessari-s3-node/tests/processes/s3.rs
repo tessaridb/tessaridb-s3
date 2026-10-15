@@ -24,8 +24,6 @@ pub struct Meta {
     pub password: String,
     /// `TESSARIDB_S3_META_REPLICATION`, required for more than one address.
     pub replication: Option<String>,
-    /// A directory holding `cert.pem`, `key.pem` and `ca.pem` for the internal surface; `None` keeps it plain.
-    pub internal_tls: Option<PathBuf>,
     /// `TESSARIDB_S3_NOTIFY_TARGETS` for every node; `None` declares no destination.
     pub notify_targets: Option<String>,
     /// Each node's failure domain, `n1` first, which also says how many nodes there are; `None`: six nodes, each a
@@ -33,24 +31,33 @@ pub struct Meta {
     pub zones: Option<&'static [&'static str]>,
 }
 
-/// A certificate authority minted for one cluster and the certificate it issues for `127.0.0.1`, which every local
-/// node presents: written to a fresh directory the cluster removes when it is dropped.
-pub fn internal_tls() -> PathBuf {
+/// A certificate authority minted for one cluster and the peer credential it issues each of its `count` nodes,
+/// `<node>.peer.tessari-s3`: `ca.pem`, `<node>-cert.pem` and `<node>-key.pem` in a fresh directory the cluster
+/// removes when it is dropped.
+fn internal_tls(count: usize) -> PathBuf {
     let dir = scratch("tls");
     std::fs::create_dir_all(&dir).expect("tls directory");
     let mut authority = rcgen::CertificateParams::new(Vec::new()).expect("authority parameters");
     authority.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     let authority_key = rcgen::KeyPair::generate().expect("authority key");
     let authority = authority.self_signed(&authority_key).expect("authority");
-    let node_key = rcgen::KeyPair::generate().expect("node key");
-    let node = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])
-        .expect("node parameters")
-        .signed_by(&node_key, &authority, &authority_key)
-        .expect("node certificate");
     std::fs::write(dir.join("ca.pem"), authority.pem()).expect("ca written");
-    std::fs::write(dir.join("cert.pem"), node.pem()).expect("cert written");
-    std::fs::write(dir.join("key.pem"), node_key.serialize_pem()).expect("key written");
+    for n in 1..=count {
+        let key = rcgen::KeyPair::generate().expect("node key");
+        let leaf = rcgen::CertificateParams::new(vec![format!("n{n}.peer.tessari-s3")])
+            .expect("node parameters")
+            .signed_by(&key, &authority, &authority_key)
+            .expect("node certificate");
+        std::fs::write(dir.join(format!("n{n}-cert.pem")), leaf.pem()).expect("cert written");
+        std::fs::write(dir.join(format!("n{n}-key.pem")), key.serialize_pem())
+            .expect("key written");
+    }
     dir
+}
+
+/// How many nodes a cluster of `meta` has: one per zone it names, six otherwise.
+fn size(meta: &Meta) -> usize {
+    meta.zones.map_or(6, <[&str]>::len)
 }
 
 /// A free local port, released for the child to bind.
@@ -83,6 +90,8 @@ pub struct Cluster {
     pub nodes: Vec<Node>,
     pub meta: MetaPool,
     pub logs: PathBuf,
+    /// The authority and every node's credential.
+    tls: PathBuf,
     settings: Meta,
 }
 
@@ -93,54 +102,75 @@ impl Drop for Cluster {
             std::fs::remove_dir_all(&node.dir).ok();
         }
         // A failing test names the logs in its message; they stay for the reader.
-        if let Some(dir) = &self.settings.internal_tls {
-            std::fs::remove_dir_all(dir).ok();
-        }
+        std::fs::remove_dir_all(&self.tls).ok();
         if !std::thread::panicking() {
             std::fs::remove_dir_all(&self.logs).ok();
         }
     }
 }
 
-/// The variables every node shares, plus this node's own.
-fn environment(
-    meta: &Meta,
-    namespace: &str,
-    node: &str,
-    s3: &str,
-    internal: &str,
-    dir: &Path,
-) -> Vec<(String, String)> {
+/// The credentials and metadata settings every node shares.
+fn shared(meta: &Meta, namespace: &str) -> Vec<(String, String)> {
     let mut vars: Vec<(String, String)> = [
-        ("TESSARIDB_S3_LISTEN", s3),
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET),
         ("TESSARIDB_S3_META_ADDRESS", &meta.addresses),
         ("TESSARIDB_S3_META_USER", &meta.user),
         ("TESSARIDB_S3_META_PASSWORD", &meta.password),
         ("TESSARIDB_S3_META_NAMESPACE", namespace),
-        ("TESSARIDB_S3_ERASURE", "4+2"),
-        ("TESSARIDB_S3_NODE_ID", node),
-        ("TESSARIDB_S3_INTERNAL_LISTEN", internal),
-        ("TESSARIDB_S3_INTERNAL_ADVERTISE", internal),
-        ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET),
-        ("TESSARIDB_S3_HEAL_INTERVAL_SECS", "1"),
     ]
     .into_iter()
     .map(|(key, value)| (key.to_owned(), value.to_owned()))
     .collect();
+    if let Some(replication) = &meta.replication {
+        vars.push((
+            "TESSARIDB_S3_META_REPLICATION".to_owned(),
+            replication.clone(),
+        ));
+    }
+    vars
+}
+
+/// The variables every node shares, plus this node's own: its credential from `tls`, and every node of the cluster
+/// named a founding member.
+fn environment(
+    meta: &Meta,
+    tls: &Path,
+    namespace: &str,
+    node: &str,
+    s3: &str,
+    internal: &str,
+    dir: &Path,
+) -> Vec<(String, String)> {
+    let founding = (1..=size(meta))
+        .map(|n| format!("n{n}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut vars = shared(meta, namespace);
+    vars.extend(
+        [
+            ("TESSARIDB_S3_LISTEN", s3),
+            ("TESSARIDB_S3_ERASURE", "4+2"),
+            ("TESSARIDB_S3_NODE_ID", node),
+            ("TESSARIDB_S3_INTERNAL_LISTEN", internal),
+            ("TESSARIDB_S3_INTERNAL_ADVERTISE", internal),
+            ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET),
+            ("TESSARIDB_S3_HEAL_INTERVAL_SECS", "1"),
+            ("TESSARIDB_S3_FOUNDING_MEMBERS", &founding),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned())),
+    );
     vars.push((
         "TESSARIDB_S3_DATA_DIR".to_owned(),
         dir.display().to_string(),
     ));
-    if let Some(dir) = &meta.internal_tls {
-        for (key, file) in [
-            ("TESSARIDB_S3_INTERNAL_TLS_CERT", "cert.pem"),
-            ("TESSARIDB_S3_INTERNAL_TLS_KEY", "key.pem"),
-            ("TESSARIDB_S3_INTERNAL_TLS_CA", "ca.pem"),
-        ] {
-            vars.push((key.to_owned(), dir.join(file).display().to_string()));
-        }
+    for (key, file) in [
+        ("TESSARIDB_S3_INTERNAL_TLS_CERT", format!("{node}-cert.pem")),
+        ("TESSARIDB_S3_INTERNAL_TLS_KEY", format!("{node}-key.pem")),
+        ("TESSARIDB_S3_INTERNAL_TLS_CA", "ca.pem".to_owned()),
+    ] {
+        vars.push((key.to_owned(), tls.join(file).display().to_string()));
     }
     let zone = meta.zones.and_then(|zones| {
         let index = node
@@ -156,25 +186,14 @@ fn environment(
     if let Some(targets) = &meta.notify_targets {
         vars.push(("TESSARIDB_S3_NOTIFY_TARGETS".to_owned(), targets.clone()));
     }
-    if let Some(replication) = &meta.replication {
-        vars.push((
-            "TESSARIDB_S3_META_REPLICATION".to_owned(),
-            replication.clone(),
-        ));
-    }
     vars
 }
 
 /// The metadata settings a node of this cluster runs with.
 pub fn settings(meta: &Meta, namespace: &str) -> MetaSettings {
-    let vars = environment(
-        meta,
-        namespace,
-        "n1",
-        "127.0.0.1:1",
-        "127.0.0.1:1",
-        Path::new("/"),
-    );
+    let mut vars = shared(meta, namespace);
+    // Never opened: only the metadata settings are taken from this configuration.
+    vars.push(("TESSARIDB_S3_DATA_DIR".to_owned(), "/".to_owned()));
     S3Config::from_lookup(|key| {
         vars.iter()
             .find(|(name, _)| name == key)
@@ -188,6 +207,7 @@ pub fn settings(meta: &Meta, namespace: &str) -> MetaSettings {
 /// only once it is registered.
 async fn launch(
     meta: &Meta,
+    tls: &Path,
     namespace: &str,
     name: &str,
     logs: &Path,
@@ -201,7 +221,9 @@ async fn launch(
         .expect("log file");
     let child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
         .env_clear()
-        .envs(environment(meta, namespace, name, &s3, &internal, &dir))
+        .envs(environment(
+            meta, tls, namespace, name, &s3, &internal, &dir,
+        ))
         .stdout(Stdio::from(log.try_clone().expect("log handle")))
         .stderr(Stdio::from(log))
         .kill_on_drop(true)
@@ -233,20 +255,33 @@ impl Cluster {
         let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
         let logs = scratch("logs");
         std::fs::create_dir_all(&logs).expect("log directory");
+        let tls = internal_tls(size(&meta));
         let mut nodes = Vec::new();
-        for n in 1..=meta.zones.map_or(6, <[&str]>::len) {
+        for n in 1..=size(&meta) {
             let addresses = (
                 format!("127.0.0.1:{}", free_port()),
                 format!("127.0.0.1:{}", free_port()),
             );
             let name = format!("n{n}");
-            nodes.push(launch(&meta, &namespace, &name, &logs, addresses, scratch("data")).await);
+            nodes.push(
+                launch(
+                    &meta,
+                    &tls,
+                    &namespace,
+                    &name,
+                    &logs,
+                    addresses,
+                    scratch("data"),
+                )
+                .await,
+            );
         }
         Self {
             meta: MetaPool::new(settings(&meta, &namespace)).expect("pool"),
             namespace,
             nodes,
             logs,
+            tls,
             settings: meta,
         }
     }
@@ -261,6 +296,7 @@ impl Cluster {
         );
         self.nodes[index] = launch(
             &self.settings,
+            &self.tls,
             &self.namespace,
             &name,
             &self.logs,

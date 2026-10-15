@@ -86,8 +86,14 @@ pub(super) fn entity(version: i64, sets: &[&[&str]]) -> LayoutEntity {
 }
 
 impl ClusterRepository for Fake {
-    async fn register(&self, _node: &str, _endpoint: &str, _zone: Option<&str>) -> Result<()> {
-        Ok(())
+    async fn register(
+        &self,
+        _node: &str,
+        _fingerprint: &str,
+        _endpoint: &str,
+        _zone: Option<&str>,
+    ) -> Result<bool> {
+        Ok(true)
     }
 
     async fn nodes(&self) -> Result<Vec<NodeEntity>> {

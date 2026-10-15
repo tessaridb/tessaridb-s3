@@ -25,13 +25,16 @@ pub(crate) enum Applied {
 
 /// Topology queries; no rule beyond what a query states.
 pub(crate) trait ClusterRepository: Send + Sync {
-    /// Writes or refreshes `node`'s registration, in `zone` when it names one.
+    /// Writes or refreshes `node`'s registration, in `zone` when it names one, only while `node` is an approved member
+    /// with no join token outstanding and no pinned certificate other than `fingerprint`; `false` otherwise, and
+    /// nothing is written.
     fn register(
         &self,
         node: &str,
+        fingerprint: &str,
         endpoint: &str,
         zone: Option<&str>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> impl Future<Output = Result<bool>> + Send;
     /// Registered nodes in id order, at most the server's cap.
     fn nodes(&self) -> impl Future<Output = Result<Vec<NodeEntity>>> + Send;
     /// The version of the layout new objects are written under, once there is one.

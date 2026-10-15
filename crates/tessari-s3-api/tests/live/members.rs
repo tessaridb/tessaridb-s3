@@ -202,10 +202,7 @@ async fn a_removed_node_is_a_tombstone_nothing_admits_again() {
         .approve(&node("n1"), None, "root", "first")
         .await
         .expect("approved");
-    cluster
-        .register(&node("n1"), "x:1", None)
-        .await
-        .expect("registered");
+    crate::joined(state.storage(), &node("n1"), "x:1", None).await;
     let removed = members.remove(&node("n1"), "root", "retired", None).await;
     assert_eq!(removed.expect("answered"), Removal::Removed);
     let tombstone = members.get(&node("n1")).await.expect("read").expect("kept");
@@ -251,10 +248,7 @@ async fn a_node_the_current_layout_places_shards_on_is_not_removed() {
             .approve(&node(id), None, "root", "founding")
             .await
             .expect("approved");
-        cluster
-            .register(&node(id), "x:1", None)
-            .await
-            .expect("registered");
+        crate::joined(state.storage(), &node(id), "x:1", None).await;
     }
     let code = Code::new(2, 1).expect("a code");
     let layout = cluster
@@ -268,4 +262,135 @@ async fn a_node_the_current_layout_places_shards_on_is_not_removed() {
     assert_eq!(refused.expect("answered"), Removal::InLayout);
     let kept = members.get(&node("n2")).await.expect("read").expect("kept");
     assert_eq!(kept.state, MemberState::Approved);
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_node_registers_only_as_an_admitted_member_presenting_its_certificate() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    let (members, cluster) = (state.storage().members(), state.storage().cluster());
+    let registered = || async {
+        cluster
+            .members()
+            .await
+            .expect("members")
+            .into_iter()
+            .map(|member| member.node.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        cluster
+            .register(&node("n1"), &print('a'), "x:1", None)
+            .await,
+        Ok(false),
+        "unknown"
+    );
+    members
+        .approve(&node("n1"), Some(&print('a')), "root", "a member")
+        .await
+        .expect("approved");
+    assert_eq!(
+        cluster
+            .register(&node("n1"), &print('b'), "x:1", None)
+            .await,
+        Ok(false),
+        "another certificate"
+    );
+    let _ = token(members, "n2").await;
+    assert_eq!(
+        cluster
+            .register(&node("n2"), &print('c'), "x:2", None)
+            .await,
+        Ok(false),
+        "awaiting its token"
+    );
+    assert_eq!(
+        registered().await,
+        Vec::<String>::new(),
+        "nothing refused was written"
+    );
+    assert_eq!(
+        cluster
+            .register(&node("n1"), &print('a'), "x:1", None)
+            .await,
+        Ok(true)
+    );
+    assert_eq!(registered().await, vec!["n1"]);
+    assert_eq!(
+        members.remove(&node("n1"), "root", "retired", None).await,
+        Ok(Removal::Removed)
+    );
+    assert_eq!(
+        cluster
+            .register(&node("n1"), &print('a'), "x:1", None)
+            .await,
+        Ok(false),
+        "removed"
+    );
+    assert_eq!(
+        registered().await,
+        Vec::<String>::new(),
+        "a removed node does not register again"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_founding_member_is_created_once_and_never_over_an_existing_record() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    let members = state.storage().members();
+    assert_eq!(
+        members.found(&node("n1"), "founding", "configured").await,
+        Ok(true)
+    );
+    let founded = members
+        .get(&node("n1"))
+        .await
+        .expect("read")
+        .expect("a record");
+    assert_eq!(
+        (founded.state, founded.fingerprint, founded.by.as_str()),
+        (MemberState::Approved, None, "founding")
+    );
+    assert_eq!(
+        members.found(&node("n1"), "founding", "configured").await,
+        Ok(false)
+    );
+    members
+        .approve(&node("n2"), Some(&print('a')), "root", "pinned")
+        .await
+        .expect("approved");
+    assert_eq!(
+        members.found(&node("n2"), "founding", "configured").await,
+        Ok(false)
+    );
+    let pinned = members
+        .get(&node("n2"))
+        .await
+        .expect("read")
+        .expect("a record");
+    assert_eq!(
+        (pinned.fingerprint, pinned.by.as_str()),
+        (Some(print('a')), "root"),
+        "left as it was"
+    );
+    members
+        .approve(&node("n3"), None, "root", "a member")
+        .await
+        .expect("approved");
+    assert_eq!(
+        members.remove(&node("n3"), "root", "retired", None).await,
+        Ok(Removal::Removed)
+    );
+    assert_eq!(
+        members.found(&node("n3"), "founding", "configured").await,
+        Ok(false)
+    );
+    assert_eq!(
+        members.admits(&node("n3"), &print('a')).await,
+        Ok(Admission::Removed),
+        "configuration never resurrects a tombstone"
+    );
 }

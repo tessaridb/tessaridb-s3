@@ -41,7 +41,6 @@ fn meta_from_env() -> Meta {
         user: need("TESSARIDB_S3_TEST_META_USER"),
         password: need("TESSARIDB_S3_TEST_META_PASSWORD"),
         replication: None,
-        internal_tls: None,
         notify_targets: None,
         zones: None,
     }

@@ -8,7 +8,7 @@ use crate::disk::{first_shards, kill, writing};
 use crate::docker;
 use crate::meta::MetaCluster;
 use crate::requests::{call, fetch, get_interrupted, put, put_interrupted};
-use crate::s3::{Cluster, Meta, count, internal_tls};
+use crate::s3::{Cluster, count};
 
 /// How long the cluster may take to heal after its nodes come back: passes run every second.
 const HEALED_WITHIN: Duration = Duration::from_secs(60);
@@ -42,14 +42,6 @@ pub(crate) async fn healed(cluster: &Cluster) {
     }
 }
 
-/// The cluster's own nodes speak mutual TLS between them, as a deployment over a network would.
-pub(crate) fn with_tls(meta: Meta) -> Meta {
-    Meta {
-        internal_tls: Some(internal_tls()),
-        ..meta
-    }
-}
-
 pub(crate) fn require_docker() {
     if let Err(why) = docker::available() {
         panic!("{why}");
@@ -61,7 +53,7 @@ pub(crate) fn require_docker() {
 async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     require_docker();
     let metadata = MetaCluster::start().await;
-    let mut cluster = Cluster::start(with_tls(metadata.meta())).await;
+    let mut cluster = Cluster::start(metadata.meta()).await;
     let log = std::fs::read_to_string(cluster.logs.join("n1.log")).expect("n1's log");
     assert!(
         log.contains("over mutual TLS"),
@@ -181,7 +173,7 @@ struct Attempt {
 async fn the_metadata_leader_killed_under_traffic_loses_nothing_acknowledged() {
     require_docker();
     let metadata = MetaCluster::start().await;
-    let cluster = Cluster::start(with_tls(metadata.meta())).await;
+    let cluster = Cluster::start(metadata.meta()).await;
     assert_eq!(call(&cluster.nodes[0], "PUT", "/traffic", b"").await.0, 200);
     let leader = metadata.leader().await;
 

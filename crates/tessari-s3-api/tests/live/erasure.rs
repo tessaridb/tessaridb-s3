@@ -148,22 +148,18 @@ pub(crate) async fn member() -> Member {
             .await
             .expect("schema applies on the test node");
     }
-    storage
-        .cluster()
-        .register(&NodeId::new("n1").expect("id"), "127.0.0.1:1", None)
-        .await
-        .expect("registered");
-    admitted(&storage, "n1").await;
+    crate::joined(
+        &storage,
+        &NodeId::new("n1").expect("id"),
+        "127.0.0.1:1",
+        None,
+    )
+    .await;
     let mut peers = Vec::new();
     for n in 2..=6 {
         let peer = peer(&config, &authority, &format!("n{n}")).await;
         let node = NodeId::new(&format!("n{n}")).expect("id");
-        admitted(&storage, node.as_str()).await;
-        storage
-            .cluster()
-            .register(&node, &peer.address, None)
-            .await
-            .expect("registered");
+        crate::joined(&storage, &node, &peer.address, None).await;
         peers.push(peer);
     }
     Member {
@@ -182,20 +178,6 @@ pub(crate) async fn member() -> Member {
         config,
         authority,
     }
-}
-
-/// `node` approved as a member of the cluster, presenting any certificate the authority issued for it.
-pub(crate) async fn admitted(storage: &Storage, node: &str) {
-    storage
-        .members()
-        .approve(
-            &NodeId::new(node).expect("id"),
-            None,
-            "live-test",
-            "a member of the test cluster",
-        )
-        .await
-        .expect("approved");
 }
 
 /// Shard files under `dir`, temporary ones included.

@@ -15,7 +15,7 @@ static TLS_FILES: LazyLock<[String; 3]> = LazyLock::new(|| {
 });
 
 /// The cluster settings with the TLS files a member needs.
-fn clustered() -> Vec<(&'static str, &'static str)> {
+pub(super) fn clustered() -> Vec<(&'static str, &'static str)> {
     let mut vars = with(&CLUSTER);
     vars.extend([
         ("TESSARIDB_S3_INTERNAL_TLS_CERT", TLS_FILES[0].as_str()),

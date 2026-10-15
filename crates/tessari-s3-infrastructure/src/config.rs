@@ -74,7 +74,7 @@ pub struct ClusterSettings {
     pub internal_listen: SocketAddr,
     /// `TESSARIDB_S3_INTERNAL_ADVERTISE` — `host:port` other nodes reach that surface at.
     pub internal_advertise: String,
-    /// `TESSARIDB_S3_CLUSTER_SECRET` — the key internal requests are signed with (at least 32 bytes).
+    /// `TESSARIDB_S3_CLUSTER_SECRET` — the key objects are placed on the cluster's sets by (at least 32 bytes).
     pub secret: SecretKey,
     /// `TESSARIDB_S3_ZONE` — the failure domain this node is in; `None`: a domain of its own.
     pub zone: Option<tessari_s3_types::Zone>,
@@ -85,6 +85,10 @@ pub struct ClusterSettings {
     /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS, required: the certificate
     /// speaks for this node, and peers are admitted by theirs.
     pub tls: crate::tls::InternalTls,
+    /// `TESSARIDB_S3_FOUNDING_MEMBERS` — nodes admitted by their id at start when they have no membership record yet.
+    pub founding: Vec<NodeId>,
+    /// `TESSARIDB_S3_JOIN_TOKEN` — a one-time token this node offers at start to bind its certificate; never printed.
+    pub join_token: Option<SecretKey>,
 }
 
 impl S3Config {

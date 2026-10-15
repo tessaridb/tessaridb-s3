@@ -133,6 +133,22 @@ impl MembershipService {
         Ok(Approval::Approved(member))
     }
 
+    /// Admits `node` by its id when it has no record at all — a founding member named in configuration; an existing
+    /// record, a tombstone included, is left as it is. `true` when the record was created.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn found(&self, node: &NodeId, by: &str, reason: &str) -> Result<bool> {
+        let grant = Grant {
+            node: node.as_str(),
+            fingerprint: None,
+            token: None,
+            reason,
+            by,
+        };
+        self.repository.create(&grant).await
+    }
+
     /// Issues a one-time join token for `node`, lapsing after `lifetime`; until the node offers it, no certificate
     /// is the node's.
     ///

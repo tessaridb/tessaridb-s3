@@ -93,37 +93,40 @@ fn a_refusal_is_forbidden_rather_than_a_fault() {
     assert_eq!(Refused::Unidentified.category(), ErrorCategory::Forbidden);
 }
 
-/// This node's TLS material with a certificate issued for `name`.
-fn material_for(name: &str) -> InternalTls {
+/// This node's TLS material with a certificate issued for `name`, and that certificate's fingerprint.
+fn material_for(name: &str) -> (InternalTls, String) {
     let key = rcgen::KeyPair::generate().expect("a key");
     let certificate = rcgen::CertificateParams::new(vec![name.to_owned()])
         .expect("certificate parameters")
         .self_signed(&key)
         .expect("a certificate");
-    InternalTls::new(
+    let tls = InternalTls::new(
         certificate.pem().into_bytes(),
         key.serialize_pem().into_bytes(),
         certificate.pem().into_bytes(),
-    )
+    );
+    (tls, fingerprint(certificate.der()))
 }
 
 #[test]
 fn a_node_whose_own_certificate_is_another_nodes_does_not_start() {
     let n1 = node("n1");
+    let (own, print) = material_for("n1.peer.tessari-s3");
     assert_eq!(
-        speaks_for_itself(&material_for("n1.peer.tessari-s3"), &n1),
-        Ok(())
+        speaks_for_itself(&own, &n1),
+        Ok(print),
+        "the fingerprint of its own certificate"
     );
     let refused = Err(Error::InvalidConfig {
         key: "TESSARIDB_S3_INTERNAL_TLS_CERT",
         reason: "issued for another node than TESSARIDB_S3_NODE_ID",
     });
     assert_eq!(
-        speaks_for_itself(&material_for("n2.peer.tessari-s3"), &n1),
+        speaks_for_itself(&material_for("n2.peer.tessari-s3").0, &n1),
         refused
     );
     assert_eq!(
-        speaks_for_itself(&material_for("n1.client.tessari-s3"), &n1),
+        speaks_for_itself(&material_for("n1.client.tessari-s3").0, &n1),
         refused
     );
 }

@@ -63,7 +63,6 @@ fn pool(wire: &str) -> MetaPool {
         user: USER.to_owned(),
         password: PASSWORD.to_owned(),
         replication: None,
-        internal_tls: None,
         notify_targets: None,
         zones: None,
     };
@@ -255,7 +254,6 @@ impl MetaCluster {
             user: USER.to_owned(),
             password: PASSWORD.to_owned(),
             replication: Some("3".to_owned()),
-            internal_tls: None,
             notify_targets: None,
             zones: None,
         }

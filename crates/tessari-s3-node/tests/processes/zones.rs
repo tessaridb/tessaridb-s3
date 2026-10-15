@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::disk::kill;
-use crate::faults::{MIB, healed, patterned, require_docker, with_tls};
+use crate::faults::{MIB, healed, patterned, require_docker};
 use crate::meta::MetaCluster;
 use crate::requests::{call, fetch};
 use crate::s3::{Cluster, Meta, count};
@@ -38,7 +38,7 @@ async fn a_zone_killed_under_a_writer_loses_nothing_acknowledged_and_heals_when_
     let metadata = MetaCluster::start().await;
     let mut cluster = Cluster::start(Meta {
         zones: Some(&ZONES),
-        ..with_tls(metadata.meta())
+        ..metadata.meta()
     })
     .await;
     let front = &cluster.nodes[FRONT];

@@ -27,6 +27,9 @@ pub(crate) trait MemberRepository: Send + Sync {
     fn get(&self, node: &str) -> impl Future<Output = Result<Option<MemberEntity>>> + Send;
     /// Every record in node order, at most the server's cap.
     fn list(&self) -> impl Future<Output = Result<Vec<MemberEntity>>> + Send;
+    /// Writes `grant` as an approved record only when `node` has no record at all; `false` when one exists, and then
+    /// nothing is written.
+    fn create(&self, grant: &Grant<'_>) -> impl Future<Output = Result<bool>> + Send;
     /// Writes `grant` as an approved record — created when there is none, replaced while it is still approved;
     /// `false` when the record is a tombstone, and then nothing is written.
     fn grant(&self, grant: &Grant<'_>) -> impl Future<Output = Result<bool>> + Send;

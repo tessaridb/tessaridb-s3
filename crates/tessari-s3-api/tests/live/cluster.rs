@@ -21,18 +21,9 @@ async fn a_node_registers_once_and_its_endpoint_follows_it() {
     let _why = IGNORED;
     let (state, _) = fresh().await;
     let cluster = state.storage().cluster();
-    cluster
-        .register(&node("n1"), "a.internal:1", None)
-        .await
-        .expect("registered");
-    cluster
-        .register(&node("n2"), "b.internal:1", None)
-        .await
-        .expect("registered");
-    cluster
-        .register(&node("n1"), "c.internal:2", None)
-        .await
-        .expect("registered again");
+    crate::joined(state.storage(), &node("n1"), "a.internal:1", None).await;
+    crate::joined(state.storage(), &node("n2"), "b.internal:1", None).await;
+    crate::joined(state.storage(), &node("n1"), "c.internal:2", None).await;
     let members = cluster.members().await.expect("members");
     let seen: Vec<(&str, &str)> = members
         .iter()
@@ -48,14 +39,14 @@ async fn a_node_registers_its_zone_and_a_later_registration_replaces_it() {
     let (state, _) = fresh().await;
     let cluster = state.storage().cluster();
     let zone = |name: &str| Zone::new(name).expect("a zone");
-    cluster
-        .register(&node("n1"), "a.internal:1", Some(&zone("eu-1a")))
-        .await
-        .expect("registered");
-    cluster
-        .register(&node("n2"), "b.internal:1", None)
-        .await
-        .expect("registered");
+    crate::joined(
+        state.storage(),
+        &node("n1"),
+        "a.internal:1",
+        Some(&zone("eu-1a")),
+    )
+    .await;
+    crate::joined(state.storage(), &node("n2"), "b.internal:1", None).await;
     let zones = || async {
         cluster
             .members()
@@ -77,14 +68,14 @@ async fn a_node_registers_its_zone_and_a_later_registration_replaces_it() {
             ("n2".to_owned(), None)
         ]
     );
-    cluster
-        .register(&node("n1"), "a.internal:1", None)
-        .await
-        .expect("registered again");
-    cluster
-        .register(&node("n2"), "b.internal:1", Some(&zone("eu-1b")))
-        .await
-        .expect("registered again");
+    crate::joined(state.storage(), &node("n1"), "a.internal:1", None).await;
+    crate::joined(
+        state.storage(),
+        &node("n2"),
+        "b.internal:1",
+        Some(&zone("eu-1b")),
+    )
+    .await;
     assert_eq!(
         zones().await,
         [
@@ -104,10 +95,7 @@ async fn racing_nodes_agree_on_one_first_layout() {
     // A second node: its own pool over the same namespace.
     let other = Storage::new(planter, crate::scratch_dir());
     for id in ["n5", "n3"] {
-        cluster
-            .register(&node(id), "x:1", None)
-            .await
-            .expect("registered");
+        crate::joined(state.storage(), &node(id), "x:1", None).await;
     }
     assert_eq!(
         cluster.current(code(2, 1)).await.expect("asked"),
@@ -115,10 +103,7 @@ async fn racing_nodes_agree_on_one_first_layout() {
         "two nodes cannot hold a 2+1 layout"
     );
     for id in ["n9", "n1"] {
-        cluster
-            .register(&node(id), "x:1", None)
-            .await
-            .expect("registered");
+        crate::joined(state.storage(), &node(id), "x:1", None).await;
     }
     // Racers on two pools, spawned so they run in parallel; each must come back with the same layout. Which path a
     // racer takes depends on timing, so the lost-race read-back is pinned by the service's unit test instead.
@@ -149,10 +134,7 @@ async fn racing_nodes_agree_on_one_first_layout() {
         .map(|member| member.node().as_str())
         .collect();
     assert_eq!((first.version(), names), (1, vec!["n1", "n3", "n5"]));
-    cluster
-        .register(&node("n0"), "x:1", None)
-        .await
-        .expect("registered");
+    crate::joined(state.storage(), &node("n0"), "x:1", None).await;
     assert_eq!(
         cluster.current(code(2, 1)).await.expect("asked"),
         Some(first),

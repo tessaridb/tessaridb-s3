@@ -34,14 +34,13 @@ async fn cluster() -> (ClusterService, MetaPool) {
         ("n5", "c"),
         ("n6", "c"),
     ] {
-        cluster
-            .register(
-                &NodeId::new(id).expect("an id"),
-                "x:1",
-                Some(&Zone::new(zone).expect("a zone")),
-            )
-            .await
-            .expect("registered");
+        crate::joined(
+            state.storage(),
+            &NodeId::new(id).expect("an id"),
+            "x:1",
+            Some(&Zone::new(zone).expect("a zone")),
+        )
+        .await;
     }
     let first = cluster.current(code()).await.expect("asked");
     assert_eq!(first.map(|layout| layout.version()), Some(1));

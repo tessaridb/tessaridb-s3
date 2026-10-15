@@ -19,6 +19,9 @@ const COMPANIONS: [&str; 5] = [
     "TESSARIDB_S3_DATA_DIR",
 ];
 
+/// How this node takes part in membership: founding members admitted by id, and a join token offered at start.
+const MEMBERSHIP: [&str; 2] = ["TESSARIDB_S3_FOUNDING_MEMBERS", "TESSARIDB_S3_JOIN_TOKEN"];
+
 /// The internal surface's TLS files: certificate chain, private key, cluster authority.
 const TLS: [&str; 3] = [
     "TESSARIDB_S3_INTERNAL_TLS_CERT",
@@ -62,6 +65,7 @@ pub(crate) fn cluster_settings(
             .iter()
             .take(4)
             .chain(TLS.iter())
+            .chain(MEMBERSHIP.iter())
             .chain(std::iter::once(&"TESSARIDB_S3_ZONE"))
             .any(|key| get(key).is_some());
         return if stray {
@@ -144,9 +148,29 @@ pub(crate) fn cluster_settings(
         move_bytes_per_sec,
         // A member speaks mutual TLS to its peers: the certificate is what proves which node it is.
         tls: internal_tls(get)?.ok_or(Error::MissingConfig { key: TLS[0] })?,
+        founding: founding(get(MEMBERSHIP[0]).as_deref())?,
+        join_token: get(MEMBERSHIP[1]).map(|token| SecretKey::new(token.trim().to_owned())),
     }))
 }
 
+/// `TESSARIDB_S3_FOUNDING_MEMBERS`: node ids separated by commas; unset is none.
+fn founding(list: Option<&str>) -> Result<Vec<NodeId>> {
+    let Some(list) = list else {
+        return Ok(Vec::new());
+    };
+    list.split(',')
+        .map(|id| {
+            NodeId::new(id.trim()).map_err(|_| Error::InvalidConfig {
+                key: MEMBERSHIP[0],
+                reason: "node ids separated by commas",
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "cluster_membership_tests.rs"]
+mod membership_tests;
 #[cfg(test)]
 #[path = "cluster_config_tests.rs"]
 mod tests;

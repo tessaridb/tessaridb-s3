@@ -14,6 +14,7 @@ use super::repository::ClusterRepository;
 use super::staging::{Apply, Stage, StagedLayout, apply_of, stage_of, staged_of};
 use super::tessaridb::TessariCluster;
 use crate::data::DriveSpace;
+use crate::members::Fingerprint;
 use crate::peers::{PeerAt, RemoteShards};
 use crate::{Error, Result};
 
@@ -90,13 +91,26 @@ impl ClusterService {
         }
     }
 
-    /// Registers `node` at `endpoint` in `zone`, or refreshes its registration.
+    /// Registers `node`, presenting a certificate whose SHA-256 is `fingerprint`, at `endpoint` in `zone`, or
+    /// refreshes its registration — only as an admitted member (see [`crate::members::MembershipService::admits`]);
+    /// `false` otherwise, and nothing is written.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
-    pub async fn register(&self, node: &NodeId, endpoint: &str, zone: Option<&Zone>) -> Result<()> {
+    pub async fn register(
+        &self,
+        node: &NodeId,
+        fingerprint: &Fingerprint,
+        endpoint: &str,
+        zone: Option<&Zone>,
+    ) -> Result<bool> {
         self.repository
-            .register(node.as_str(), endpoint, zone.map(Zone::as_str))
+            .register(
+                node.as_str(),
+                fingerprint.as_str(),
+                endpoint,
+                zone.map(Zone::as_str),
+            )
             .await
     }
 

@@ -33,12 +33,13 @@ async fn root_stages_and_applies_a_layout_and_every_act_is_recorded() {
     let first = send(&member.console, "GET", "/api/v1/cluster", Some(&root), None).await;
     assert_eq!(versions(&first.json()), (1, 1));
     for n in 7..=12 {
-        member
-            .storage
-            .cluster()
-            .register(&NodeId::new(&format!("n{n}")).expect("an id"), "x:1", None)
-            .await
-            .expect("registered");
+        crate::joined(
+            &member.storage,
+            &NodeId::new(&format!("n{n}")).expect("an id"),
+            "x:1",
+            None,
+        )
+        .await;
     }
     let path = "/api/v1/cluster/layout/staged";
     let console = &member.console;

@@ -100,6 +100,32 @@ static SCHEMA_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 pub(crate) const IGNORED: &str =
     "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD";
 
+/// `node` admitted by its id and registered at `endpoint` in `zone`, as a member the operator approved would be.
+pub(crate) async fn joined(
+    storage: &Storage,
+    node: &tessari_s3_types::NodeId,
+    endpoint: &str,
+    zone: Option<&tessari_s3_types::Zone>,
+) {
+    storage
+        .members()
+        .approve(node, None, "live-test", "a member of the test cluster")
+        .await
+        .expect("approved");
+    let any =
+        tessari_s3_storage::members::Fingerprint::new(&"0".repeat(64)).expect("a fingerprint");
+    let registered = storage
+        .cluster()
+        .register(node, &any, endpoint, zone)
+        .await
+        .expect("answered");
+    assert!(
+        registered,
+        "{} registers as an approved member",
+        node.as_str()
+    );
+}
+
 /// A server state over a fresh namespace on the test node, schema applied, and a separate pool into the same
 /// namespace for a test that must plant a record directly. Large objects go to a fresh data directory that is
 /// created on first use.

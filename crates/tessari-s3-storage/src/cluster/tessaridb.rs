@@ -42,23 +42,38 @@ fn records(answers: Vec<Answer>) -> Result<Vec<Value>> {
 }
 
 impl ClusterRepository for TessariCluster {
-    async fn register(&self, node: &str, endpoint: &str, zone: Option<&str>) -> Result<()> {
+    async fn register(
+        &self,
+        node: &str,
+        fingerprint: &str,
+        endpoint: &str,
+        zone: Option<&str>,
+    ) -> Result<bool> {
         let parameters = vec![
             ("node".to_owned(), Value::String(node.to_owned())),
+            (
+                "fingerprint".to_owned(),
+                Value::String(fingerprint.to_owned()),
+            ),
             ("endpoint".to_owned(), Value::String(endpoint.to_owned())),
             (
                 "zone".to_owned(),
                 zone.map_or(Value::None, |zone| Value::String(zone.to_owned())),
             ),
         ];
-        self.pool
-            .run(
-                "UPSERT s3_nodes:$node SET node = $node, endpoint = $endpoint, zone = $zone, \
-                 seen = time::now();",
-                parameters,
-            )
-            .await?;
-        Ok(())
+        // The member record is written to, conditioned on admitting this node, in the registration's transaction: an
+        // unknown node (`NoSuchRecord`) or one not admitted (`ConditionNotMet`), both class `conflict`, writes nothing,
+        // and a removal racing it writes the same registration record, so one of the two gives way.
+        let script = "BEGIN; \
+             UPDATE s3_members:$node SET state = state WHERE state = 'approved' \
+             AND (token_digest ?? '') = '' AND (fingerprint ?? $fingerprint) = $fingerprint; \
+             UPSERT s3_nodes:$node SET node = $node, endpoint = $endpoint, zone = $zone, seen = time::now(); \
+             COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn nodes(&self) -> Result<Vec<NodeEntity>> {
