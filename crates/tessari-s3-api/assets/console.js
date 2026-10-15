@@ -170,12 +170,17 @@
     if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
       return null;
     }
+    const moving2 = v["moving"];
+    if (!record(moving2) || !count(moving2["listed"]) || !flag(moving2["more"])) {
+      return null;
+    }
     return {
       node: v["node"],
       erasure: v["erasure"],
       members,
       layout: placed,
       heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
+      moving: { listed: moving2["listed"], more: moving2["more"] },
       metadata: { addresses }
     };
   }
@@ -1862,6 +1867,13 @@
       )
     );
   }
+  function moving(waiting) {
+    if (waiting.listed === 0) {
+      return tile("layers", "Layout moves", el("span", { class: "chip ok" }, "Up to date"), "Every object is on the current layout.");
+    }
+    const counted = waiting.more ? `> ${waiting.listed.toLocaleString()}` : waiting.listed.toLocaleString();
+    return tile("layers", "Layout moves", counted, el("span", {}, el("span", { class: "chip warn" }, "Moving"), " Members move these objects onto the current layout in the background."));
+  }
   async function cluster(screen) {
     loading(screen, TITLE4, "the cluster");
     const answer = await call("GET", "/cluster", readCluster);
@@ -1885,6 +1897,7 @@
         { class: "tiles" },
         tile("layers", "Erasure code", view.erasure === null ? "—" : mono(view.erasure), view.erasure === null ? "Not a cluster member" : "data + parity shards per object"),
         healing(view.erasure === null ? null : view.heal_backlog),
+        view.erasure === null ? null : moving(view.moving),
         tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)])))
       ),
       view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),

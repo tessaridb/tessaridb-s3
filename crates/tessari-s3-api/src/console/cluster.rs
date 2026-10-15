@@ -64,7 +64,17 @@ pub(super) struct Cluster {
     /// Absent on a node on its own, and until enough members have registered.
     layout: Option<LayoutView>,
     heal_backlog: BacklogView,
+    /// Objects still on a layout older than the current one, which the mover has yet to move.
+    moving: MovingView,
     metadata: MetadataView,
+}
+
+#[derive(Serialize)]
+struct MovingView {
+    /// Counted up to the bound.
+    listed: usize,
+    /// Whether more are waiting than were counted.
+    more: bool,
 }
 
 pub(super) async fn cluster(
@@ -99,6 +109,11 @@ pub(super) async fn cluster(
         .objects()
         .heal_backlog(CONSOLE_BACKLOG_COUNT_MAX)
         .await?;
+    let moving = storage
+        .objects()
+        .moving(CONSOLE_BACKLOG_COUNT_MAX)
+        .await?
+        .unwrap_or_default();
     Ok(Json(Cluster {
         node: state.node().map(str::to_owned),
         erasure: state.erasure().map(str::to_owned),
@@ -108,6 +123,10 @@ pub(super) async fn cluster(
             listed: backlog.as_ref().map_or(0, |found| found.listed),
             more: backlog.is_some_and(|found| found.more),
             at_risk: backlog.map_or(0, |found| found.at_risk),
+        },
+        moving: MovingView {
+            listed: moving.listed,
+            more: moving.more,
         },
         metadata: MetadataView {
             addresses: state.meta_addresses().to_vec(),

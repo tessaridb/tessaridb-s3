@@ -102,6 +102,8 @@ export type Cluster = {
   readonly members: readonly Member[] | null;
   readonly layout: Layout | null;
   readonly heal_backlog: Backlog;
+  /** Objects still on a layout older than the current one, counted up to a bound. */
+  readonly moving: { readonly listed: number; readonly more: boolean };
   readonly metadata: { readonly addresses: readonly string[] };
 };
 export type Problem = { readonly code: string; readonly message: string };
@@ -332,12 +334,17 @@ export function readCluster(v: unknown): Cluster | null {
   if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
     return null;
   }
+  const moving = v["moving"];
+  if (!record(moving) || !count(moving["listed"]) || !flag(moving["more"])) {
+    return null;
+  }
   return {
     node: v["node"],
     erasure: v["erasure"],
     members,
     layout: placed,
     heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
+    moving: { listed: moving["listed"], more: moving["more"] },
     metadata: { addresses },
   };
 }

@@ -33,6 +33,15 @@ function layoutCard(cluster: Cluster): HTMLElement {
   );
 }
 
+/** The objects members still have to move onto the current layout. */
+function moving(waiting: Cluster["moving"]): HTMLElement {
+  if (waiting.listed === 0) {
+    return tile("layers", "Layout moves", el("span", { class: "chip ok" }, "Up to date"), "Every object is on the current layout.");
+  }
+  const counted = waiting.more ? `> ${waiting.listed.toLocaleString()}` : waiting.listed.toLocaleString();
+  return tile("layers", "Layout moves", counted, el("span", {}, el("span", { class: "chip warn" }, "Moving"), " Members move these objects onto the current layout in the background."));
+}
+
 export async function cluster(screen: Screen): Promise<void> {
   loading(screen, TITLE, "the cluster");
   const answer = await call("GET", "/cluster", readCluster);
@@ -56,6 +65,7 @@ export async function cluster(screen: Screen): Promise<void> {
       { class: "tiles" },
       tile("layers", "Erasure code", view.erasure === null ? "—" : mono(view.erasure), view.erasure === null ? "Not a cluster member" : "data + parity shards per object"),
       healing(view.erasure === null ? null : view.heal_backlog),
+      view.erasure === null ? null : moving(view.moving),
       tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)]))),
     ),
     view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),

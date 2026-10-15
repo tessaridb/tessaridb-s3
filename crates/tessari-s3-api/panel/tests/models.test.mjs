@@ -77,6 +77,7 @@ test("the cluster view reads members, a layout or none, the backlog and the meta
     members: [{ node: "n1", endpoint: "127.0.0.1:1", zone: "a", answering: true, drive }],
     layout: { version: 2, sets: [[{ node: "n1", zone: "a" }, { node: "n2", zone: "b" }, { node: "n3", zone: null }], [{ node: "n4", zone: "a" }, { node: "n5", zone: "b" }, { node: "n6", zone: "c" }]] },
     heal_backlog: { listed: 3, more: false, at_risk: 1 },
+    moving: { listed: 2, more: true },
     metadata: { addresses: ["127.0.0.1:9080"] },
   };
   assert.deepEqual(readCluster(cluster), cluster);
@@ -85,6 +86,7 @@ test("the cluster view reads members, a layout or none, the backlog and the meta
   assert.equal(readCluster({ ...cluster, layout: { version: 1, nodes: ["n1", "n2", "n3"] } }), null, "a layout is its sets");
   assert.equal(readCluster({ ...cluster, layout: { version: 1, sets: [[{ node: "n1" }]] } }), null, "a set member always says its zone");
   assert.equal(readCluster({ ...cluster, heal_backlog: { listed: 3, more: false } }), null, "the at-risk count is always sent");
+  assert.equal(readCluster({ ...cluster, moving: { listed: 2 } }), null, "the objects still to move are always sent");
 });
 
 test("the status backlog carries how many objects are at risk", () => {

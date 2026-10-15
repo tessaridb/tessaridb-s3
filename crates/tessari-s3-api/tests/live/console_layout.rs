@@ -11,6 +11,8 @@ use crate::access::user_with_key;
 use crate::console::{send, sign_in};
 use crate::console_users::sign_in_as;
 use crate::erasure::member;
+use crate::erasure_moves::{NEW_SET, UNPACED, applied, grown};
+use crate::erasure_reads::written;
 
 const STAGE: &str = r#"{"sets":[["n1","n2","n3","n4","n5","n6"],["n7","n8","n9","n10","n11","n12"]],"reason":"grow to two sets"}"#;
 
@@ -215,4 +217,35 @@ async fn a_user_may_read_nothing_staged_but_change_nothing() {
         let answer = send(&member.console, method, path, Some(&user), body).await;
         assert_eq!(answer.status, 403, "{method} {path}");
     }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_cluster_view_counts_the_objects_still_on_an_older_layout() {
+    let _why = IGNORED;
+    let mut member = written().await;
+    let root = sign_in(&member.console).await;
+    let before = send(&member.console, "GET", "/api/v1/cluster", Some(&root), None).await;
+    assert_eq!(
+        before.json()["moving"],
+        serde_json::json!({"listed": 0, "more": false})
+    );
+    grown(&mut member).await;
+    applied(&member, &[&NEW_SET]).await;
+    let applied_view = send(&member.console, "GET", "/api/v1/cluster", Some(&root), None).await;
+    assert_eq!(
+        applied_view.json()["moving"],
+        serde_json::json!({"listed": 1, "more": false})
+    );
+    member
+        .storage
+        .objects()
+        .move_layouts(0, 100, UNPACED)
+        .await
+        .expect("a pass");
+    let moved = send(&member.console, "GET", "/api/v1/cluster", Some(&root), None).await;
+    assert_eq!(
+        moved.json()["moving"],
+        serde_json::json!({"listed": 0, "more": false})
+    );
 }

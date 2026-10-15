@@ -132,6 +132,15 @@ pub struct Healed {
     pub held: usize,
 }
 
+/// Data ids still on a layout older than the current one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MoveBacklog {
+    /// Ids counted, up to the bound.
+    pub listed: usize,
+    /// Whether more are on older layouts than were counted.
+    pub more: bool,
+}
+
 /// What one pass moving data onto the current layout did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Moved {

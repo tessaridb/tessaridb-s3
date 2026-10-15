@@ -18,7 +18,7 @@ use super::read::ErasureReader;
 use super::repository::ShardSetRepository;
 use super::upload::Destination;
 use super::writes::ErasureWrites;
-use crate::objects::Moved;
+use crate::objects::{MoveBacklog, Moved};
 use crate::peers::ShardRef;
 use crate::{Error, Result};
 
@@ -70,6 +70,26 @@ impl ErasureWrites {
             }
         }
         Ok(done)
+    }
+
+    /// How many data ids are on a layout older than the current one, counted up to `limit`.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub(crate) async fn moving(&self, limit: usize) -> Result<MoveBacklog> {
+        let current = match self.current().await {
+            Ok(current) => current,
+            Err(Error::NoLayout) => return Ok(MoveBacklog::default()),
+            Err(error) => return Err(error),
+        };
+        let older = self
+            .sets
+            .older(current.version(), limit.saturating_add(1))
+            .await?;
+        Ok(MoveBacklog {
+            listed: older.len().min(limit),
+            more: older.len() > limit,
+        })
     }
 
     /// Copies the shards of data `id` whose node changes under `current`, verifies each copy, and switches the id;
