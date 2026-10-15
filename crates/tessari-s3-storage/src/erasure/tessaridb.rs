@@ -12,7 +12,7 @@ use crate::{Error, Result};
 /// Shard-set records over a metadata pool.
 #[derive(Clone)]
 pub(crate) struct TessariShardSets {
-    pool: MetaPool,
+    pub(super) pool: MetaPool,
 }
 
 impl TessariShardSets {
@@ -21,7 +21,7 @@ impl TessariShardSets {
     }
 }
 
-fn data(id: [u8; 16]) -> Vec<(String, Value)> {
+pub(super) fn data(id: [u8; 16]) -> Vec<(String, Value)> {
     vec![("data".to_owned(), Value::Uuid(id))]
 }
 

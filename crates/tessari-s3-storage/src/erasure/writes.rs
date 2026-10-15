@@ -82,7 +82,7 @@ impl ErasureWrites {
 
     /// The layout new objects are written under, read from the store for every write so a change applied on any
     /// node is followed by the next write here.
-    async fn current(&self) -> Result<Layout> {
+    pub(super) async fn current(&self) -> Result<Layout> {
         self.cluster
             .current(self.code)
             .await?
@@ -94,8 +94,20 @@ impl ErasureWrites {
         self.cluster.version(self.code, version).await
     }
 
+    /// The node each shard of data `id` goes to under `layout`, by shard index.
+    pub(super) fn placed(&self, id: [u8; 16], layout: &Layout) -> Vec<NodeId> {
+        placement(&self.key, id, layout)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
     /// Where each shard of data `id` goes under `layout`: this node's drive, or the registered endpoint of a peer.
-    async fn destinations(&self, id: [u8; 16], layout: &Layout) -> Result<Vec<Destination>> {
+    pub(super) async fn destinations(
+        &self,
+        id: [u8; 16],
+        layout: &Layout,
+    ) -> Result<Vec<Destination>> {
         let members = self.cluster.members().await?;
         placement(&self.key, id, layout)
             .into_iter()

@@ -132,6 +132,19 @@ pub struct Healed {
     pub held: usize,
 }
 
+/// What one pass moving data onto the current layout did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Moved {
+    /// Data ids on an older layout that were looked at.
+    pub examined: usize,
+    /// Ids whose shards were copied, verified and switched to the current layout.
+    pub moved: usize,
+    /// Ids whose shards the old layout left behind were removed, past the reclaim grace.
+    pub retired: usize,
+    /// Ids another node holds the claim on, left to it for this pass.
+    pub held: usize,
+}
+
 /// What a delete ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Removed {

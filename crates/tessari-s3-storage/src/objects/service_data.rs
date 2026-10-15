@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::ObjectService;
 use crate::data::hex;
 use crate::objects::ObjectReader;
-use crate::objects::model::{HealBacklog, Healed, Reclaimed};
+use crate::objects::model::{HealBacklog, Healed, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
 use crate::{Error, Result};
@@ -135,6 +135,18 @@ impl ObjectService {
         match &self.erasure {
             Some(writes) => writes.heal_pass(limit).await,
             None => Ok(Healed::default()),
+        }
+    }
+
+    /// Moves up to `limit` data ids written under an older layout onto the current one, and first removes the shards
+    /// earlier moves left behind once they are `grace_secs` old; nothing off a cluster.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn move_layouts(&self, grace_secs: u64, limit: usize) -> Result<Moved> {
+        match &self.erasure {
+            Some(writes) => writes.move_pass(grace_secs, limit).await,
+            None => Ok(Moved::default()),
         }
     }
 

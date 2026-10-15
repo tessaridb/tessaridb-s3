@@ -84,7 +84,7 @@ async fn a_listing_whose_data_is_gone_is_dropped() {
 }
 
 /// The data id `/shards/big` is stored under.
-async fn data_id(member: &Member) -> [u8; 16] {
+pub(crate) async fn data_id(member: &Member) -> [u8; 16] {
     let object = member
         .storage
         .objects()
@@ -103,7 +103,7 @@ async fn data_id(member: &Member) -> [u8; 16] {
 }
 
 /// Another node (`n9`) takes, or hands back, the claim on data `id`, as its healer or reclaimer would.
-async fn claim_elsewhere(planter: &MetaPool, id: [u8; 16], take: bool) {
+pub(crate) async fn claim_elsewhere(planter: &MetaPool, id: [u8; 16], take: bool) {
     let script = if take {
         "DEFINE SPACE IF NOT EXISTS heal_claims; SET heal_claims:$data = 'n9' IF ABSENT EXPIRE 60s;"
     } else {

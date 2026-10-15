@@ -111,8 +111,8 @@ impl ErasureWrites {
         Ok(Outcome::Whole)
     }
 
-    /// Writes shards `broken` again from the stripes `reader` decodes from the others.
-    async fn rebuild(
+    /// Writes shards `broken` to `sources` from the stripes `reader` decodes, each through the shard commit.
+    pub(super) async fn rebuild(
         &self,
         reader: &ErasureReader,
         sources: &[Destination],

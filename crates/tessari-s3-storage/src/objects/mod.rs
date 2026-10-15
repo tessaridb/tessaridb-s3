@@ -10,7 +10,7 @@ mod upload;
 mod version_id;
 
 pub use model::{
-    Content, Deleted, HealBacklog, Healed, Listed, ListedVersion, Multipart, NewObject,
+    Content, Deleted, HealBacklog, Healed, Listed, ListedVersion, Moved, Multipart, NewObject,
     ObjectSummary, Part, Reclaimed, Removed, RemovedIf, StoredObject, VersionKind, VersionRead,
     VersionRemoved, VersionsListed, WriteCondition, Written,
 };

@@ -2,6 +2,9 @@
 //! cluster, acknowledged only when the write quorum of shards is durable.
 
 mod heal;
+mod mover;
+mod moves_repository;
+mod moves_tessaridb;
 mod read;
 mod repository;
 mod senders;

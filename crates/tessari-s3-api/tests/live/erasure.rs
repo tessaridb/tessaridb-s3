@@ -17,7 +17,7 @@ const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
 
 /// A peer node serving shards from its own data directory.
 pub(crate) struct Peer {
-    address: String,
+    pub(crate) address: String,
     pub(crate) server: tokio::task::JoinHandle<()>,
     pub(crate) dir: PathBuf,
 }
@@ -31,6 +31,8 @@ pub(crate) struct Member {
     pub(crate) planter: MetaPool,
     pub(crate) dir: PathBuf,
     pub(crate) peers: Vec<Peer>,
+    /// The member's configuration, for a test that starts more peers in its namespace.
+    pub(crate) config: S3Config,
 }
 
 impl Drop for Member {
@@ -72,7 +74,7 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         .expect("live configuration")
 }
 
-async fn peer(config: &S3Config) -> Peer {
+pub(crate) async fn peer(config: &S3Config) -> Peer {
     let dir = scratch_dir();
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
@@ -150,6 +152,7 @@ pub(crate) async fn member() -> Member {
         planter: MetaPool::new(config.meta.clone()).expect("pool"),
         dir,
         peers,
+        config,
     }
 }
 
