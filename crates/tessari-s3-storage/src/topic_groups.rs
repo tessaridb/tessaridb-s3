@@ -1,4 +1,5 @@
-//! The groups that read the `object_events` topic: one per notification destination, one for media processing. A
+//! The groups that read this crate's topics — on `object_events` one per notification destination and one for media
+//! processing, on `replication_tasks` the replicators. A
 //! group's name is grammar, never a bound value, so it is built only from a name this module checks first — narrower
 //! than the store's own lexer — and positions are bound one parameter each.
 
@@ -26,18 +27,31 @@ pub(crate) struct MessageEntity {
     pub value: Value,
 }
 
-/// A group's quoted name, checked: `'<prefix><name>'` where the name is 1 to 64 letters, digits, `-` or `_`.
+/// A group's quoted name, checked: `'<prefix><name>'` where the name is 1 to 64 letters, digits, `-` or `_` — and
+/// the topic it reads, a name of this crate's schema.
 #[derive(Debug, Clone)]
-pub(crate) struct Group(String);
+pub(crate) struct Group {
+    quoted: String,
+    topic: &'static str,
+}
 
 impl Group {
+    /// A group on `object_events`.
     pub(crate) fn named(prefix: &str, name: &str) -> Result<Self> {
+        Self::on("object_events", prefix, name)
+    }
+
+    /// A group on `topic`.
+    pub(crate) fn on(topic: &'static str, prefix: &str, name: &str) -> Result<Self> {
         if !is_plain_name(name) {
             return Err(malformed(
                 "a group name is 1 to 64 letters, digits, '-' or '_'",
             ));
         }
-        Ok(Self(format!("'{prefix}{name}'")))
+        Ok(Self {
+            quoted: format!("'{prefix}{name}'"),
+            topic,
+        })
     }
 }
 
@@ -81,12 +95,13 @@ fn whole(value: Option<&Value>, reason: &'static str) -> Result<u64> {
     }
 }
 
-/// Declares `group` on `object_events` when it is missing; a new group starts at the topic's oldest message.
+/// Declares `group` on its topic when it is missing; a new group starts at the topic's oldest message.
 pub(crate) async fn define(pool: &MetaPool, group: &Group, holding: &Holding) -> Result<()> {
     let script = format!(
-        "DEFINE GROUP IF NOT EXISTS {} ON TOPIC object_events ACK DEADLINE {}s DELIVERIES {} IN FLIGHT {} \
+        "DEFINE GROUP IF NOT EXISTS {} ON TOPIC {} ACK DEADLINE {}s DELIVERIES {} IN FLIGHT {} \
          DEAD LETTER TO {};",
-        group.0,
+        group.quoted,
+        group.topic,
         holding.ack_deadline_secs,
         holding.deliveries,
         holding.in_flight,
@@ -103,8 +118,8 @@ pub(crate) async fn read(
     limit: usize,
 ) -> Result<Vec<MessageEntity>> {
     let script = format!(
-        "READ FROM object_events FOR CONSUMER {} LIMIT $limit;",
-        group.0
+        "READ FROM {} FOR CONSUMER {} LIMIT $limit;",
+        group.topic, group.quoted
     );
     let parameters = vec![("limit".to_owned(), crate::params::count(limit))];
     let answers = pool.run(&script, parameters).await?;
@@ -133,7 +148,7 @@ pub(crate) async fn ack(pool: &MetaPool, group: &Group, settled: &[u64]) -> Resu
         return Ok(());
     }
     let (at, parameters) = positions(settled)?;
-    let script = format!("ACK object_events FOR CONSUMER {} AT {at};", group.0);
+    let script = format!("ACK {} FOR CONSUMER {} AT {at};", group.topic, group.quoted);
     pool.run(&script, parameters).await?;
     Ok(())
 }
@@ -151,8 +166,9 @@ pub(crate) async fn nack(
     // `DELAY` takes a literal duration; the number is the server's own, never a caller's.
     let (at, parameters) = positions(failed)?;
     let script = format!(
-        "NACK object_events FOR CONSUMER {} AT {at} DELAY {}s;",
-        group.0,
+        "NACK {} FOR CONSUMER {} AT {at} DELAY {}s;",
+        group.topic,
+        group.quoted,
         delay_secs.max(1)
     );
     pool.run(&script, parameters).await?;

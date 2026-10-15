@@ -1,5 +1,11 @@
 //! Every number with a meaning in TessariDB S3, typed and documented with its unit and its reason.
 
+mod replication;
+pub use replication::{
+    REPLICATION_ACK_DEADLINE_SECS, REPLICATION_DELIVERIES, REPLICATION_IN_FLIGHT,
+    REPLICATION_RETRY_MAX_SECS, REPLICATION_RETRY_STEP_SECS,
+};
+
 /// Shortest bucket name, in bytes. AWS general purpose bucket naming rules.
 pub const BUCKET_NAME_MIN_LEN: usize = 3;
 

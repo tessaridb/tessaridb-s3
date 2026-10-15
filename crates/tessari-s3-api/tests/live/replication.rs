@@ -9,10 +9,10 @@ use tessari_s3_core::authz::{Access, Role};
 use crate::access::{grant, user_with_key};
 use crate::{IGNORED, Seen, call, call_as, call_with, fresh, fresh_with, scratch_dir};
 
-const ENABLED: &[u8] =
+pub(crate) const ENABLED: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
 
-fn configuration(destination: &str, rule_extra: &str) -> String {
+pub(crate) fn configuration(destination: &str, rule_extra: &str) -> String {
     format!(
         "<ReplicationConfiguration><Role>arn:aws:iam::000000000000:role/replication</Role>\
          <Rule><ID>logs</ID><Priority>1</Priority><Status>Enabled</Status><Filter><Prefix>logs/</Prefix></Filter>\

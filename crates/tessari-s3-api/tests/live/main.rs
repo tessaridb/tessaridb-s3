@@ -66,6 +66,7 @@ mod quota_window;
 mod reclaim;
 mod regions;
 mod replication;
+mod replication_tasks;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,

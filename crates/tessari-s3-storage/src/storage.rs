@@ -23,6 +23,7 @@ use crate::multipart::{MultipartService, TessariMultipart};
 use crate::notifications::{NotificationService, TessariNotifications};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
+use crate::replication::{ReplicationService, TessariReplication};
 use crate::shards::ShardService;
 use crate::spaces::{SpaceService, TessariSpaces};
 use crate::usage::{TessariUsage, UsageService};
@@ -198,6 +199,15 @@ impl Storage {
             TessariNotifications::new(self.regional.clone()),
             self.buckets.clone(),
         )
+    }
+
+    /// Replication of this region's versions to their destination buckets.
+    #[must_use]
+    pub fn replication(&self) -> ReplicationService {
+        ReplicationService::new(TessariReplication::new(
+            self.pool.clone(),
+            self.regional.clone(),
+        ))
     }
 
     /// Media jobs: objects created where a bucket's media rules may take them.

@@ -7,7 +7,7 @@ mod repository;
 mod service;
 mod tessaridb;
 mod upload;
-mod version_id;
+pub(crate) mod version_id;
 
 pub use model::{
     Content, Deleted, HealBacklog, Healed, Listed, ListedVersion, MoveBacklog, Moved, Multipart,

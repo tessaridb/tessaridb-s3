@@ -46,6 +46,8 @@ use crate::Result;
 /// again an interval after each pass; a claim hands a bucket to one node at a time.
 /// A bucket names the space that owns it (`space_name`) and, when a user made it, its `creator`; buckets from before
 /// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
+/// `s3_regions:<region>` holds the URL a region's S3 surface is reached at, as its nodes advertise it; a replicator
+/// sends a version to its destination bucket's region there.
 /// `spaces`, `users` (one space each), `access_keys` (the secret sealed, never plain) and `grants` (a user's access to
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
@@ -97,6 +99,7 @@ DEFINE INDEX IF NOT EXISTS by_link_user ON identity_links FIELDS user_name;
 DEFINE TABLE IF NOT EXISTS console_logouts (after int REQUIRED);
 DEFINE TABLE IF NOT EXISTS oidc_logout_ids (seen int REQUIRED);
 ALTER TABLE oidc_logout_ids SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS s3_regions (endpoint string REQUIRED, seen datetime REQUIRED);
 COMMIT;
 ";
 
@@ -215,6 +218,7 @@ DEFINE FIELD IF NOT EXISTS replication_status ON objects TYPE string;
 DEFINE FIELD IF NOT EXISTS replication_status ON versions TYPE string;
 DEFINE FIELD IF NOT EXISTS replicate_to ON versions TYPE string;
 DEFINE TOPIC IF NOT EXISTS replication_tasks RETAIN 30d;
+DEFINE TOPIC IF NOT EXISTS replication_failed RETAIN 30d;
 DEFINE EVENT OR REPLACE replication_queued ON versions FOR CREATE WHEN $after.replicate_to != NONE \
 THEN { LET $named = string::concat('p-', string::concat(type::string($after.incarnation), string::concat('/', \
 string::concat(type::string($after.seq), string::concat('/', $after.key))))); \
