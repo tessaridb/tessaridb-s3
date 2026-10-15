@@ -50,8 +50,6 @@ pub enum Apply {
     StagedChanged,
     /// The current version moved since the layout was staged; it must be staged again over the new one.
     BaseMoved,
-    /// The staged layout breaks a rule.
-    Invalid(LayoutError),
 }
 
 /// The staged layout, if any.

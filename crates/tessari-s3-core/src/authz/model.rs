@@ -216,6 +216,6 @@ pub enum Action {
     ManageSpace(SpaceName),
     /// Create a user, issue it a key, disable it or change its grants — judged on the user as it is or would be.
     ManageUser(UserResource),
-    /// Create and remove spaces, set quotas, read every space.
+    /// Create and remove spaces, set quotas, read every space, change the cluster's layout.
     Operate,
 }

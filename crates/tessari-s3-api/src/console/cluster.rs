@@ -16,7 +16,7 @@ use super::error::ConsoleError;
 use super::status::{BacklogView, MemberView, view};
 
 #[derive(Serialize)]
-struct LayoutView {
+pub(super) struct LayoutView {
     version: u32,
     /// The erasure sets: an object goes to one, chosen by a keyed hash of its data id, one shard per node.
     sets: Vec<Vec<LayoutMemberView>>,

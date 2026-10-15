@@ -5,6 +5,10 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Root changes a cluster's layout through the console: staged over the current version (`PUT
+  /api/v1/cluster/layout/staged`, judged against the registered nodes and their zones) and applied as the next version
+  (`POST /api/v1/cluster/layout/apply`), refused when the layout or the staging changed meanwhile. Both need a fresh
+  sign-in and a reason, and every attempt is recorded.
 - Cluster members may name their failure domain with `TESSARIDB_S3_ZONE`. A layout now holds one or more erasure
   sets, and no set puts more of one object's shards in one zone than its parity can lose; the first layout passes
   over a node whose zone is already full. The layout record changed shape (`sets` of nodes with their zones) and a

@@ -65,6 +65,8 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         ("TESSARIDB_S3_INTERNAL_ADVERTISE", "127.0.0.1:1".to_owned()),
         ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET.to_owned()),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
+        // The live suite's own root key for sealing user access-key secrets, as `live_config` sets it.
+        ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
     ];
     S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
         .expect("live configuration")
@@ -110,6 +112,7 @@ pub(crate) async fn member() -> Member {
         config.cluster.as_ref().expect("clustered"),
     )
     .expect("clustered storage")
+    .with_iam_key(config.iam_key.clone())
     .with_reclaim_grace(config.reclaim_grace_secs);
     {
         let _turn = SCHEMA_TURN.lock().await;

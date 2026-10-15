@@ -15,6 +15,7 @@ mod guard;
 mod identity;
 mod input;
 mod keys;
+mod layout;
 mod limits;
 mod logout;
 mod media;
@@ -247,6 +248,13 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
             get(session::capabilities).delete(session::sign_out),
         )
         .route("/api/v1/cluster", get(cluster::cluster))
+        .route(
+            "/api/v1/cluster/layout/staged",
+            get(layout::staged)
+                .put(layout::stage)
+                .delete(layout::discard),
+        )
+        .route("/api/v1/cluster/layout/apply", post(layout::apply))
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))
