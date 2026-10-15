@@ -5,6 +5,11 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Bucket replication: Get, Put and DeleteBucketReplication (the `Filter` form). Each version a rule covers is queued
+  in its own commit and sent by any node to the destination region's endpoint (`TESSARIDB_S3_ADVERTISE`) as the
+  Role's user, keeping its version id; `x-amz-replication-status` answers `PENDING`, `COMPLETED`, `FAILED` or
+  `REPLICA`, and a replica is never sent on. A replicating bucket cannot suspend versioning. The console status
+  reports the replication backlog.
 - Regions: each region's object metadata (objects, uploads, the cluster, the queues) is kept in its own database
   `<database>_<region>`, buckets and identities in the shared one, so a region's database can be led by its own
   metadata nodes. A request for another region's bucket is answered `301 PermanentRedirect` with
