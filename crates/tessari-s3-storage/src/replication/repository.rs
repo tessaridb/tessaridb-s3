@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use super::model::Progress;
 use crate::Result;
 use crate::topic_groups::MessageEntity;
 
@@ -25,6 +26,8 @@ pub(crate) trait ReplicationRepository: Send + Sync {
         version_id: &str,
         status: &'static str,
     ) -> impl Future<Output = Result<()>> + Send;
+    /// The replicators' backlog, in flight and given-up counts, as the topic reports them.
+    fn progress(&self) -> impl Future<Output = Result<Progress>> + Send;
     /// Records that `region`'s S3 surface is reached at `endpoint`.
     fn advertise(&self, region: &str, endpoint: &str) -> impl Future<Output = Result<()>> + Send;
     /// The URL `region`'s S3 surface is reached at, if any of its nodes advertised one.

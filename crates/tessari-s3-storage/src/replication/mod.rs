@@ -8,6 +8,6 @@ mod repository;
 mod service;
 mod tessaridb;
 
-pub use model::Task;
+pub use model::{Progress, Task};
 pub use service::ReplicationService;
 pub use tessaridb::TessariReplication;

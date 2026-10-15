@@ -56,8 +56,16 @@ async fn a_task_is_handed_out_once_and_its_version_stamped_completed_or_failed()
             .status,
         200
     );
+    let queued = replication.progress().await.expect("progress");
+    assert_eq!((queued.backlog, queued.in_flight), (1, 0), "{queued:?}");
     let handed = replication.next(10).await.expect("tasks");
     assert_eq!(handed.len(), 1, "{handed:?}");
+    let held = replication.progress().await.expect("progress");
+    assert_eq!(
+        (held.backlog, held.in_flight, held.failed),
+        (1, 1, 0),
+        "{held:?}"
+    );
     let first = &handed[0];
     assert_eq!(
         (

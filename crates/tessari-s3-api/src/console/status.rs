@@ -1,6 +1,6 @@
 //! `GET /api/v1/status`: what this node is — its name in the cluster, the build, the region it signs for, the space of
 //! its data drive — and, on a cluster member, the registered members with whether each answers now and its drive's
-//! space, and how many objects wait for healing. The drive, the members and the backlog are the cluster view, answered
+//! space, how many objects wait for healing, and how this region's replication stands. The drive, the members and the backlog are the cluster view, answered
 //! only to a principal that may see the cluster.
 
 use std::time::Duration;
@@ -59,6 +59,17 @@ pub(super) struct BacklogView {
     pub(super) at_risk: usize,
 }
 
+/// Where this region's replication stands.
+#[derive(Serialize)]
+pub(super) struct ReplicationView {
+    /// Versions not yet sent.
+    backlog: u64,
+    /// Versions being sent now.
+    in_flight: u64,
+    /// Versions given up (`FAILED`).
+    failed: u64,
+}
+
 #[derive(Serialize)]
 pub(super) struct Status {
     version: &'static str,
@@ -67,6 +78,7 @@ pub(super) struct Status {
     erasure: Option<String>,
     members: Option<Vec<MemberView>>,
     heal_backlog: Option<BacklogView>,
+    replication: Option<ReplicationView>,
     /// This node's data drive; absent on a node without a data directory.
     drive: Option<DriveView>,
 }
@@ -84,6 +96,7 @@ pub(super) async fn status(
             erasure: state.erasure().map(str::to_owned),
             members: None,
             heal_backlog: None,
+            replication: None,
             drive: None,
         }));
     }
@@ -108,6 +121,18 @@ pub(super) async fn status(
             more: backlog.more,
             at_risk: backlog.at_risk,
         });
+    // The node's own status answers while the metadata store does not; replication is then left out, and said so.
+    let replication = match storage.replication().progress().await {
+        Ok(progress) => Some(ReplicationView {
+            backlog: progress.backlog,
+            in_flight: progress.in_flight,
+            failed: progress.failed,
+        }),
+        Err(error) => {
+            tracing::warn!(%error, "replication progress could not be read");
+            None
+        }
+    };
     Ok(Json(Status {
         version: env!("CARGO_PKG_VERSION"),
         node: state.node().map(str::to_owned),
@@ -115,6 +140,7 @@ pub(super) async fn status(
         erasure: state.erasure().map(str::to_owned),
         members,
         heal_backlog,
+        replication,
         drive: drive.map(DriveView::from),
     }))
 }

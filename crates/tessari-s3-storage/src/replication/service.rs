@@ -7,7 +7,7 @@ use tessari_s3_constants::{
 };
 use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
-use super::model::Task;
+use super::model::{Progress, Task};
 use super::repository::ReplicationRepository;
 use super::tessaridb::TessariReplication;
 use crate::topic_groups::{self, MessageEntity};
@@ -130,6 +130,14 @@ impl ReplicationService {
             REPLICATION_RETRY_MAX_SECS,
         );
         self.repository.nack(&[task.position], delay).await
+    }
+
+    /// The replicators' backlog, in flight and given-up counts.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn progress(&self) -> Result<Progress> {
+        self.repository.progress().await
     }
 
     /// Records that `region`'s S3 surface is reached at `endpoint`.

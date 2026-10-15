@@ -20,3 +20,14 @@ pub struct Task {
     /// The bucket it is sent to.
     pub destination: String,
 }
+
+/// Where this region's replication stands, as its topic reports it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Progress {
+    /// Tasks not yet settled: queued and not handed out, in flight, or waiting to be tried again.
+    pub backlog: u64,
+    /// Tasks handed out and not yet settled.
+    pub in_flight: u64,
+    /// Tasks given up: their versions are `FAILED`.
+    pub failed: u64,
+}

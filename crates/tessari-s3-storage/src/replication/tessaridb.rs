@@ -4,8 +4,9 @@
 use tessari_s3_constants::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_DELIVERIES, REPLICATION_IN_FLIGHT,
 };
-use tessari_s3_infrastructure::tessaridb::{MetaPool, RefusalClass, Value};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 
+use super::model::Progress;
 use super::repository::ReplicationRepository;
 use crate::answers::first_record;
 use crate::objects::version_id::{key_prefix, record_id};
@@ -101,6 +102,43 @@ impl ReplicationRepository for TessariReplication {
             object,
         )
         .await
+    }
+
+    async fn progress(&self) -> Result<Progress> {
+        let answers = self
+            .regional
+            .run("INFO FOR TOPIC replication_tasks;", Vec::new())
+            .await?;
+        let Some(Answer::Value { value, .. }) = answers.into_iter().next() else {
+            return Err(Error::Malformed {
+                record: "replication_tasks",
+                reason: "INFO FOR TOPIC answered no value",
+            });
+        };
+        let field = |value: Option<&Value>, name: &str| match value {
+            Some(Value::Object(fields)) => fields.get(name).cloned(),
+            _ => None,
+        };
+        let group = field(field(Some(&value), "groups").as_ref(), "replicators");
+        let count = |name: &'static str| match field(group.as_ref(), name) {
+            Some(Value::Number(Number::Integer(count))) => {
+                u64::try_from(count).map_err(|_| Error::Malformed {
+                    record: "replication_tasks",
+                    reason: name,
+                })
+            }
+            // No group yet: nothing has been handed out or given up.
+            None | Some(Value::None | Value::Null) => Ok(0),
+            Some(_) => Err(Error::Malformed {
+                record: "replication_tasks",
+                reason: name,
+            }),
+        };
+        Ok(Progress {
+            backlog: count("lag")?,
+            in_flight: count("in_flight")?,
+            failed: count("dead_lettered")?,
+        })
     }
 
     async fn advertise(&self, region: &str, endpoint: &str) -> Result<()> {
