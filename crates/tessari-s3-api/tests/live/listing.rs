@@ -397,7 +397,10 @@ async fn a_missing_bucket_a_bad_max_keys_and_an_earlier_life_are_answered() {
     // The bucket record goes and comes back: the object of its earlier life must not be listed.
     let name = vec![("name".to_owned(), Value::String("life".to_owned()))];
     planter
-        .run("DELETE buckets:$name;", name)
+        .run(
+            &format!("DELETE {}.buckets:$name;", planter.global_database()),
+            name,
+        )
         .await
         .expect("bucket record removed");
     assert_eq!(call(&state, "PUT", "/life", vec![], b"").await.status, 200);

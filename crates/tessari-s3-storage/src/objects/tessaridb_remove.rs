@@ -63,8 +63,9 @@ pub(super) async fn remove(
     let changes = versions::statements(bucket, key, incarnation, plan, false)?;
     parameters.extend(changes.parameters);
     let script = format!(
-        "BEGIN; LET $now = time::now(); {guard}{stamp}DELETE objects:$id; {}COMMIT;",
-        changes.script
+        "BEGIN; LET $now = time::now(); {guard}{stamp}DELETE objects:$id; {}{}",
+        changes.script,
+        versions::commit(plan.local)
     );
     match pool.run(&script, parameters).await {
         Ok(_) => Ok(true),

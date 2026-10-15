@@ -6,7 +6,10 @@ use tessari_s3_infrastructure::tessaridb::{MetaError, MetaPool, RefusalClass};
 
 use crate::Result;
 
-/// The table definitions, run inside the configured namespace and database. The `reclaims` queue holds the data ids
+/// The table definitions, split between two databases of the configured namespace: the GLOBAL one holds what every
+/// region shares — buckets, spaces, users, keys, grants, sign-ins and the console's record — and each region's own
+/// database (`<database>_<region>`) holds the object metadata of the region's buckets and the region's cluster, so a
+/// region's records can be led and kept in the region. No transaction writes both. The `reclaims` queue holds the data ids
 /// whose files may be reclaimed: an upload's own id from before its file exists until the commit that references it,
 /// and — through the `supersede` event, inside the very transaction that overwrites or deletes an object — the id it
 /// replaced. Each record is held back until `due`, the queuing instant plus the database parameter `$reclaim_grace`
@@ -25,6 +28,9 @@ use crate::Result;
 /// the id until reclamation; the `heal_queue` hands out the data ids acknowledged with fewer than every shard durable
 /// (or found damaged by a read), one healer at a time, and the `heal_claims` space holds the expiring claim of the
 /// one node healing or reclaiming an id. What operators do through the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
+/// A bucket whose `acknowledge` is `local` has its object writes and removals acknowledged once its region's majority
+/// holds them (`ACKNOWLEDGE LOCAL MAJORITY`) rather than the namespace's majority; `acknowledge_probes:local` records
+/// the latest write that proved this region's database takes that acknowledgement.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
 /// `object_events` is the notification outbox, a topic: a write or removal stamps the object record with whether its
@@ -46,7 +52,7 @@ use crate::Result;
 /// drops it at its expiry), and `identity_links` which user each provider identity signs in as.
 /// The definitions commit as ONE transaction: a node never sees the tables without the event, and nodes starting
 /// together contend once per attempt rather than once per definition.
-const TABLES: &str = "\
+const GLOBAL_TABLES: &str = "\
 BEGIN;
 DEFINE TABLE IF NOT EXISTS buckets (\
  name string REQUIRED, created datetime REQUIRED, region string REQUIRED, incarnation uuid REQUIRED);
@@ -58,7 +64,42 @@ DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE FIELD IF NOT EXISTS lifecycle ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
 DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
+DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
+DEFINE TABLE IF NOT EXISTS spaces (name string REQUIRED, created datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS users (\
+ name string REQUIRED, space_name string REQUIRED, space_role string REQUIRED, create_buckets bool REQUIRED,\
+ operator bool REQUIRED, cluster_viewer bool REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_user_space ON users FIELDS space_name;
+DEFINE TABLE IF NOT EXISTS access_keys (\
+ user_name string REQUIRED, secret bytes REQUIRED, nonce bytes REQUIRED, kek_id string REQUIRED,\
+ algorithm string REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
+DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
+ALTER TABLE access_keys SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
+ALTER TABLE key_issues SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS grants (\
+ user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string REQUIRED);
+ALTER TABLE oidc_logins SET EXPIRE;
+DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_link_user ON identity_links FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS console_logouts (after int REQUIRED);
+DEFINE TABLE IF NOT EXISTS oidc_logout_ids (seen int REQUIRED);
+ALTER TABLE oidc_logout_ids SET EXPIRE;
+COMMIT;
+";
+
+/// The region's tables, run inside its own database; `__GLOBAL__` stands for the global database, whose `buckets`
+/// an event reads by its qualified name.
+const REGIONAL_TABLES: &str = "\
+BEGIN;
+DEFINE TABLE IF NOT EXISTS acknowledge_probes (checked datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS objects (\
  bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED, size int REQUIRED, etag string REQUIRED,\
  modified datetime REQUIRED, headers object REQUIRED, metadata object REQUIRED, checksums object REQUIRED,\
@@ -154,7 +195,7 @@ CREATE object_events:$named = { bucket_name: $after.bucket_name, key: $after.key
 event: string::concat('s3:ObjectCreated:', $after.op), version_id: $after.version_id, size: $after.size, \
 etag: $after.etag, at: $after.modified }; };
 DEFINE EVENT OR REPLACE object_removed ON objects FOR DELETE WHEN $before.notify = true \
-THEN { LET $removed_from = $before.bucket_name; LET $state = (SELECT versioning FROM ONLY buckets:$removed_from); \
+THEN { LET $removed_from = $before.bucket_name; LET $state = (SELECT versioning FROM ONLY __GLOBAL__.buckets:$removed_from); \
 LET $named = string::concat('r-', type::string($before.data ?? $before.upload)); \
 CREATE object_events:$named = { bucket_name: $before.bucket_name, key: $before.key, \
 event: string::concat(string::concat('s3:', $before.op ?? 'ObjectRemoved'), \
@@ -168,34 +209,8 @@ version_id: $before.version_id, at: time::now() }; };
 DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;
-DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 DEFINE TABLE IF NOT EXISTS bucket_usage (taken datetime REQUIRED, buckets array REQUIRED);
 DEFINE SPACE IF NOT EXISTS usage_claims;
-DEFINE TABLE IF NOT EXISTS spaces (name string REQUIRED, created datetime REQUIRED);
-DEFINE TABLE IF NOT EXISTS users (\
- name string REQUIRED, space_name string REQUIRED, space_role string REQUIRED, create_buckets bool REQUIRED,\
- operator bool REQUIRED, cluster_viewer bool REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
-DEFINE INDEX IF NOT EXISTS by_user_space ON users FIELDS space_name;
-DEFINE TABLE IF NOT EXISTS access_keys (\
- user_name string REQUIRED, secret bytes REQUIRED, nonce bytes REQUIRED, kek_id string REQUIRED,\
- algorithm string REQUIRED, disabled bool REQUIRED, created datetime REQUIRED);
-DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
-DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
-DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
-DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
-ALTER TABLE access_keys SET EXPIRE;
-DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
-ALTER TABLE key_issues SET EXPIRE;
-DEFINE TABLE IF NOT EXISTS grants (\
- user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
-DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
-DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string REQUIRED);
-ALTER TABLE oidc_logins SET EXPIRE;
-DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);
-DEFINE INDEX IF NOT EXISTS by_link_user ON identity_links FIELDS user_name;
-DEFINE TABLE IF NOT EXISTS console_logouts (after int REQUIRED);
-DEFINE TABLE IF NOT EXISTS oidc_logout_ids (seen int REQUIRED);
-ALTER TABLE oidc_logout_ids SET EXPIRE;
 COMMIT;
 ";
 
@@ -205,10 +220,10 @@ COMMIT;
 ///
 /// # Errors
 /// The metadata store's refusal or outage, or the last `retry` refusal when every attempt lost.
-pub async fn apply(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
+pub async fn apply(global: &MetaPool, regional: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
     let mut attempt: u32 = 1;
     loop {
-        match apply_once(pool, reclaim_grace_secs).await {
+        match apply_once(global, regional, reclaim_grace_secs).await {
             Err(crate::Error::Meta(error))
                 if error.is_class(RefusalClass::Retry) && attempt < SCHEMA_RETRY_ATTEMPTS =>
             {
@@ -239,28 +254,37 @@ fn grace(
     )])
 }
 
-async fn apply_once(pool: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
+async fn apply_once(global: &MetaPool, regional: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
     // The names come from configuration checked against `[a-z][a-z0-9_]*`; a name is grammar and is never bound.
-    let (namespace, database) = pool.scope();
+    let (namespace, database) = global.scope();
+    let (_, region_database) = regional.scope();
     // The replication is stated, never left out: a metadata cluster refuses a namespace whose replication nobody said.
-    let replication = pool.replication().clause();
-    // The server's own account is an editor of its one database (an operator declares the namespace, the database and
-    // the account): `USE` plus the database's `IF NOT EXISTS` is all it may run here. Only when that is refused — the
-    // namespace is new, so an account that may declare one is starting the server — is the namespace declared.
-    let own = format!("USE NAMESPACE {namespace}; DEFINE DATABASE IF NOT EXISTS {database};");
-    match pool.run_unscoped(&own).await {
+    // `MAJORITY OR WEAKER` lets a bucket ask for its writes to be acknowledged by its region's majority alone.
+    let replication = global.replication().clause();
+    // The server's own account is an editor of its namespace (an operator declares the namespace and the account):
+    // `USE` plus each database's `IF NOT EXISTS` is all it may run here. Only when that is refused — the namespace is
+    // new, so an account that may declare one is starting the server — is the namespace declared.
+    let databases = format!(
+        "DEFINE DATABASE IF NOT EXISTS {database}; DEFINE DATABASE IF NOT EXISTS {region_database};"
+    );
+    let own = format!("USE NAMESPACE {namespace}; {databases}");
+    match global.run_unscoped(&own).await {
         Ok(_) => {}
         Err(MetaError::Refused { .. }) => {
             let tenancy = format!(
-                "DEFINE NAMESPACE IF NOT EXISTS {namespace} {replication}; USE NAMESPACE {namespace};\n\
-             DEFINE DATABASE IF NOT EXISTS {database};"
+                "DEFINE NAMESPACE IF NOT EXISTS {namespace} {replication} ACKNOWLEDGE MAJORITY OR WEAKER;\n\
+                 USE NAMESPACE {namespace}; {databases}"
             );
-            pool.run_unscoped(&tenancy).await?;
+            global.run_unscoped(&tenancy).await?;
         }
         Err(error) => return Err(error.into()),
     }
-    pool.run(TABLES, grace(reclaim_grace_secs)?).await?;
-    fill_spaces(pool).await
+    global.run(GLOBAL_TABLES, Vec::new()).await?;
+    let regional_tables = REGIONAL_TABLES.replace("__GLOBAL__", database);
+    regional
+        .run(&regional_tables, grace(reclaim_grace_secs)?)
+        .await?;
+    fill_spaces(global).await
 }
 
 /// Gives every bucket record without a `space_name` the default space. A field's `DEFAULT` fills only what is written

@@ -64,6 +64,7 @@ mod oidc_provider;
 mod quota;
 mod quota_window;
 mod reclaim;
+mod regions;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,
@@ -163,7 +164,11 @@ pub(crate) async fn fresh_at(
 ) -> (ApiState, MetaPool, std::path::PathBuf) {
     let config = live_config(meta_addresses, replication, &data_dir);
     let storage = prepared(&config).await;
-    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    // Nearly everything a test plants is the region's: objects, queues, the cluster.
+    let planter = MetaPool::new(config.meta.clone())
+        .expect("pool")
+        .regional(&config.region)
+        .expect("the region's database");
     (
         ApiState::new(&config, ApiState::system_clock(), storage),
         planter,
@@ -238,7 +243,7 @@ pub(crate) fn live_config(
 }
 
 /// The account the server signs in as for `config`'s namespace: created by the test node's owner as an editor of that
-/// one database — never the owner — the way an operator sets a deployment up. Its password is derived from the
+/// one namespace — never the owner — the way an operator sets a deployment up. Its password is derived from the
 /// namespace, so every node of one test signs in alike; it guards nothing outside the throwaway test node.
 pub(crate) async fn confined(
     config: &S3Config,
@@ -250,8 +255,8 @@ pub(crate) async fn confined(
     let password = format!("svc_{namespace}_password");
     owner
         .run_unscoped(&format!(
-            "DEFINE NAMESPACE IF NOT EXISTS {namespace} {}; USE NAMESPACE {namespace}; \
-             DEFINE DATABASE IF NOT EXISTS {database};",
+            "DEFINE NAMESPACE IF NOT EXISTS {namespace} {} ACKNOWLEDGE MAJORITY OR WEAKER; \
+             USE NAMESPACE {namespace}; DEFINE DATABASE IF NOT EXISTS {database};",
             owner.replication().clause()
         ))
         .await
@@ -261,7 +266,7 @@ pub(crate) async fn confined(
     owner
         .run(
             &format!(
-                "DEFINE USER IF NOT EXISTS {user} ON {namespace}.{database} ROLE editor PASSWORD '{password}';"
+                "DEFINE USER IF NOT EXISTS {user} ON NAMESPACE {namespace} ROLE editor PASSWORD '{password}';"
             ),
             Vec::new(),
         )
@@ -281,8 +286,10 @@ pub(crate) async fn prepared(config: &S3Config) -> Storage {
     drop(turn);
     let storage = Storage::new(
         MetaPool::new(account).expect("pool"),
+        &config.region,
         config.data_dir.clone(),
     )
+    .expect("storage")
     .with_iam_key(config.iam_key.clone())
     .with_reclaim_grace(config.reclaim_grace_secs);
     // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one store-wide
@@ -375,7 +382,7 @@ pub(crate) async fn call_as(
         headers,
         access_key,
         secret,
-        region: "us-east-1",
+        region: state.region(),
         amz_date: &amz_date,
     };
     let (target, mut headers) = signer::sign_with_body(&unsigned, body);

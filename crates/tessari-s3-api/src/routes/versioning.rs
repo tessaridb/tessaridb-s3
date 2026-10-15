@@ -48,6 +48,8 @@ pub(crate) async fn put(call: &Call<'_>, body: Body) -> Result<Response<Body>> {
             "MFA delete is not supported",
         ));
     }
+    // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
+    crate::routes::buckets::resident(call).await?;
     if !call
         .state
         .storage()

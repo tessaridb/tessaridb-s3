@@ -31,6 +31,8 @@ pub struct BucketEntity {
     pub notify: Option<Value>,
     /// The media rules as stored; absent while none are set.
     pub media: Option<Vec<Value>>,
+    /// `local` when the bucket's writes are acknowledged by its region's majority alone; absent otherwise.
+    pub acknowledge: Option<String>,
 }
 
 impl BucketEntity {
@@ -91,6 +93,11 @@ impl BucketEntity {
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("media")),
         };
+        let acknowledge = match fields.get("acknowledge") {
+            None | Some(Value::None) => None,
+            Some(Value::String(level)) => Some(level.clone()),
+            Some(_) => return Err(malformed("acknowledge")),
+        };
         let limit = |field: &'static str| match fields.get(field) {
             None | Some(Value::None) => Ok(None),
             Some(Value::Number(Number::Integer(limit))) => Ok(Some(*limit)),
@@ -109,6 +116,7 @@ impl BucketEntity {
             lifecycle,
             notify,
             media,
+            acknowledge,
         })
     }
 }

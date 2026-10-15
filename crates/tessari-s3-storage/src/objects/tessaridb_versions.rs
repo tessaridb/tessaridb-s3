@@ -7,7 +7,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::super::repository::{Head, VersionPlan};
 use super::super::version_id::{NULL, key_prefix, record_id};
-use crate::answers::first_record;
+use crate::answers::{bucket_read, first_record};
 use crate::{Error, Result};
 
 /// Where the statements of a plan bind their values; distinct from the object statement's own names.
@@ -43,6 +43,15 @@ fn seq_field(record: Option<Value>) -> Result<Option<u64>> {
     }
 }
 
+/// The end of a transaction changing a key of a bucket with `local` acknowledgement or without.
+pub(super) const fn commit(local: bool) -> &'static str {
+    if local {
+        "COMMIT ACKNOWLEDGE LOCAL MAJORITY;"
+    } else {
+        "COMMIT;"
+    }
+}
+
 /// See `ObjectRepository::head`.
 pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) -> Result<Head> {
     let parameters = vec![
@@ -64,15 +73,19 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
     // bucket and key fields tell apart. The null version's sequence is kept at the key's own address in
     // `version_nulls`: an index cannot answer inside a transaction once anything in the store has committed since it
     // began, and this read must hold under concurrent writers.
-    let script = "BEGIN; SELECT versioning, notify, media FROM ONLY buckets:$bucket; \
-                  SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
-                  SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;";
-    let mut answers = pool.run(script, parameters).await?.into_iter();
+    let script = format!(
+        "BEGIN; {} SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
+         SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;",
+        bucket_read(pool, "versioning, notify, media, acknowledge")
+    );
+    let mut answers = pool.run(&script, parameters).await?.into_iter();
     let _begin = answers.next();
     let bucket_record = first_record(answers.next())?;
     // A change is recorded for whoever reads `object_events`: the notification destinations and the media workers.
     let notifies = matches!(&bucket_record, Some(Value::Object(fields))
         if ["notify", "media"].iter().any(|field| !matches!(fields.get(*field), None | Some(Value::None))));
+    let local = matches!(&bucket_record, Some(Value::Object(fields))
+        if fields.get("acknowledge") == Some(&Value::String(crate::buckets::LOCAL.to_owned())));
     let state = match bucket_record {
         Some(Value::Object(fields)) => match fields.get("versioning") {
             None | Some(Value::None) => None,
@@ -95,6 +108,7 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
     let null = seq_field(first_record(answers.next())?)?;
     let current = first_record(answers.next())?.is_some();
     Ok(Head {
+        local,
         state,
         newest,
         null,

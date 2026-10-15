@@ -165,6 +165,7 @@ async fn a_move_cut_short_on_either_side_of_the_switch_finishes_from_the_store()
     let restarted = Storage::clustered(
         tessari_s3_infrastructure::tessaridb::MetaPool::new(member.config.meta.clone())
             .expect("pool"),
+        &member.config.region,
         member.config.data_dir.clone(),
         member.config.cluster.as_ref().expect("clustered"),
     )

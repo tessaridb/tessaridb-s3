@@ -67,6 +67,17 @@ pub(crate) trait BucketRepository: Send + Sync {
         rules: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s acknowledgement to its region's majority (`local`) or back to the default.
+    fn set_acknowledge(
+        &self,
+        name: &BucketName,
+        local: bool,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Writes one record to this region's database acknowledged by the region's majority, answering the store's own
+    /// words when it refuses that acknowledgement.
+    fn probe_local(&self) -> impl Future<Output = Result<Option<String>>> + Send;
+
     fn list(&self, visible: &Visible) -> impl Future<Output = Result<Vec<BucketEntity>>> + Send;
     /// Whether any object record lies in `name`'s range.
     fn holds_objects(&self, name: &BucketName) -> impl Future<Output = Result<bool>> + Send;

@@ -405,7 +405,10 @@ async fn a_copy_is_refused_by_name_before_it_writes() {
 async fn incarnation_value(planter: &tessari_s3_infrastructure::tessaridb::MetaPool) -> Value {
     let answer = planter
         .run(
-            "SELECT incarnation FROM ONLY buckets:$b;",
+            &format!(
+                "SELECT incarnation FROM ONLY {}.buckets:$b;",
+                planter.global_database()
+            ),
             vec![("b".to_owned(), Value::String("cpr".to_owned()))],
         )
         .await

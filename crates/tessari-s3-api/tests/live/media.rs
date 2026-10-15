@@ -29,8 +29,8 @@ async fn in_flight(planter: &MetaPool) -> i64 {
 async fn with_media(planter: &MetaPool, bucket: &str) {
     planter
         .run(
-            "UPDATE buckets:$name SET media = [{ id: 'photos', content_types: ['image/*'], prefix: '', \
-             outputs: ['image/320/jpeg'] }];",
+            &format!("UPDATE {}.buckets:$name SET media = [{{ id: 'photos', content_types: ['image/*'], prefix: '', \
+             outputs: ['image/320/jpeg'] }}];", planter.global_database()),
             vec![("name".to_owned(), Value::String(bucket.to_owned()))],
         )
         .await
@@ -271,8 +271,8 @@ async fn an_uploaded_image_gets_its_renditions_from_two_nodes_and_a_rendition_ge
     );
     planter
         .run(
-            "UPDATE buckets:'pictures' SET media = [{ id: 'photos', content_types: ['image/*'], \
-             prefix: 'photos/', outputs: ['image/320/jpeg', 'image/1920/webp', 'image/150/png'] }];",
+            &format!("UPDATE {}.buckets:'pictures' SET media = [{{ id: 'photos', content_types: ['image/*'], \
+             prefix: 'photos/', outputs: ['image/320/jpeg', 'image/1920/webp', 'image/150/png'] }}];", planter.global_database()),
             Vec::new(),
         )
         .await
@@ -425,8 +425,8 @@ async fn an_uploaded_video_gets_web_renditions_and_a_poster_through_ffmpeg() {
     assert_eq!(call(&state, "PUT", "/films", vec![], b"").await.status, 200);
     planter
         .run(
-            "UPDATE buckets:'films' SET media = [{ id: 'clips', content_types: ['video/*'], prefix: 'clips/', \
-             outputs: ['video/360p/mp4', 'video/360p/webm', 'poster/320/jpeg'] }];",
+            &format!("UPDATE {}.buckets:'films' SET media = [{{ id: 'clips', content_types: ['video/*'], prefix: 'clips/', \
+             outputs: ['video/360p/mp4', 'video/360p/webm', 'poster/320/jpeg'] }}];", planter.global_database()),
             Vec::new(),
         )
         .await

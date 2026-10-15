@@ -83,6 +83,7 @@ pub(super) async fn write(
     };
     let changes = versions::statements(bucket, key, incarnation, plan, true)?;
     let versioned = changes.script;
+    let commit = versions::commit(plan.local);
     parameters.extend(changes.parameters);
     // A data object commits together with the removal of its pending `reclaims` entry, and only while that entry exists
     // unmarked — the `UPDATE` refuses, and the whole transaction with it, once a reclaimer has taken the file. The
@@ -105,7 +106,7 @@ pub(super) async fn write(
                     "BEGIN; LET $now = time::now(); UPDATE uploads:$upload SET last_part = $now; \
                      {statement} \
                      DELETE FROM parts WHERE upload = $upload AND NOT (number IN $listed) LIMIT ALL; \
-                     DELETE uploads:$upload; {versioned}COMMIT;"
+                     DELETE uploads:$upload; {versioned}{commit}"
                 ),
                 3,
             )
@@ -116,7 +117,7 @@ pub(super) async fn write(
                 format!(
                     "BEGIN; LET $now = time::now(); {statement} \
                      UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; \
-                     DELETE reclaims:$data; {versioned}COMMIT;"
+                     DELETE reclaims:$data; {versioned}{commit}"
                 ),
                 2,
             )

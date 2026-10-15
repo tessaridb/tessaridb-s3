@@ -7,6 +7,9 @@ use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
 
+/// The stored `acknowledge` of a bucket whose writes its region's majority acknowledges.
+pub(crate) const LOCAL: &str = "local";
+
 use crate::{Error, Result};
 
 /// One bucket.
@@ -34,6 +37,20 @@ pub struct Bucket {
     pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
     /// Its media rules; `None` while none are set.
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
+    /// Who must hold an object write before it is acknowledged.
+    pub acknowledgement: Acknowledgement,
+}
+
+/// Who must hold a bucket's object writes and removals before the client is told they succeeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Acknowledgement {
+    /// A majority of the nodes keeping the bucket's region's database — the default; such a write survives a
+    /// failover of that database's leadership.
+    #[default]
+    Majority,
+    /// A majority of those nodes inside the region only: faster where the database is also kept in other regions,
+    /// and a write acknowledged this way can be LOST to a failover whose new leader did not collect it.
+    RegionMajority,
 }
 
 impl Bucket {
@@ -108,6 +125,16 @@ impl TryFrom<BucketEntity> for Bucket {
                 .as_ref()
                 .map(|rules| super::media::from_values(rules))
                 .transpose()?,
+            acknowledgement: match entity.acknowledge.as_deref() {
+                None => Acknowledgement::Majority,
+                Some(LOCAL) => Acknowledgement::RegionMajority,
+                Some(_) => {
+                    return Err(Error::Malformed {
+                        record: "bucket",
+                        reason: "acknowledge is not local",
+                    });
+                }
+            },
         })
     }
 }

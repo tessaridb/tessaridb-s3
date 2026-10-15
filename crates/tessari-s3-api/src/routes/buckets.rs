@@ -175,6 +175,20 @@ pub(crate) async fn list(call: &Call<'_>) -> Result<Response<Body>> {
     Ok(xml_response(StatusCode::OK, document))
 }
 
+/// Refuses with `PermanentRedirect` naming the bucket's region when the addressed bucket lives in another region than
+/// this node's; a bucket that does not exist passes, for the handler to answer.
+pub(crate) async fn resident(call: &Call<'_>) -> Result<()> {
+    match call.state.storage().buckets().get(call.bucket()?).await? {
+        Some(bucket) if bucket.region != call.state.region() => {
+            Err(tessari_s3_storage::Error::OtherRegion {
+                region: bucket.region,
+            }
+            .into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The addressed bucket, or `NoSuchBucket`.
 pub(super) async fn existing(call: &Call<'_>) -> Result<Bucket> {
     call.state

@@ -41,8 +41,10 @@ async fn main() -> anyhow::Result<()> {
     );
     let pool = MetaPool::new(config.meta.clone())?;
     let storage = match &config.cluster {
-        Some(cluster) => Storage::clustered(pool, config.data_dir.clone(), cluster)?,
-        None => Storage::new(pool, config.data_dir.clone()),
+        Some(cluster) => {
+            Storage::clustered(pool, &config.region, config.data_dir.clone(), cluster)?
+        }
+        None => Storage::new(pool, &config.region, config.data_dir.clone())?,
     }
     .with_iam_key(config.iam_key.clone())
     .with_reclaim_grace(config.reclaim_grace_secs);

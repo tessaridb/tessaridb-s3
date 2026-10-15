@@ -1,5 +1,5 @@
-//! The server signs in to TessariDB as its own account, against a real node: an editor of its one database and
-//! nothing else — not the owner — so its schema still applies, while a statement about another namespace or the whole
+//! The server signs in to TessariDB as its own account, against a real node: an editor of its one namespace (the
+//! global database and its region's) and nothing else — not the owner — so its schema still applies, while a statement about another namespace or the whole
 //! store is refused by the node itself.
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool};
@@ -8,7 +8,7 @@ use crate::{IGNORED, confined, live_config, prepared, scratch_dir, test_node};
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn the_server_runs_as_an_editor_of_its_one_database_and_is_refused_outside_it() {
+async fn the_server_runs_as_an_editor_of_its_one_namespace_and_is_refused_outside_it() {
     let _why = IGNORED;
     let config = live_config(test_node(), None, &scratch_dir());
     // The schema applies under the confined account (the harness signs every live test in this way).
@@ -16,7 +16,7 @@ async fn the_server_runs_as_an_editor_of_its_one_database_and_is_refused_outside
     let account = confined(&config).await;
     let owner = MetaPool::new(config.meta.clone()).expect("pool");
     let (namespace, database) = owner.scope();
-    let reach = format!("{namespace}.{database}");
+    let reach = format!("\"{namespace}\"");
 
     let answers = owner
         .run(&format!("INFO FOR USER {};", account.user), Vec::new())
@@ -39,7 +39,11 @@ async fn the_server_runs_as_an_editor_of_its_one_database_and_is_refused_outside
             "{kind} held: {info}"
         );
     }
-    assert!(info.contains(&reach), "the reach is its database: {info}");
+    assert!(info.contains(&reach), "the reach is its namespace: {info}");
+    assert!(
+        !info.contains(&format!("{namespace}.{database}")),
+        "no narrower reach is held: {info}"
+    );
 
     let server = MetaPool::new(account).expect("pool");
     let other = server

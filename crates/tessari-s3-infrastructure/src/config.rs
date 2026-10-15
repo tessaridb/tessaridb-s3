@@ -14,6 +14,7 @@ use tessari_s3_types::{Code, NodeId, SecretKey};
 use crate::cluster_config::cluster_settings;
 use crate::meta_config::meta_settings;
 use crate::tessaridb::MetaSettings;
+use crate::tessaridb::regional_database;
 use crate::{Error, Result};
 
 /// Everything the S3 server reads from its environment.
@@ -151,6 +152,13 @@ impl S3Config {
             })?,
         };
         let meta = meta_settings(&get)?;
+        if regional_database(&meta.database, &region).is_none() {
+            return Err(Error::InvalidConfig {
+                key: "TESSARIDB_S3_REGION",
+                reason: "not a region name (lowercase letters, digits and single hyphens, beginning with a letter) \
+                         short enough to name its metadata database",
+            });
+        }
         let cluster = cluster_settings(&get)?;
         let console = crate::console_config::console_settings(&get)?;
         let iam_key = crate::iam_config::iam_key(&get)?;

@@ -170,6 +170,8 @@ pub(crate) async fn delete_many(call: &Call<'_>, body: Body) -> Result<Response<
     check(&integrity, &hashes.finish(), None)?;
     let request = parse(&document)?;
     let bucket = call.bucket()?;
+    // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
+    crate::routes::buckets::resident(call).await?;
     // An entry naming a version deletes it for good, which needs who administers the bucket; without that, those
     // entries are refused one by one and the rest go ahead (S3 reports each key on its own).
     let versions_allowed = !request.entries.iter().any(|(_, version)| version.is_some())

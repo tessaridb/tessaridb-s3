@@ -7,7 +7,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 use super::entity::read;
 use super::model::{NewObject, Part};
 use super::repository::{Batch, Guard, Head, ObjectRepository, Snapshot, VersionPlan, Wrote};
-use crate::answers::{first_record, incarnation_of};
+use crate::answers::{bucket_read, first_record, incarnation_of};
 use crate::schema::QUEUE_FOR_RECLAIM;
 use crate::{Error, Result};
 
@@ -73,9 +73,12 @@ impl ObjectRepository for TessariObjects {
         )];
         let answers = self
             .pool
-            .run("SELECT incarnation FROM ONLY buckets:$bucket;", parameters)
+            .run(&bucket_read(&self.pool, "incarnation, region"), parameters)
             .await?;
-        incarnation_of(first_record(answers.into_iter().next())?)
+        incarnation_of(
+            first_record(answers.into_iter().next())?,
+            self.pool.region(),
+        )
     }
 
     async fn read(&self, bucket: &BucketName, key: &ObjectKey) -> Result<Snapshot> {
@@ -88,10 +91,12 @@ impl ObjectRepository for TessariObjects {
         ];
         // Two plain reads, the bucket first: an object is taken only when it carries the incarnation read just before
         // it, and every write is fenced on that incarnation in its own commit, so the pair answers as of one moment.
-        let script =
-            "SELECT incarnation FROM ONLY buckets:$bucket; SELECT * FROM ONLY objects:$id;";
-        let mut answers = self.pool.run(script, parameters).await?.into_iter();
-        let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
+        let script = format!(
+            "{} SELECT * FROM ONLY objects:$id;",
+            bucket_read(&self.pool, "incarnation, region")
+        );
+        let mut answers = self.pool.run(&script, parameters).await?.into_iter();
+        let bucket_incarnation = incarnation_of(first_record(answers.next())?, self.pool.region())?;
         let object = first_record(answers.next())?
             .map(|value| read(&value))
             .transpose()?;

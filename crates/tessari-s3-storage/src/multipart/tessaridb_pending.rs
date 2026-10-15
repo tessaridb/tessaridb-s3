@@ -14,7 +14,7 @@ use tessari_s3_types::{BucketName, ObjectKey, Timestamp, UploadId};
 use super::super::model::{NewUpload, OpenUpload};
 use super::super::repository::{PendingBatch, PendingRow};
 use super::strings;
-use crate::answers::{first_record, incarnation_of};
+use crate::answers::{bucket_read, first_record, incarnation_of};
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -179,12 +179,14 @@ pub(super) async fn page(
         ("after".to_owned(), Value::String(after.to_owned())),
         ("limit".to_owned(), crate::params::count(limit)),
     ];
-    let script = "SELECT incarnation FROM ONLY buckets:$bucket; \
-         SELECT upload, bucket_name, key, incarnation, initiated, position FROM pending AFTER pending:$after \
-         LIMIT $limit;";
+    let script = format!(
+        "{} SELECT upload, bucket_name, key, incarnation, initiated, position FROM pending AFTER pending:$after \
+         LIMIT $limit;",
+        bucket_read(pool, "incarnation, region")
+    );
     // Plain reads, the bucket first: an upload is listed only when it carries the incarnation read before it.
-    let mut answers = pool.run(script, parameters).await?.into_iter();
-    let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
+    let mut answers = pool.run(&script, parameters).await?.into_iter();
+    let bucket_incarnation = incarnation_of(first_record(answers.next())?, pool.region())?;
     let walked = match answers.next() {
         Some(Answer::Records { records, .. }) => records,
         _ => Vec::new(),

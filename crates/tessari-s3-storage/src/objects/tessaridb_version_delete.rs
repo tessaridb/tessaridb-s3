@@ -7,8 +7,8 @@ use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::super::repository::Removal;
 use super::super::version_id::{NULL, Naming, key_prefix, record_id};
-use super::{TessariObjects, id, is_lost_or_refused};
-use crate::answers::first_record;
+use super::{TessariObjects, id, is_lost_or_refused, versions};
+use crate::answers::{bucket_read, first_record};
 use crate::{Error, Result};
 
 /// A version's fields, as a read of it projects them.
@@ -40,6 +40,8 @@ pub(crate) struct Target {
     successor: Option<Successor>,
     /// Whether the bucket notifies, read with the target.
     notify: bool,
+    /// Whether the bucket's writes are acknowledged by its region's majority alone.
+    local: bool,
 }
 
 type Fields = std::collections::BTreeMap<String, Value>;
@@ -124,8 +126,8 @@ impl TessariObjects {
         ];
         let script = format!(
             "BEGIN; SELECT {FIELDS} FROM ONLY versions:$target; \
-             SELECT {FIELDS} FROM versions AFTER versions:$prefix LIMIT 2; \
-             SELECT notify FROM ONLY buckets:$bucket; COMMIT;"
+             SELECT {FIELDS} FROM versions AFTER versions:$prefix LIMIT 2; {} COMMIT;",
+            bucket_read(&self.pool, "notify, acknowledge")
         );
         let mut answers = self.pool.run(&script, parameters).await?.into_iter();
         let _begin = answers.next();
@@ -137,8 +139,11 @@ impl TessariObjects {
             return Ok(None);
         }
         let mut newest = of_key(answers.next(), bucket, key)?.into_iter();
-        let notify = matches!(first_record(answers.next())?, Some(Value::Object(fields))
+        let bucket_record = first_record(answers.next())?;
+        let notify = matches!(&bucket_record, Some(Value::Object(fields))
             if !matches!(fields.get("notify"), None | Some(Value::None)));
+        let local = matches!(&bucket_record, Some(Value::Object(fields))
+            if fields.get("acknowledge") == Some(&Value::String(crate::buckets::LOCAL.to_owned())));
         let successor = match newest.next() {
             Some(first) if seq(&first)? == target_seq => Some(match newest.next() {
                 Some(next) if !is_marker(&next) => {
@@ -157,6 +162,7 @@ impl TessariObjects {
             version_id: version_id.to_owned(),
             successor,
             notify,
+            local,
         }))
     }
 
@@ -230,7 +236,7 @@ impl TessariObjects {
             }
             (Some(Successor::Nothing), true) => {}
         }
-        script.push_str("COMMIT;");
+        script.push_str(versions::commit(target.local));
         match self.pool.run(&script, parameters).await {
             Ok(_) => Ok(true),
             Err(error) if is_lost_or_refused(&error) => Ok(false),

@@ -85,6 +85,11 @@ impl From<tessari_s3_storage::Error> for Error {
                     "the metadata store is busy; reduce your request rate",
                 )
             }
+            Storage::OtherRegion { region } => Self::new(
+                ErrorCode::PermanentRedirect,
+                "the bucket you are attempting to access must be addressed using the specified endpoint",
+            )
+            .with_header("x-amz-bucket-region", region.clone()),
             Storage::Quorum { .. }
             | Storage::Unreadable { .. }
             | Storage::NoLayout

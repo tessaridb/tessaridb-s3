@@ -65,6 +65,8 @@ pub(crate) async fn put(call: &Call<'_>, body: Body) -> Result<Response<Body>> {
         .collect();
     validate(&rules, |target| call.state.declares_target(target))
         .map_err(|refused| Error::new(ErrorCode::InvalidArgument, refused.to_string()))?;
+    // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
+    crate::routes::buckets::resident(call).await?;
     if !call
         .state
         .storage()

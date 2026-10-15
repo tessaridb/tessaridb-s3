@@ -7,7 +7,7 @@ use tessari_s3_types::BucketName;
 use super::super::entity::list_row;
 use super::super::repository::Batch;
 use crate::Result;
-use crate::answers::{first_record, incarnation_of};
+use crate::answers::{bucket_read, first_record, incarnation_of};
 
 /// What a listing reads of each record.
 /// `headers` is read whole for its `content-type` (0.33 has no route to a hyphenated key); it is small — the system
@@ -41,12 +41,12 @@ pub(super) async fn page(
         None => String::new(),
     };
     let script = format!(
-        "SELECT incarnation FROM ONLY buckets:$bucket; {exact} \
-         SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT $limit;"
+        "{} {exact} SELECT {LIST_FIELDS} FROM objects AFTER objects:$after LIMIT $limit;",
+        bucket_read(pool, "incarnation, region")
     );
     // Plain reads, the bucket first: a row is listed only when it carries the incarnation read before it.
     let mut answers = pool.run(&script, parameters).await?.into_iter();
-    let bucket_incarnation = incarnation_of(first_record(answers.next())?)?;
+    let bucket_incarnation = incarnation_of(first_record(answers.next())?, pool.region())?;
     let mut rows = Vec::new();
     if at.is_some()
         && let Some(value) = first_record(answers.next())?

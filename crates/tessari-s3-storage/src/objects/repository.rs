@@ -45,6 +45,8 @@ pub(crate) struct Head {
     pub(crate) notifies: bool,
     /// Whether the key has a current object record.
     pub(crate) current: bool,
+    /// Whether the bucket asked for its writes to be acknowledged by its region's majority alone.
+    pub(crate) local: bool,
 }
 
 /// The version a write or a delete adds.
@@ -75,6 +77,9 @@ pub(crate) struct VersionPlan {
     pub(crate) current: bool,
     /// What a removal is done for, which names its event.
     pub(crate) removal: Removal,
+    /// Whether the change is acknowledged by the bucket's region's majority (`ACKNOWLEDGE LOCAL MAJORITY`) rather
+    /// than the namespace's.
+    pub(crate) local: bool,
 }
 
 /// What removes an object or a version: a request, or the bucket's lifecycle rules (S3 ref 11 M5 event names).

@@ -40,6 +40,8 @@ export type Bucket = {
   readonly maxBytes: number | null;
   /** The most objects it may hold; null is no limit. */
   readonly maxObjects: number | null;
+  /** Who acknowledges its writes: the majority keeping its metadata, or its region's majority alone. */
+  readonly acknowledgement: "majority" | "region";
 };
 export type ObjectRow = {
   readonly key: string;
@@ -198,9 +200,24 @@ export function readUsage(v: unknown): Usage | null {
     : { taken: v["taken"], stale: v["stale"], buckets, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
 }
 
+const acknowledgement = (v: unknown): v is Bucket["acknowledgement"] => v === "majority" || v === "region";
+
 const bucket = (v: unknown): Bucket | null =>
-  record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"])
-    ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] }
+  record(v) &&
+  text(v["name"]) &&
+  text(v["created"]) &&
+  text(v["region"]) &&
+  countOrNull(v["max_bytes"]) &&
+  countOrNull(v["max_objects"]) &&
+  acknowledgement(v["acknowledgement"])
+    ? {
+        name: v["name"],
+        created: v["created"],
+        region: v["region"],
+        maxBytes: v["max_bytes"],
+        maxObjects: v["max_objects"],
+        acknowledgement: v["acknowledgement"],
+      }
     : null;
 
 export function readBuckets(v: unknown): readonly Bucket[] | null {

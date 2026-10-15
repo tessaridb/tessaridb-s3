@@ -40,14 +40,18 @@ pub(super) async fn on_bucket(
     name: &BucketName,
     make: fn(BucketResource) -> Action,
 ) -> Result<(), ConsoleError> {
-    if matches!(principal, Principal::Root) {
-        return Ok(());
+    let found = state.storage().buckets().get(name).await?;
+    // A principal that may not reach the bucket is refused alike whether it exists or not, before its region is said.
+    if !matches!(principal, Principal::Root) {
+        let bucket = found.as_ref().ok_or(ConsoleError::forbidden())?;
+        allow(principal, &make(bucket.resource()))?;
     }
-    let bucket = state
-        .storage()
-        .buckets()
-        .get(name)
-        .await?
-        .ok_or(ConsoleError::forbidden())?;
-    allow(principal, &make(bucket.resource()))
+    match found {
+        // Its objects and its lifecycle work are in that region's database: this node's would answer empty.
+        Some(bucket) if bucket.region != state.region() => Err(ConsoleError::conflict(
+            "other_region",
+            "this bucket lives in another region; open the console of a node in that region",
+        )),
+        _ => Ok(()),
+    }
 }

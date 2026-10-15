@@ -4,6 +4,7 @@
 //! same evaluator the S3 path uses.
 
 mod access;
+mod acknowledgement;
 mod actions;
 mod break_glass;
 mod buckets;
@@ -263,6 +264,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))
+        .route(
+            "/api/v1/buckets/{bucket}/acknowledgement",
+            put(acknowledgement::set),
+        )
         .route(
             "/api/v1/buckets/{bucket}/media",
             get(media::get).put(media::set),

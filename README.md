@@ -102,13 +102,13 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_ROOT_ACCESS_KEY` | — (required) | the root credential's access key |
 | `TESSARIDB_S3_ROOT_SECRET_KEY` | — (required, ≥ 16 bytes) | the root credential's secret |
 | `TESSARIDB_S3_LISTEN` | `127.0.0.1:9100` | the address the S3 API listens on |
-| `TESSARIDB_S3_REGION` | `us-east-1` | the region requests must be signed for |
+| `TESSARIDB_S3_REGION` | `us-east-1` | the region requests must be signed for; its buckets' objects are kept in the database `<database>_<region>`, and a request for another region's bucket is answered `301 PermanentRedirect` |
 | `TESSARIDB_S3_DOMAINS` | empty | comma-separated endpoint domains for `<bucket>.<domain>` addressing; path-style always works |
 | `TESSARIDB_S3_MAX_INFLIGHT` | `1024` | requests served at once before new ones get `503 SlowDown` |
 | `TESSARIDB_S3_SHUTDOWN_GRACE_SECS` | `30` | how long in-flight requests get after SIGTERM |
 | `TESSARIDB_S3_META_ADDRESS` | — (required) | the TessariDB nodes holding the metadata, `host:port` of each wire surface, comma-separated; a node that does not answer within 5 s is passed over for the next |
 | `TESSARIDB_S3_META_REPLICATION` | `none` for one node; required for several | copies the metadata cluster keeps of the namespace: a number, or `none` — a cluster refuses a namespace whose replication was never stated |
-| `TESSARIDB_S3_META_USER` / `_PASSWORD` | — (required) | the TessariDB user the server signs in as — its own account, an editor of its one database (`DEFINE USER s3 ON s3.meta ROLE editor`), never the owner |
+| `TESSARIDB_S3_META_USER` / `_PASSWORD` | — (required) | the TessariDB user the server signs in as — its own account, an editor of its namespace (`DEFINE USER s3 ON NAMESPACE s3 ROLE editor`), never the owner |
 | `TESSARIDB_S3_META_NAMESPACE` / `_DATABASE` | `s3` / `meta` | where the metadata lives; the database is created on start-up, the namespace only by an account allowed to (the operator declares it with the server's account) |
 | `TESSARIDB_S3_META_CA` | unset | a PEM certificate authority to verify the node's TLS against; unset speaks in the clear |
 | `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata store; at most 4 new ones sign in at once, because a node verifies at most 24 passwords at once for all its clients — a sign-in it still declines answers `503 SlowDown` |
@@ -292,7 +292,7 @@ aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
 The database (`tessaridb/tessaridb:0.34.2-beta`; a store an earlier image created opens unchanged and keeps its on-disk format until `ALTER STORE FINALIZE FORMAT` — run that only once no older image will open the store again) declares its owner from `.env` on first start and is reachable only
 from the S3 server over the compose network. A one-shot `s3-account` step (`docker/s3-account.sh`) signs in as that
 owner once to declare the namespace, the database and the server's own account; the server then signs in as `s3`,
-an editor of `s3.meta` that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
+an editor of the `s3` namespace that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
 a TLS-terminating proxy in front before exposing either. Both keep their data in named volumes, and the server runs
 as a non-root user. The image carries no credential: every required value comes from the environment, and the
 server refuses to start without them. No image is published yet.

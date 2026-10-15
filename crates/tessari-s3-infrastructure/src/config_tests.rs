@@ -349,3 +349,25 @@ fn video_renditions_need_ffmpeg_named_and_a_blank_name_is_unset() {
     blank.push(("TESSARIDB_S3_FFMPEG", "  "));
     assert_eq!(load(&blank).expect("loads").ffmpeg, None);
 }
+
+#[test]
+fn a_region_that_cannot_name_its_database_is_refused() {
+    for region in ["EU", "eu_west", "eu-", &format!("eu-{}", "a".repeat(60))] {
+        let mut vars = CREDENTIALS.to_vec();
+        vars.push(("TESSARIDB_S3_REGION", region));
+        let refusal = load(&vars).map(|_| ()).expect_err(region);
+        assert!(
+            matches!(
+                refusal,
+                Error::InvalidConfig {
+                    key: "TESSARIDB_S3_REGION",
+                    ..
+                }
+            ),
+            "{region}: {refusal:?}"
+        );
+    }
+    let mut vars = CREDENTIALS.to_vec();
+    vars.push(("TESSARIDB_S3_REGION", "eu-west-1"));
+    assert_eq!(load(&vars).expect("loads").region, "eu-west-1");
+}

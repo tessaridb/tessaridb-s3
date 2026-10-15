@@ -24,6 +24,8 @@ pub enum ErrorCode {
     InvalidPartNumber,
     /// 304: the object has not changed since the condition named.
     NotModified,
+    /// 301: the bucket lives in another region; the request belongs at that region's endpoint.
+    PermanentRedirect,
     /// 412: a condition the request named does not hold.
     PreconditionFailed,
     /// 404: the key holds no object.
@@ -107,6 +109,7 @@ impl ErrorCode {
             Self::InvalidRange => "InvalidRange",
             Self::InvalidPartNumber => "InvalidPartNumber",
             Self::NotModified => "NotModified",
+            Self::PermanentRedirect => "PermanentRedirect",
             Self::PreconditionFailed => "PreconditionFailed",
             Self::NoSuchKey => "NoSuchKey",
             Self::NoSuchUpload => "NoSuchUpload",
@@ -172,6 +175,7 @@ impl ErrorCode {
             | Self::NoSuchLifecycleConfiguration => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
+            Self::PermanentRedirect => 301,
             Self::InvalidRange | Self::InvalidPartNumber => 416,
             Self::MissingContentLength => 411,
             Self::MetadataTooLarge
@@ -210,6 +214,7 @@ mod tests {
             (ErrorCode::InvalidRange, "InvalidRange", 416),
             (ErrorCode::InvalidPartNumber, "InvalidPartNumber", 416),
             (ErrorCode::NotModified, "NotModified", 304),
+            (ErrorCode::PermanentRedirect, "PermanentRedirect", 301),
             (ErrorCode::PreconditionFailed, "PreconditionFailed", 412),
             (ErrorCode::NoSuchKey, "NoSuchKey", 404),
             (ErrorCode::NoSuchUpload, "NoSuchUpload", 404),

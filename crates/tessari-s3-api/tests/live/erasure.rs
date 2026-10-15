@@ -105,8 +105,10 @@ pub(crate) async fn peer(config: &S3Config, authority: &Authority, node: &str) -
     let dir = scratch_dir();
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
+        &config.region,
         dir.clone(),
-    );
+    )
+    .expect("storage");
     let members = Arc::new(storage.members().clone());
     let state = InternalState::new(ApiState::system_clock(), storage, members, 64);
     let tls = server_config(&authority.issue(node)).expect("server TLS");
@@ -135,6 +137,7 @@ pub(crate) async fn member() -> Member {
     crate::namespaces::removed_at_end(&config.meta);
     let storage = Storage::clustered(
         MetaPool::new(config.meta.clone()).expect("pool"),
+        &config.region,
         config.data_dir.clone(),
         config.cluster.as_ref().expect("clustered"),
     )
@@ -172,7 +175,10 @@ pub(crate) async fn member() -> Member {
         .expect("built")
         .expect("a console is configured"),
         storage,
-        planter: MetaPool::new(config.meta.clone()).expect("pool"),
+        planter: MetaPool::new(config.meta.clone())
+            .expect("pool")
+            .regional(&config.region)
+            .expect("the region's database"),
         dir,
         peers,
         config,

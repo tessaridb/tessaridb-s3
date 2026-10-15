@@ -320,7 +320,10 @@ async fn an_object_from_an_earlier_life_of_the_bucket_is_invisible_and_replaceab
     // bucket can be removed while an object record of it remains. Remove the bucket record alone, then recreate.
     let name = vec![("name".to_owned(), Value::String("reborn".to_owned()))];
     planter
-        .run("DELETE buckets:$name;", name)
+        .run(
+            &format!("DELETE {}.buckets:$name;", planter.global_database()),
+            name,
+        )
         .await
         .expect("bucket record removed");
     bucket(&state, "reborn").await;

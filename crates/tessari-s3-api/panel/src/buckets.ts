@@ -12,6 +12,7 @@ import { icon } from "./icons.ts";
 import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Usage } from "./models.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
+import { acknowledgementForm } from "./bucket-acknowledgement.ts";
 import { limits, quotaForm } from "./bucket-quota.ts";
 import { uploadKeyForm } from "./bucket-upload-key.ts";
 import { mediaForm } from "./bucket-media.ts";
@@ -84,6 +85,7 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
   const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket.name}`, "danger");
   // Offered to keys that may operate; the server refuses everyone else regardless.
   const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket.name}`) : null;
+  const acknowledge = screen.may?.operate === true ? iconAction("shield", "Acknowledgement…", `Write acknowledgement of ${bucket.name}`) : null;
   // Offered to users; the server issues one only to a user who may write this bucket.
   const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket.name}`) : null;
   // Offered on every row: a reader sees the rules, and the server refuses a save from anyone who may not configure.
@@ -96,9 +98,20 @@ function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTa
     numeric(held === null ? "—" : size(held.raw_bytes)),
     numeric(limits(bucket)),
     moment(bucket.created),
-    mono(bucket.region),
-    el("div", { class: "actions" }, upload, media, quota, remove),
+    bucket.acknowledgement === "region" ? el("span", {}, mono(bucket.region), " · region majority") : mono(bucket.region),
+    el("div", { class: "actions" }, upload, media, quota, acknowledge, remove),
   );
+  acknowledge?.addEventListener("click", () => {
+    const cell = el("td", { colspan: "8" });
+    const region = el("tr", { class: "asking" }, cell);
+    cell.append(
+      acknowledgementForm(screen, bucket, () => {
+        region.remove();
+        acknowledge.focus();
+      }),
+    );
+    line.after(region);
+  });
   quota?.addEventListener("click", () => {
     const cell = el("td", { colspan: "8" });
     const region = el("tr", { class: "asking" }, cell);

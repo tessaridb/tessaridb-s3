@@ -38,6 +38,13 @@ pub enum Error {
         /// The HTTP status it answered.
         status: u16,
     },
+    /// The bucket lives in another region: its object metadata is in that region's database, so this node neither
+    /// reads nor writes it, and the request belongs at that region's nodes.
+    #[error("the bucket lives in region {region}")]
+    OtherRegion {
+        /// The bucket's region.
+        region: String,
+    },
     /// A stored record does not have the shape this server writes — a defect or a store written by something else.
     #[error("a stored {record} record is malformed: {reason}")]
     Malformed {
@@ -133,7 +140,9 @@ impl Error {
             | Self::Unsealable
             | Self::NoIamKey
             | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
-            Self::InvalidShard { .. } | Self::ShardLength { .. } => ErrorCategory::Validation,
+            Self::InvalidShard { .. } | Self::ShardLength { .. } | Self::OtherRegion { .. } => {
+                ErrorCategory::Validation
+            }
             Self::Contended | Self::Held => ErrorCategory::Conflict,
         }
     }

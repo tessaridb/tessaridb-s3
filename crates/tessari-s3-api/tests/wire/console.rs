@@ -37,8 +37,10 @@ pub(super) fn console(now: i64, sign_ins: &str, requests: &str) -> ConsoleState 
     .expect("configuration");
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
+        &config.region,
         config.data_dir.clone(),
-    );
+    )
+    .expect("storage");
     ConsoleState::new(&config, Arc::new(move || now), storage)
         .expect("built")
         .expect("a console is configured")

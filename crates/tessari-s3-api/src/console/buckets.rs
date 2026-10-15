@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tessari_s3_core::authz::{Action, Principal, SpaceName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
-use tessari_s3_storage::buckets::{Created, Deleted};
+use tessari_s3_storage::buckets::{Acknowledgement, Created, Deleted};
 use tessari_s3_types::BucketName;
 
 use super::ConsoleState;
@@ -26,6 +26,8 @@ struct BucketView {
     region: String,
     max_bytes: Option<u64>,
     max_objects: Option<u64>,
+    /// `region` when its writes are acknowledged by its region's majority alone, `majority` otherwise.
+    acknowledgement: &'static str,
 }
 
 #[derive(Serialize)]
@@ -57,6 +59,10 @@ pub(super) async fn list(
                 region: bucket.region,
                 max_bytes: bucket.quota.max_bytes,
                 max_objects: bucket.quota.max_objects,
+                acknowledgement: match bucket.acknowledgement {
+                    Acknowledgement::Majority => "majority",
+                    Acknowledgement::RegionMajority => "region",
+                },
             })
             .collect(),
     }))

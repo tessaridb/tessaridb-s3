@@ -6,7 +6,7 @@ use tessari_s3_types::{BucketName, Timestamp};
 
 use super::super::version_id::{key_prefix, record_id};
 use super::TessariObjects;
-use crate::answers::{first_record, incarnation_of};
+use crate::answers::{bucket_read, first_record, incarnation_of};
 use crate::{Error, Result};
 
 /// One walked version record.
@@ -104,11 +104,13 @@ impl TessariObjects {
             ("after".to_owned(), Value::Bytes(after)),
             ("limit".to_owned(), crate::params::count(limit)),
         ];
-        let script = "SELECT incarnation FROM ONLY buckets:$bucket; \
-             SELECT bucket_name, key, incarnation, seq, version_id, marker, modified, size, etag FROM versions \
-             AFTER versions:$after LIMIT $limit;";
-        let mut answers = self.pool.run(script, parameters).await?.into_iter();
-        let incarnation = incarnation_of(first_record(answers.next())?)?;
+        let script = format!(
+            "{} SELECT bucket_name, key, incarnation, seq, version_id, marker, modified, size, etag FROM versions \
+             AFTER versions:$after LIMIT $limit;",
+            bucket_read(&self.pool, "incarnation, region")
+        );
+        let mut answers = self.pool.run(&script, parameters).await?.into_iter();
+        let incarnation = incarnation_of(first_record(answers.next())?, self.pool.region())?;
         let walked = match answers.next() {
             Some(Answer::Records { records, .. }) => records,
             _ => Vec::new(),

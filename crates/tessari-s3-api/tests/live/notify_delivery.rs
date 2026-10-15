@@ -217,8 +217,8 @@ async fn a_kafka_destination_receives_each_matching_event_keyed_by_its_object() 
     // configuration is written as the API stores it.
     planter
         .run(
-            "UPDATE buckets:'streamed' SET notify = { rules: [{ id: 'to-kafka', target: 'orders', \
-             events: ['s3:ObjectCreated:*', 's3:ObjectRemoved:*'], prefix: '', suffix: '' }] };",
+            &format!("UPDATE {}.buckets:'streamed' SET notify = {{ rules: [{{ id: 'to-kafka', target: 'orders', \
+             events: ['s3:ObjectCreated:*', 's3:ObjectRemoved:*'], prefix: '', suffix: '' }}] }};", planter.global_database()),
             Vec::<(String, Value)>::new(),
         )
         .await

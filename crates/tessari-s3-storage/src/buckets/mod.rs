@@ -9,6 +9,7 @@ mod repository;
 mod service;
 mod tessaridb;
 
-pub use model::Bucket;
-pub use service::{BucketService, Created, Deleted};
+pub(crate) use model::LOCAL;
+pub use model::{Acknowledgement, Bucket};
+pub use service::{AcknowledgementSet, BucketService, Created, Deleted};
 pub use tessaridb::TessariBuckets;

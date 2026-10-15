@@ -5,7 +5,7 @@ use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::BucketName;
 
-use super::model::Bucket;
+use super::model::{Acknowledgement, Bucket};
 use super::repository::{BucketRepository, Inserted};
 use super::tessaridb::TessariBuckets;
 use crate::Result;
@@ -17,6 +17,18 @@ pub enum Created {
     Created(Box<Bucket>),
     /// A bucket of that name already exists, in some space: bucket names are global.
     Exists,
+}
+
+/// What setting a bucket's acknowledgement ended in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AcknowledgementSet {
+    /// The bucket's writes are acknowledged as asked from its next write on.
+    Set,
+    /// There was no such bucket.
+    NoSuchBucket,
+    /// The metadata store refused a region-majority acknowledgement here — in its own words (a store whose nodes name
+    /// no region has no region majority to count); nothing was changed.
+    Refused(String),
 }
 
 /// What deleting a bucket ended in.
@@ -93,6 +105,28 @@ impl BucketService {
             .set_limits(name, stored(quota.max_bytes)?, stored(quota.max_objects)?)
             .await?;
         Ok(true)
+    }
+
+    /// Sets who must hold `name`'s object writes before they are acknowledged. A region majority is first proved
+    /// by a write this region's database acknowledges that way, so a bucket is never set to a level every one of its
+    /// writes would then be refused.
+    ///
+    /// # Errors
+    /// The metadata store's refusal (other than of the level itself) or outage.
+    pub async fn set_acknowledgement(
+        &self,
+        name: &BucketName,
+        acknowledgement: Acknowledgement,
+    ) -> Result<AcknowledgementSet> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(AcknowledgementSet::NoSuchBucket);
+        }
+        let local = acknowledgement == Acknowledgement::RegionMajority;
+        if local && let Some(refusal) = self.repository.probe_local().await? {
+            return Ok(AcknowledgementSet::Refused(refusal));
+        }
+        self.repository.set_acknowledge(name, local).await?;
+        Ok(AcknowledgementSet::Set)
     }
 
     /// Sets `name`'s versioning state, answering `false` when there is no such bucket. A state is always one of the

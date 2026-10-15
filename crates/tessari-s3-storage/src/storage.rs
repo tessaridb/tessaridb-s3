@@ -28,7 +28,8 @@ use crate::spaces::{SpaceService, TessariSpaces};
 use crate::usage::{TessariUsage, UsageService};
 use crate::users::{TessariUsers, UserService};
 
-/// Every storage service, built over one metadata pool.
+/// Every storage service, built over one metadata pool: the global database for buckets and identities, this node's
+/// region's database for everything else.
 #[derive(Clone)]
 pub struct Storage {
     buckets: BucketService,
@@ -43,33 +44,41 @@ pub struct Storage {
     users: UserService,
     identities: IdentityService,
     pool: MetaPool,
+    regional: MetaPool,
     reclaim_grace_secs: u64,
 }
 
 impl Storage {
-    /// The services over `pool`, with every object's bytes under `data_dir`. Nothing is dialled or created until the
-    /// first call.
-    #[must_use]
-    pub fn new(pool: MetaPool, data_dir: PathBuf) -> Self {
+    /// The services over `pool` for a node of `region`, with every object's bytes under `data_dir`. Nothing is
+    /// dialled or created until the first call.
+    ///
+    /// # Errors
+    /// [`crate::Error::Meta`] when `region` does not name a database.
+    pub fn new(pool: MetaPool, region: &str, data_dir: PathBuf) -> Result<Self> {
+        let regional = pool.regional(region)?;
         let data = DataFiles::new(data_dir, DATA_BLOCK_SIZE);
         let shards = ShardService::new(data.clone());
-        let objects = ObjectService::new(TessariObjects::new(pool.clone()), data);
+        let objects = ObjectService::new(TessariObjects::new(regional.clone()), data);
         let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
-        Self {
-            buckets: BucketService::new(TessariBuckets::new(pool.clone())),
-            multipart: MultipartService::new(TessariMultipart::new(pool.clone()), objects.clone()),
-            cluster: ClusterService::new(TessariCluster::new(pool.clone())),
-            members: MembershipService::new(TessariMembers::new(pool.clone())),
+        Ok(Self {
+            buckets: BucketService::new(TessariBuckets::new(pool.clone(), regional.clone())),
+            multipart: MultipartService::new(
+                TessariMultipart::new(regional.clone()),
+                objects.clone(),
+            ),
+            cluster: ClusterService::new(TessariCluster::new(regional.clone())),
+            members: MembershipService::new(TessariMembers::new(regional.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
-            usage: UsageService::new(TessariUsage::new(pool.clone())),
+            usage: UsageService::new(TessariUsage::new(regional.clone())),
             users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
             identities: IdentityService::new(TessariIdentities::new(pool.clone())),
             spaces,
             objects,
             shards,
             pool,
+            regional,
             reclaim_grace_secs: DEFAULT_RECLAIM_GRACE_SECS,
-        }
+        })
     }
 
     /// The services of a cluster member: as [`Storage::new`], with every data id written as erasure-coded shards
@@ -77,13 +86,19 @@ impl Storage {
     ///
     /// # Errors
     /// [`crate::Error::Peer`] when the peer client cannot be built.
-    pub fn clustered(pool: MetaPool, data_dir: PathBuf, cluster: &ClusterSettings) -> Result<Self> {
-        let mut storage = Self::new(pool.clone(), data_dir);
+    pub fn clustered(
+        pool: MetaPool,
+        region: &str,
+        data_dir: PathBuf,
+        cluster: &ClusterSettings,
+    ) -> Result<Self> {
+        let mut storage = Self::new(pool, region, data_dir)?;
+        let regional = storage.regional.clone();
         let peers = RemoteShards::new(cluster.node.clone(), &cluster.tls)?;
         storage.cluster = storage.cluster.clone().with_peers(peers.clone());
         let writes = ErasureWrites::new(
             cluster,
-            pool.clone(),
+            regional.clone(),
             storage.cluster.clone(),
             storage.shards.clone(),
             peers,
@@ -91,7 +106,7 @@ impl Storage {
         storage.objects = storage.objects.clone().clustered(Arc::new(writes));
         storage.usage = storage.usage.clone().clustered(cluster.code)?;
         storage.multipart =
-            MultipartService::new(TessariMultipart::new(pool), storage.objects.clone());
+            MultipartService::new(TessariMultipart::new(regional), storage.objects.clone());
         Ok(storage)
     }
 
@@ -122,8 +137,8 @@ impl Storage {
     /// # Errors
     /// The metadata store's refusal or outage, or the drive's.
     pub async fn prepare(&self) -> Result<()> {
-        crate::schema::apply(&self.pool, self.reclaim_grace_secs).await?;
-        let moved = crate::schema_queues::convert(&self.pool).await?;
+        crate::schema::apply(&self.pool, &self.regional, self.reclaim_grace_secs).await?;
+        let moved = crate::schema_queues::convert(&self.regional).await?;
         if moved > 0 {
             tracing::info!(moved, "work-list entries moved onto the queues");
         }
@@ -169,7 +184,7 @@ impl Storage {
     #[must_use]
     pub fn lifecycle(&self) -> LifecycleService {
         LifecycleService::new(
-            TessariLifecycle::new(self.pool.clone()),
+            TessariLifecycle::new(self.regional.clone()),
             self.buckets.clone(),
             self.objects.clone(),
             self.multipart.clone(),
@@ -180,7 +195,7 @@ impl Storage {
     #[must_use]
     pub fn notifications(&self) -> NotificationService {
         NotificationService::new(
-            TessariNotifications::new(self.pool.clone()),
+            TessariNotifications::new(self.regional.clone()),
             self.buckets.clone(),
         )
     }
@@ -188,7 +203,10 @@ impl Storage {
     /// Media jobs: objects created where a bucket's media rules may take them.
     #[must_use]
     pub fn media(&self) -> MediaService {
-        MediaService::new(TessariMedia::new(self.pool.clone()), self.buckets.clone())
+        MediaService::new(
+            TessariMedia::new(self.regional.clone()),
+            self.buckets.clone(),
+        )
     }
 
     /// Bucket operations.

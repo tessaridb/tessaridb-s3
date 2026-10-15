@@ -51,8 +51,10 @@ pub(crate) fn state(now: i64, max_inflight: usize) -> ApiState {
     .expect("test configuration loads");
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool settings"),
+        &config.region,
         config.data_dir.clone(),
-    );
+    )
+    .expect("storage");
     ApiState::with_limit(
         &config,
         std::sync::Arc::new(move || now),

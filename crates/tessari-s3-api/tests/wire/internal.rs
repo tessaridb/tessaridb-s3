@@ -101,7 +101,12 @@ pub(crate) fn storage_at(dir: std::path::PathBuf) -> Storage {
             .map(|(_, v)| (*v).to_owned())
     })
     .expect("test configuration loads");
-    Storage::new(MetaPool::new(config.meta).expect("pool settings"), dir)
+    Storage::new(
+        MetaPool::new(config.meta).expect("pool settings"),
+        &config.region,
+        dir,
+    )
+    .expect("storage")
 }
 
 /// 2.5 blocks of 64 bytes.

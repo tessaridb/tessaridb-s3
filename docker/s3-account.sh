@@ -1,9 +1,10 @@
 #!/bin/bash
 # Declares the TessariDB S3 server's own database account, once, as the store's owner.
 #
-# The server signs in as an editor of its ONE database — it reads, writes and keeps
-# its own schema there and can reach nothing else — never as the owner. The owner
-# declares the namespace, the database and the account; every statement carries
+# The server signs in as an editor of its ONE namespace — it keeps the global database
+# and its region's database there, and can reach nothing else — never as the owner. The
+# owner declares the namespace (letting a bucket ask for its region's majority alone),
+# the database and the account; every statement carries
 # `IF NOT EXISTS`, so running this again changes nothing (a new password is set with
 # `ALTER USER`, not by re-running it).
 #
@@ -28,10 +29,10 @@ script="$(mktemp)"
 trap 'rm -f "$script"' EXIT
 chmod 600 "$script"
 cat > "$script" <<STATEMENTS
-DEFINE NAMESPACE IF NOT EXISTS ${S3_NAMESPACE} REPLICATION NONE;
+DEFINE NAMESPACE IF NOT EXISTS ${S3_NAMESPACE} REPLICATION NONE ACKNOWLEDGE MAJORITY OR WEAKER;
 USE NAMESPACE ${S3_NAMESPACE};
 DEFINE DATABASE IF NOT EXISTS ${S3_DATABASE};
 USE NAMESPACE ${S3_NAMESPACE} DATABASE ${S3_DATABASE};
-DEFINE USER IF NOT EXISTS ${S3_META_USER} ON ${S3_NAMESPACE}.${S3_DATABASE} ROLE editor PASSWORD '${S3_META_PASSWORD}';
+DEFINE USER IF NOT EXISTS ${S3_META_USER} ON NAMESPACE ${S3_NAMESPACE} ROLE editor PASSWORD '${S3_META_PASSWORD}';
 STATEMENTS
 exec tessaridb --at "$TESSARIDB_AT" --user "$TESSARIDB_OWNER" -f "$script"

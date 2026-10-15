@@ -93,7 +93,7 @@ async fn racing_nodes_agree_on_one_first_layout() {
     let (state, planter) = fresh().await;
     let cluster = state.storage().cluster();
     // A second node: its own pool over the same namespace.
-    let other = Storage::new(planter, crate::scratch_dir());
+    let other = Storage::new(planter, state.region(), crate::scratch_dir()).expect("a second node");
     for id in ["n5", "n3"] {
         crate::joined(state.storage(), &node(id), "x:1", None).await;
     }

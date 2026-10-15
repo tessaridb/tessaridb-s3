@@ -11,7 +11,9 @@ use crate::s3::{Cluster, count, scratch};
 
 /// The cluster's membership, read and written as the console would.
 fn members(cluster: &Cluster) -> MembershipService {
-    Storage::new(cluster.meta.clone(), scratch("unused"))
+    // The nodes run in the default region; its database holds the membership.
+    Storage::new(cluster.meta.clone(), "us-east-1", scratch("unused"))
+        .expect("storage over the cluster's pool")
         .members()
         .clone()
 }

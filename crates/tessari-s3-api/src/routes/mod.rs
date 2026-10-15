@@ -28,6 +28,21 @@ pub(crate) async fn route(
     call: &Call<'_>,
     body: Body,
 ) -> Result<Response<Body>> {
+    // A bucket's configuration is in the global database, so these would answer anywhere: they are sent to the
+    // bucket's region like its objects are (object paths are sent there by the storage layer's own check). The
+    // operations carrying a body check it in their handler once the body has parsed, and a batch delete is checked
+    // once there rather than answering each key with an error.
+    if matches!(
+        operation,
+        Operation::HeadBucket
+            | Operation::DeleteBucket
+            | Operation::GetBucketVersioning
+            | Operation::GetBucketLifecycleConfiguration
+            | Operation::DeleteBucketLifecycle
+            | Operation::GetBucketNotificationConfiguration
+    ) {
+        buckets::resident(call).await?;
+    }
     match operation {
         Operation::CreateBucket => buckets::create(call, body).await,
         Operation::HeadBucket => buckets::head(call).await,

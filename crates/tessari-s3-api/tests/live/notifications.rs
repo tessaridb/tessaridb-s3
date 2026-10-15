@@ -37,7 +37,10 @@ pub(crate) async fn recorded(planter: &MetaPool, key: &str) -> Vec<String> {
 async fn configure(planter: &MetaPool, bucket: &str) {
     planter
         .run(
-            "UPDATE buckets:$name SET notify = { rules: [] };",
+            &format!(
+                "UPDATE {}.buckets:$name SET notify = {{ rules: [] }};",
+                planter.global_database()
+            ),
             vec![("name".to_owned(), Value::String(bucket.to_owned()))],
         )
         .await
@@ -228,7 +231,10 @@ async fn a_removal_follows_the_configuration_at_the_time_of_the_removal() {
     );
     planter
         .run(
-            "UPDATE buckets:$name SET notify = NONE;",
+            &format!(
+                "UPDATE {}.buckets:$name SET notify = NONE;",
+                planter.global_database()
+            ),
             vec![("name".to_owned(), Value::String("later".to_owned()))],
         )
         .await

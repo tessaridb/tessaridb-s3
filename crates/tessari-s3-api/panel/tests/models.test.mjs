@@ -96,10 +96,13 @@ test("the status backlog carries how many objects are at risk", () => {
 });
 
 test("a bucket carries its limits, null where it has none", () => {
-  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1" };
+  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1", acknowledgement: "region" };
   assert.deepEqual(readBuckets({ buckets: [{ ...row, max_bytes: 1000, max_objects: null }] }), [
     { ...row, maxBytes: 1000, maxObjects: null },
   ]);
+  const { acknowledgement: _, ...silent } = row;
+  assert.equal(readBuckets({ buckets: [{ ...silent, max_bytes: 1000, max_objects: null }] }), null, "the level is always sent");
+  assert.equal(readBuckets({ buckets: [{ ...row, acknowledgement: "leader", max_bytes: 1000, max_objects: null }] }), null);
   assert.equal(readBuckets({ buckets: [{ ...row, max_bytes: -1, max_objects: null }] }), null);
   assert.equal(readBuckets({ buckets: [row] }), null, "the limits are always sent");
 });

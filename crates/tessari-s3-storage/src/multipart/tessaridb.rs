@@ -11,7 +11,7 @@ use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 use super::entity::complete_row;
 use super::model::{NewPart, NewUpload, OpenUpload, StoredPart};
 use super::repository::{MultipartRepository, PartRow, PendingBatch, UploadRecord};
-use crate::answers::{first_record, incarnation_of};
+use crate::answers::{bucket_read, first_record, incarnation_of};
 use crate::{Error, Result};
 
 #[path = "tessaridb_pending.rs"]
@@ -107,9 +107,12 @@ impl MultipartRepository for TessariMultipart {
         )];
         let answers = self
             .pool
-            .run("SELECT incarnation FROM ONLY buckets:$bucket;", parameters)
+            .run(&bucket_read(&self.pool, "incarnation, region"), parameters)
             .await?;
-        incarnation_of(first_record(answers.into_iter().next())?)
+        incarnation_of(
+            first_record(answers.into_iter().next())?,
+            self.pool.region(),
+        )
     }
 
     async fn create(

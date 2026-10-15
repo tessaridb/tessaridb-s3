@@ -201,7 +201,10 @@ async fn a_queued_data_id_waits_in_the_reclaim_queue_until_its_grace_ends() {
     let mut config = crate::live_config(crate::test_node(), None, &dir);
     config.reclaim_grace_secs = 600;
     let storage = crate::prepared(&config).await;
-    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    let planter = MetaPool::new(config.meta.clone())
+        .expect("pool")
+        .regional(&config.region)
+        .expect("the region's database");
     let state =
         tessari_s3_api::ApiState::new(&config, tessari_s3_api::ApiState::system_clock(), storage);
     let objects = state.storage().objects();
@@ -305,7 +308,10 @@ async fn work_lists_from_before_the_queues_are_converted_at_start() {
     let mut config = crate::live_config(crate::test_node(), None, &dir);
     config.reclaim_grace_secs = 600;
     let storage = crate::prepared(&config).await;
-    let planter = MetaPool::new(config.meta.clone()).expect("pool");
+    let planter = MetaPool::new(config.meta.clone())
+        .expect("pool")
+        .regional(&config.region)
+        .expect("the region's database");
     let old = |byte: u8| [byte; 16];
     // Catalog definitions contend store-wide (Q-S3-2): the planting and the conversions take the schema turn.
     let turn = crate::SCHEMA_TURN.lock().await;

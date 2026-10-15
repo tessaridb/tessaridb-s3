@@ -71,7 +71,15 @@
     const buckets2 = list(v["buckets"], bucketUsage);
     return buckets2 === null ? null : { taken: v["taken"], stale: v["stale"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
   }
-  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) ? { name: v["name"], created: v["created"], region: v["region"], maxBytes: v["max_bytes"], maxObjects: v["max_objects"] } : null;
+  var acknowledgement = (v) => v === "majority" || v === "region";
+  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) && acknowledgement(v["acknowledgement"]) ? {
+    name: v["name"],
+    created: v["created"],
+    region: v["region"],
+    maxBytes: v["max_bytes"],
+    maxObjects: v["max_objects"],
+    acknowledgement: v["acknowledgement"]
+  } : null;
   function readBuckets(v) {
     return record(v) ? list(v["buckets"], bucket) : null;
   }
@@ -699,6 +707,69 @@
       }
     });
     window.addEventListener("scroll", hide, { capture: true, passive: true });
+  }
+
+  // src/bucket-acknowledgement.ts
+  //! Who acknowledges a bucket's object writes: the majority of the nodes keeping
+  //! its region's metadata (the default), or that region's majority alone. The
+  //! second is faster when the metadata is also kept in other regions, and it is
+  //! the one that can lose writes: an acknowledged write the region's nodes held
+  //! is lost if the metadata's leadership fails over to a node that did not
+  //! collect it. The server proves the region level before setting it and shows
+  //! the store's own refusal when there is no region to count. Operators only;
+  //! the reason goes into the action record.
+  function acknowledgementForm(screen, bucket2, close) {
+    const id = `ack-${bucket2.name}`;
+    const choice = (value, label, note) => {
+      const input = el("input", { type: "radio", name: `${id}-level`, id: `${id}-${value}`, value });
+      if (bucket2.acknowledgement === value) {
+        input.setAttribute("checked", "");
+      }
+      return el("div", { class: "choice" }, input, el("label", { for: `${id}-${value}` }, el("strong", {}, label), " — ", note));
+    };
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const save = el("button", { type: "submit", class: "primary" }, "Set");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Write acknowledgement: "), mono(bucket2.name)),
+      choice("majority", "Majority", "a write is acknowledged once most of the nodes keeping this region's metadata hold it; it survives a failover."),
+      choice("region", "Region majority", "acknowledged once most of this region's nodes hold it — faster, and a failover to a node outside the region can lose writes acknowledged this way."),
+      reason.row,
+      el("div", { class: "actions" }, save, cancel),
+      said
+    );
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const picked = form.querySelector(`input[name="${id}-level"]:checked`);
+      if (picked === null) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Choose one."));
+        return;
+      }
+      const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket2.name)}/acknowledgement`, ignored, {
+        level: picked.value,
+        reason: reason.input.value.trim()
+      });
+      if (answer.ok) {
+        announce(`Set the write acknowledgement of ${bucket2.name}.`);
+        screen.redraw();
+        return;
+      }
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(answer));
+    });
+    return form;
   }
 
   // src/bucket-quota.ts
@@ -1431,6 +1502,7 @@
   function bucketRow(screen, bucket2, usage) {
     const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket2.name}`, "danger");
     const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket2.name}`) : null;
+    const acknowledge = screen.may?.operate === true ? iconAction("shield", "Acknowledgement…", `Write acknowledgement of ${bucket2.name}`) : null;
     const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
     const media = iconAction("image", "Media…", `Media rules of ${bucket2.name}`);
     const held = figures(usage, bucket2);
@@ -1441,9 +1513,20 @@
       numeric(held === null ? "—" : size(held.raw_bytes)),
       numeric(limits(bucket2)),
       moment(bucket2.created),
-      mono(bucket2.region),
-      el("div", { class: "actions" }, upload, media, quota, remove)
+      bucket2.acknowledgement === "region" ? el("span", {}, mono(bucket2.region), " · region majority") : mono(bucket2.region),
+      el("div", { class: "actions" }, upload, media, quota, acknowledge, remove)
     );
+    acknowledge?.addEventListener("click", () => {
+      const cell = el("td", { colspan: "8" });
+      const region = el("tr", { class: "asking" }, cell);
+      cell.append(
+        acknowledgementForm(screen, bucket2, () => {
+          region.remove();
+          acknowledge.focus();
+        })
+      );
+      line.after(region);
+    });
     quota?.addEventListener("click", () => {
       const cell = el("td", { colspan: "8" });
       const region = el("tr", { class: "asking" }, cell);

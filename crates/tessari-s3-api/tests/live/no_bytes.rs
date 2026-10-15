@@ -68,7 +68,10 @@ async fn a_small_object_is_a_data_file_and_its_record_holds_no_bytes() {
 async fn incarnation(planter: &MetaPool) -> Value {
     let answers = planter
         .run(
-            "SELECT incarnation FROM ONLY buckets:$b;",
+            &format!(
+                "SELECT incarnation FROM ONLY {}.buckets:$b;",
+                planter.global_database()
+            ),
             vec![("b".to_owned(), Value::String("legacy".to_owned()))],
         )
         .await

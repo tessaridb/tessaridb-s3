@@ -60,11 +60,35 @@ pub fn is_safe_name(name: &str) -> bool {
         && name.len() <= 63
 }
 
+/// Whether `region` is a region name this server accepts: lowercase letters, digits and single hyphens, beginning
+/// with a letter and ending with a letter or digit — the shape of the names S3 clients sign with. It becomes part of
+/// a database name, so it is held to a pattern with no character of its own meaning there.
+#[must_use]
+pub fn is_region_name(region: &str) -> bool {
+    region.starts_with(|c: char| c.is_ascii_lowercase())
+        && !region.ends_with('-')
+        && !region.contains("--")
+        && region
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// The database holding the object metadata of `region`: `<database>_<region>` with each hyphen written as an
+/// underscore, or `None` when `region` is not a region name or the result is not a name a `USE` may carry.
+#[must_use]
+pub fn regional_database(database: &str, region: &str) -> Option<String> {
+    if !is_region_name(region) {
+        return None;
+    }
+    let name = format!("{database}_{}", region.replace('-', "_"));
+    is_safe_name(&name).then_some(name)
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU8;
 
-    use super::{Replication, is_safe_name};
+    use super::{Replication, is_region_name, is_safe_name, regional_database};
 
     #[test]
     fn replication_is_written_as_the_clause_a_namespace_takes() {
@@ -93,5 +117,34 @@ mod tests {
         ] {
             assert!(!is_safe_name(name), "{name}");
         }
+    }
+
+    #[test]
+    fn a_region_is_lowercase_words_joined_by_single_hyphens() {
+        for region in ["us-east-1", "eu-west-2", "eu", "ap-southeast-10", "home"] {
+            assert!(is_region_name(region), "{region}");
+        }
+        for region in [
+            "", "EU", "1eu", "-eu", "eu-", "eu--west", "eu_west", "eu west", "eu.west", "é",
+        ] {
+            assert!(!is_region_name(region), "{region}");
+        }
+    }
+
+    #[test]
+    fn a_regions_database_is_the_global_one_suffixed_with_the_region() {
+        assert_eq!(
+            regional_database("meta", "us-east-1").as_deref(),
+            Some("meta_us_east_1")
+        );
+        assert_eq!(regional_database("meta", "eu").as_deref(), Some("meta_eu"));
+        assert_eq!(regional_database("meta", "eu_west"), None, "not a region");
+        assert_eq!(regional_database("meta", "EU"), None, "not a region");
+        let long = "a".repeat(60);
+        assert_eq!(
+            regional_database(&long, "eu-1"),
+            None,
+            "longer than a USE takes"
+        );
     }
 }

@@ -53,6 +53,7 @@ pub(super) fn plan(head: &Head, delete: bool) -> Result<VersionPlan> {
         notify: head.notifies,
         current: head.current,
         removal: Removal::Request,
+        local: head.local,
     })
 }
 
@@ -92,6 +93,25 @@ mod tests {
             null,
             notifies: false,
             current: false,
+            local: false,
+        }
+    }
+
+    #[test]
+    fn a_bucket_acknowledged_by_its_region_carries_that_onto_every_plan() {
+        for delete in [false, true] {
+            let local = Head {
+                local: true,
+                ..head(Some(Versioning::Enabled), Some(1), None)
+            };
+            assert!(
+                plan(&local, delete).expect("a plan").local,
+                "delete {delete}"
+            );
+            assert!(
+                !plan(&head(None, None, None), delete).expect("a plan").local,
+                "control: the default is the namespace's majority"
+            );
         }
     }
 
