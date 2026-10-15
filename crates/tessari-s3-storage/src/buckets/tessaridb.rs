@@ -100,6 +100,19 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
+    async fn set_replication(&self, name: &BucketName, configuration: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        let script = match configuration {
+            Some(configuration) => {
+                parameters.push(("configuration".to_owned(), configuration));
+                "UPDATE buckets:$name SET replication = $configuration;"
+            }
+            None => "UPDATE buckets:$name SET replication = NONE;",
+        };
+        self.pool.run(script, parameters).await?;
+        Ok(())
+    }
+
     async fn set_lifecycle(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
         let mut parameters = name_param(name);
         // The rules are the bucket's, in the global database; the queue is the region's. No transaction writes both, so

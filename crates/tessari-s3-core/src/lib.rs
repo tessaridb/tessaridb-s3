@@ -16,6 +16,7 @@ pub mod objects;
 pub mod quota;
 #[cfg(test)]
 mod quota_tests;
+pub mod replication;
 pub mod versioning;
 
 pub use error::{Error, Result};

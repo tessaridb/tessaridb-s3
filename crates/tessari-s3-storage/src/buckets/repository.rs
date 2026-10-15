@@ -53,6 +53,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         rules: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s replication configuration, or removes it when `configuration` is `None`.
+    fn set_replication(
+        &self,
+        name: &BucketName,
+        configuration: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Sets `name`'s notification configuration, or removes it when `configuration` is `None`.
     fn set_notification(
         &self,

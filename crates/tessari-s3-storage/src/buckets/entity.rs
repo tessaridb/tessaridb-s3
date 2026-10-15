@@ -29,6 +29,8 @@ pub struct BucketEntity {
     pub lifecycle: Option<Vec<Value>>,
     /// The notification configuration as stored; absent while none is set.
     pub notify: Option<Value>,
+    /// The replication configuration as stored; absent while none is set.
+    pub replication: Option<Value>,
     /// The media rules as stored; absent while none are set.
     pub media: Option<Vec<Value>>,
     /// `local` when the bucket's writes are acknowledged by its region's majority alone; absent otherwise.
@@ -83,6 +85,11 @@ impl BucketEntity {
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("lifecycle")),
         };
+        let replication = match fields.get("replication") {
+            None | Some(Value::None) => None,
+            Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
+            Some(_) => return Err(malformed("replication")),
+        };
         let notify = match fields.get("notify") {
             None | Some(Value::None) => None,
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
@@ -115,6 +122,7 @@ impl BucketEntity {
             versioning,
             lifecycle,
             notify,
+            replication,
             media,
             acknowledge,
         })

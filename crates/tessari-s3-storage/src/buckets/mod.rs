@@ -5,6 +5,7 @@ mod lifecycle;
 mod media;
 mod model;
 mod notification;
+mod replication;
 mod repository;
 mod service;
 mod tessaridb;

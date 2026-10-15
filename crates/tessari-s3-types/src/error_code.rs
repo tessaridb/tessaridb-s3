@@ -36,6 +36,8 @@ pub enum ErrorCode {
     NoSuchVersion,
     /// The bucket has no lifecycle configuration.
     NoSuchLifecycleConfiguration,
+    /// The bucket has no replication configuration.
+    ReplicationConfigurationNotFoundError,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -115,6 +117,7 @@ impl ErrorCode {
             Self::NoSuchUpload => "NoSuchUpload",
             Self::NoSuchVersion => "NoSuchVersion",
             Self::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
+            Self::ReplicationConfigurationNotFoundError => "ReplicationConfigurationNotFoundError",
             Self::InvalidPart => "InvalidPart",
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
@@ -172,7 +175,8 @@ impl ErrorCode {
             Self::NoSuchKey
             | Self::NoSuchUpload
             | Self::NoSuchVersion
-            | Self::NoSuchLifecycleConfiguration => 404,
+            | Self::NoSuchLifecycleConfiguration
+            | Self::ReplicationConfigurationNotFoundError => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -222,6 +226,11 @@ mod tests {
             (
                 ErrorCode::NoSuchLifecycleConfiguration,
                 "NoSuchLifecycleConfiguration",
+                404,
+            ),
+            (
+                ErrorCode::ReplicationConfigurationNotFoundError,
+                "ReplicationConfigurationNotFoundError",
                 404,
             ),
             (ErrorCode::InvalidPart, "InvalidPart", 400),

@@ -29,7 +29,7 @@ use crate::Result;
 /// (or found damaged by a read), one healer at a time, and the `heal_claims` space holds the expiring claim of the
 /// one node healing or reclaiming an id. What operators do through the console is appended to the `console_actions` topic, kept a year; a topic refuses changing or removing a message.
 /// A bucket whose `acknowledge` is `local` has its object writes and removals acknowledged once its region's majority
-/// holds them (`ACKNOWLEDGE LOCAL MAJORITY`) rather than the namespace's majority; `acknowledge_probes:local` records
+/// holds them (`ACKNOWLEDGE LOCAL MAJORITY`) rather than the namespace's majority; `acknowledge_probes:'region'` records
 /// the latest write that proved this region's database takes that acknowledgement.
 /// `bucket_usage` holds one record, the latest per-bucket measurement, and `usage_claims` the claim of the member
 /// taking it.
@@ -62,6 +62,7 @@ DEFINE FIELD IF NOT EXISTS max_bytes ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS max_objects ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE FIELD IF NOT EXISTS lifecycle ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';

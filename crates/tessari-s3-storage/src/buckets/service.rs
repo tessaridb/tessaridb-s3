@@ -161,6 +161,25 @@ impl BucketService {
         Ok(true)
     }
 
+    /// Sets `name`'s replication configuration (already validated), or removes it with `None`; `false` when there is
+    /// no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_replication(
+        &self,
+        name: &BucketName,
+        configuration: Option<&tessari_s3_core::replication::Configuration>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_replication(name, configuration.map(super::replication::to_value))
+            .await?;
+        Ok(true)
+    }
+
     /// Sets `name`'s notification rules (already validated); no rules turns notifications off. `false` when there is
     /// no such bucket.
     ///

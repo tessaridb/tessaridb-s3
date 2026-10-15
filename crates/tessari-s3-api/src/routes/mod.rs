@@ -16,6 +16,7 @@ pub mod multipart;
 mod notification;
 pub mod objects;
 mod quota;
+mod replication;
 mod versioning;
 mod xml_tree;
 
@@ -40,6 +41,8 @@ pub(crate) async fn route(
             | Operation::GetBucketLifecycleConfiguration
             | Operation::DeleteBucketLifecycle
             | Operation::GetBucketNotificationConfiguration
+            | Operation::GetBucketReplication
+            | Operation::DeleteBucketReplication
     ) {
         buckets::resident(call).await?;
     }
@@ -54,6 +57,9 @@ pub(crate) async fn route(
         Operation::GetBucketLifecycleConfiguration => lifecycle::get(call).await,
         Operation::PutBucketLifecycleConfiguration => lifecycle::put(call, body).await,
         Operation::DeleteBucketLifecycle => lifecycle::delete(call).await,
+        Operation::GetBucketReplication => replication::get(call).await,
+        Operation::PutBucketReplication => replication::put(call, body).await,
+        Operation::DeleteBucketReplication => replication::delete(call).await,
         Operation::GetBucketNotificationConfiguration => notification::get(call).await,
         Operation::PutBucketNotificationConfiguration => notification::put(call, body).await,
         Operation::ListObjects => listing::list_v1(call).await,

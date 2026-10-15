@@ -66,6 +66,7 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
             Operation::PutBucketVersioning
                 | Operation::PutBucketLifecycleConfiguration
                 | Operation::PutBucketNotificationConfiguration
+                | Operation::PutBucketReplication
         ) {
             // An empty body is not the configuration document: refused before reading the store.
             (400, "MalformedXML")

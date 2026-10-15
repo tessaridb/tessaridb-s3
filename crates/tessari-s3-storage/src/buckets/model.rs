@@ -35,6 +35,8 @@ pub struct Bucket {
     pub lifecycle: Option<Vec<tessari_s3_core::lifecycle::Rule>>,
     /// Its notification rules; `None` while none are set.
     pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
+    /// Its replication configuration; `None` while none is set.
+    pub replication: Option<tessari_s3_core::replication::Configuration>,
     /// Its media rules; `None` while none are set.
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
     /// Who must hold an object write before it is acknowledged.
@@ -119,6 +121,11 @@ impl TryFrom<BucketEntity> for Bucket {
                 .notify
                 .as_ref()
                 .map(super::notification::from_value)
+                .transpose()?,
+            replication: entity
+                .replication
+                .as_ref()
+                .map(super::replication::from_value)
                 .transpose()?,
             media: entity
                 .media
