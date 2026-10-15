@@ -1,5 +1,29 @@
+use std::sync::LazyLock;
+
 use crate::Error;
 use crate::config::tests::{CREDENTIALS, load, with};
+
+/// Three readable files standing in for this node's internal TLS material; a cluster member must name all three.
+static TLS_FILES: LazyLock<[String; 3]> = LazyLock::new(|| {
+    let dir = std::env::temp_dir().join(format!("tessari-s3-tls-fixture-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    ["cert.pem", "key.pem", "ca.pem"].map(|name| {
+        let path = dir.join(name);
+        std::fs::write(&path, name).expect("written");
+        path.to_string_lossy().into_owned()
+    })
+});
+
+/// The cluster settings with the TLS files a member needs.
+fn clustered() -> Vec<(&'static str, &'static str)> {
+    let mut vars = with(&CLUSTER);
+    vars.extend([
+        ("TESSARIDB_S3_INTERNAL_TLS_CERT", TLS_FILES[0].as_str()),
+        ("TESSARIDB_S3_INTERNAL_TLS_KEY", TLS_FILES[1].as_str()),
+        ("TESSARIDB_S3_INTERNAL_TLS_CA", TLS_FILES[2].as_str()),
+    ]);
+    vars
+}
 
 const CLUSTER: [(&str, &str); 6] = [
     ("TESSARIDB_S3_ERASURE", "4+2"),
@@ -20,7 +44,7 @@ fn a_node_without_an_erasure_code_is_not_clustered() {
 
 #[test]
 fn the_cluster_settings_are_read_together() {
-    let cluster = load(&with(&CLUSTER))
+    let cluster = load(&clustered())
         .expect("loads")
         .cluster
         .expect("clustered");
@@ -41,7 +65,7 @@ fn a_partial_or_invalid_cluster_setting_is_refused_by_name() {
         "TESSARIDB_S3_CLUSTER_SECRET",
         "TESSARIDB_S3_DATA_DIR",
     ] {
-        let mut vars = with(&CLUSTER);
+        let mut vars = clustered();
         vars.retain(|(k, _)| *k != missing);
         assert_eq!(
             load(&vars).map(|_| ()),
@@ -49,7 +73,7 @@ fn a_partial_or_invalid_cluster_setting_is_refused_by_name() {
             "{missing}"
         );
     }
-    let mut no_code = with(&CLUSTER);
+    let mut no_code = clustered();
     no_code.retain(|(k, _)| *k != "TESSARIDB_S3_ERASURE");
     assert!(matches!(
         load(&no_code).map(|_| ()),
@@ -65,7 +89,7 @@ fn a_partial_or_invalid_cluster_setting_is_refused_by_name() {
         ("TESSARIDB_S3_INTERNAL_LISTEN", "nowhere"),
         ("TESSARIDB_S3_CLUSTER_SECRET", "short-secret"),
     ] {
-        let mut vars = with(&CLUSTER);
+        let mut vars = clustered();
         vars.retain(|(k, _)| *k != key);
         vars.push((key, bad));
         assert!(
@@ -80,11 +104,11 @@ fn healing_runs_every_minute_unless_told_otherwise() {
     let cluster = |vars: &[(&'static str, &'static str)]| {
         load(vars).map(|config| config.cluster.expect("clustered").heal_interval_secs)
     };
-    assert_eq!(cluster(&with(&CLUSTER)), Ok(60));
-    let mut set = with(&CLUSTER);
+    assert_eq!(cluster(&clustered()), Ok(60));
+    let mut set = clustered();
     set.push(("TESSARIDB_S3_HEAL_INTERVAL_SECS", "15"));
     assert_eq!(cluster(&set), Ok(15));
-    let mut zero = with(&CLUSTER);
+    let mut zero = clustered();
     zero.push(("TESSARIDB_S3_HEAL_INTERVAL_SECS", "0"));
     assert!(matches!(
         cluster(&zero),
@@ -100,13 +124,13 @@ fn moving_data_is_throttled_to_32_mib_a_second_unless_told_otherwise_and_0_pause
     let cluster = |vars: &[(&'static str, &'static str)]| {
         load(vars).map(|config| config.cluster.expect("clustered").move_bytes_per_sec)
     };
-    assert_eq!(cluster(&with(&CLUSTER)), Ok(32 * 1024 * 1024));
+    assert_eq!(cluster(&clustered()), Ok(32 * 1024 * 1024));
     for (text, bytes) in [("1048576", 1_048_576), ("0", 0)] {
-        let mut set = with(&CLUSTER);
+        let mut set = clustered();
         set.push(("TESSARIDB_S3_MOVE_BYTES_PER_SEC", text));
         assert_eq!(cluster(&set), Ok(bytes));
     }
-    let mut bad = with(&CLUSTER);
+    let mut bad = clustered();
     bad.push(("TESSARIDB_S3_MOVE_BYTES_PER_SEC", "fast-please"));
     let refused = cluster(&bad);
     assert!(matches!(
@@ -123,7 +147,7 @@ fn moving_data_is_throttled_to_32_mib_a_second_unless_told_otherwise_and_0_pause
 }
 
 #[test]
-fn internal_tls_is_three_files_read_together_or_none() {
+fn internal_tls_is_three_files_read_together_and_required_of_a_member() {
     let dir = std::env::temp_dir().join(format!("tessari-s3-tls-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("dir");
     let file = |name: &str, body: &str| {
@@ -147,10 +171,15 @@ fn internal_tls_is_three_files_read_together_or_none() {
         load(&vars).map(|config| config.cluster.expect("clustered"))
     };
     assert!(
-        cluster(&[]).expect("loads").tls.is_none(),
-        "plain unless asked"
+        matches!(
+            cluster(&[]),
+            Err(Error::MissingConfig {
+                key: "TESSARIDB_S3_INTERNAL_TLS_CERT"
+            })
+        ),
+        "a member speaks mutual TLS to its peers; there is no clear mode"
     );
-    let read = cluster(&tls).expect("loads").tls.expect("tls");
+    let read = cluster(&tls).expect("loads").tls;
     assert_eq!(read.certificate_pem, b"CERT");
     assert_eq!(read.authority_pem, b"AUTHORITY");
     assert_eq!(read.key_pem(), b"PRIVATE-KEY-BYTES");
@@ -200,7 +229,7 @@ fn internal_tls_is_three_files_read_together_or_none() {
 #[test]
 fn a_node_names_its_zone_or_is_a_domain_of_its_own() {
     let zone = |extra: &[(&'static str, &'static str)]| {
-        let mut vars = with(&CLUSTER);
+        let mut vars = clustered();
         vars.extend_from_slice(extra);
         load(&vars).map(|config| {
             config

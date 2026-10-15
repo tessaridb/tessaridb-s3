@@ -1,39 +1,83 @@
 //! The internal shard routes through the router with no network: a shard stored, read by block range and removed;
-//! and every request that is not the cluster's, or not what it declares, refused with nothing left behind.
+//! and every request whose certificate does not speak for the node it names, or whose node is not an admitted member,
+//! refused with nothing left behind.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU8, Ordering};
 
 use axum::body::{Body, to_bytes};
 use axum::http::Request;
-use tessari_s3_api::{InternalState, internal_router};
-use tessari_s3_constants::{
-    INTERNAL_DATE_HEADER, INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH, INTERNAL_SIGNATURE_HEADER,
-};
-use tessari_s3_core::internal::{InternalRequest, sign};
+use futures_util::future::BoxFuture;
+use rustls::pki_types::CertificateDer;
+use tessari_s3_api::{Admit, InternalState, PeerCertificate, internal_router};
+use tessari_s3_constants::{INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_storage::Storage;
-use tessari_s3_types::SecretKey;
+use tessari_s3_storage::members::{Admission, Fingerprint};
+use tessari_s3_types::NodeId;
 use tower::ServiceExt;
 
 use crate::NOW;
 
-pub(crate) const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
 const ID: &str = "0123456789abcdef0123456789abcdef";
 
-/// An internal state at [`NOW`] over a fresh data directory, which it returns for removal.
-fn internal() -> (InternalState, std::path::PathBuf) {
-    internal_with(std::sync::Arc::new(|| NOW))
+/// The membership the router asks, answering what a test sets: 0 admitted, 1 unknown, 2 removed, 3 awaiting a token,
+/// 4 another certificate, anything else the store failing.
+#[derive(Default)]
+pub(crate) struct Admissions(AtomicU8);
+
+impl Admissions {
+    pub(crate) fn answer(&self, code: u8) {
+        self.0.store(code, Ordering::SeqCst);
+    }
 }
 
-/// An internal state by `clock` over a fresh data directory, which it returns for removal.
-pub(crate) fn internal_with(clock: tessari_s3_api::Clock) -> (InternalState, std::path::PathBuf) {
+impl Admit for Admissions {
+    fn admits<'a>(
+        &'a self,
+        _node: &'a NodeId,
+        _fingerprint: &'a Fingerprint,
+    ) -> BoxFuture<'a, tessari_s3_storage::Result<Admission>> {
+        let answer = match self.0.load(Ordering::SeqCst) {
+            0 => Ok(Admission::Admitted),
+            1 => Ok(Admission::Unknown),
+            2 => Ok(Admission::Removed),
+            3 => Ok(Admission::AwaitingToken),
+            4 => Ok(Admission::OtherCertificate),
+            _ => Err(tessari_s3_storage::Error::Malformed {
+                record: "member",
+                reason: "the test store failed",
+            }),
+        };
+        Box::pin(async move { answer })
+    }
+}
+
+/// A certificate for `name` alone; the chain is the TLS stack's question, asked before the router's.
+pub(crate) fn certificate(name: &str) -> CertificateDer<'static> {
+    let key = rcgen::KeyPair::generate().expect("a key");
+    let params = rcgen::CertificateParams::new(vec![name.to_owned()]).expect("parameters");
+    params
+        .self_signed(&key)
+        .expect("a certificate")
+        .der()
+        .clone()
+}
+
+/// An internal state at [`NOW`] over a fresh data directory, which it returns for removal, admitting every member.
+fn internal() -> (InternalState, std::path::PathBuf) {
+    internal_with(Arc::new(|| NOW), Arc::new(Admissions::default()))
+}
+
+/// An internal state by `clock` asking `admissions`, over a fresh data directory, which it returns for removal.
+pub(crate) fn internal_with(
+    clock: tessari_s3_api::Clock,
+    admissions: Arc<Admissions>,
+) -> (InternalState, std::path::PathBuf) {
     let dir =
         std::env::temp_dir().join(format!("tessari-s3-data-{}", uuid::Uuid::new_v4().simple()));
-    let state = InternalState::new(
-        SecretKey::new(CLUSTER_SECRET.to_owned()),
-        clock,
-        storage_at(dir.clone()),
-        16,
-    );
+    let state = InternalState::new(clock, storage_at(dir.clone()), admissions, 16);
     (state, dir)
 }
 
@@ -67,25 +111,23 @@ fn body() -> Vec<u8> {
         .collect()
 }
 
-/// A request for `target` (path and query) signed by node `n1` at `date` with `secret`.
-fn signed(method: &str, target: &str, date: i64, secret: &str, body: Vec<u8>) -> Request<Body> {
-    let signature = sign(
-        secret.as_bytes(),
-        &InternalRequest {
-            method,
-            path: target,
-            date,
-            node: "n1",
-        },
-    );
-    Request::builder()
-        .method(method)
-        .uri(target)
-        .header(INTERNAL_NODE_HEADER, "n1")
-        .header(INTERNAL_DATE_HEADER, date.to_string())
-        .header(INTERNAL_SIGNATURE_HEADER, signature)
-        .body(Body::from(body))
-        .expect("request")
+/// A request for `target` naming node `node` (none: no header) over a connection that presented `certificate`.
+fn from(
+    method: &str,
+    target: &str,
+    node: Option<&str>,
+    certificate: Option<CertificateDer<'static>>,
+    body: Vec<u8>,
+) -> Request<Body> {
+    let mut builder = Request::builder().method(method).uri(target);
+    if let Some(node) = node {
+        builder = builder.header(INTERNAL_NODE_HEADER, node);
+    }
+    let mut request = builder.body(Body::from(body)).expect("request");
+    request
+        .extensions_mut()
+        .insert(PeerCertificate(certificate));
+    request
 }
 
 fn shard(index: u16, query: &str) -> String {
@@ -105,9 +147,10 @@ async fn send(state: &InternalState, request: Request<Body>) -> (u16, Vec<u8>) {
     (status, bytes)
 }
 
-/// Sends a request signed by the cluster now.
+/// Sends a request from member `n1` presenting its own certificate.
 async fn sent(state: &InternalState, method: &str, target: &str, body: Vec<u8>) -> (u16, Vec<u8>) {
-    send(state, signed(method, target, NOW, CLUSTER_SECRET, body)).await
+    let own = certificate("n1.peer.tessari-s3");
+    send(state, from(method, target, Some("n1"), Some(own), body)).await
 }
 
 #[tokio::test]
@@ -143,39 +186,87 @@ async fn a_shard_is_stored_read_by_range_and_removed() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+const UNIDENTIFIED: &str =
+    r#"{"code":"unidentified","message":"no certificate speaks for the node the request names"}"#;
+const NOT_ADMITTED: &str =
+    r#"{"code":"not_admitted","message":"the node is not an admitted member of the cluster"}"#;
+
 #[tokio::test]
-async fn the_health_route_answers_the_cluster_and_refuses_anyone_else() {
+async fn the_health_route_answers_an_admitted_member_and_refuses_anyone_else() {
     let (state, dir) = internal();
     assert_eq!(
         sent(&state, "GET", "/internal/v1/health", Vec::new()).await,
         (204, Vec::new())
     );
-    let other = "another-secret-0123456789abcdef0123";
-    let (status, bytes) = send(
-        &state,
-        signed("GET", "/internal/v1/health", NOW, other, Vec::new()),
-    )
-    .await;
-    assert_eq!(status, 401);
-    assert_eq!(
-        String::from_utf8(bytes).expect("utf-8"),
-        r#"{"code":"unauthorized","message":"the request is not signed by the cluster"}"#
-    );
+    let health = "/internal/v1/health";
+    let refusals = [
+        (
+            "nothing presented",
+            from("GET", health, Some("n1"), None, Vec::new()),
+        ),
+        (
+            "another node's certificate",
+            from(
+                "GET",
+                health,
+                Some("n1"),
+                Some(certificate("n2.peer.tessari-s3")),
+                Vec::new(),
+            ),
+        ),
+        (
+            "a client link's certificate",
+            from(
+                "GET",
+                health,
+                Some("n1"),
+                Some(certificate("n1.client.tessari-s3")),
+                Vec::new(),
+            ),
+        ),
+        (
+            "no node named",
+            from(
+                "GET",
+                health,
+                None,
+                Some(certificate("n1.peer.tessari-s3")),
+                Vec::new(),
+            ),
+        ),
+        (
+            "an invalid node id",
+            from(
+                "GET",
+                health,
+                Some("N 1"),
+                Some(certificate("n1.peer.tessari-s3")),
+                Vec::new(),
+            ),
+        ),
+    ];
+    for (why, request) in refusals {
+        let (status, bytes) = send(&state, request).await;
+        assert_eq!(
+            (status, String::from_utf8(bytes).expect("utf-8").as_str()),
+            (401, UNIDENTIFIED),
+            "{why}"
+        );
+    }
     std::fs::remove_dir_all(dir).ok();
 }
 
 #[tokio::test]
-async fn the_drive_route_answers_the_cluster_with_its_space_and_refuses_anyone_else() {
+async fn the_drive_route_answers_an_admitted_member_with_its_space_and_refuses_anyone_else() {
     let (state, dir) = internal();
     let (status, bytes) = sent(&state, "GET", "/internal/v1/drive", Vec::new()).await;
     assert_eq!(status, 200);
     let text = String::from_utf8(bytes).expect("utf-8");
     let drive = tessari_s3_storage::data::DriveSpace::from_wire(&text).expect("three byte counts");
     assert!(drive.capacity > 0 && drive.free <= drive.capacity, "{text}");
-    let other = "another-secret-0123456789abcdef0123";
     let (status, _) = send(
         &state,
-        signed("GET", "/internal/v1/drive", NOW, other, Vec::new()),
+        from("GET", "/internal/v1/drive", Some("n1"), None, Vec::new()),
     )
     .await;
     assert_eq!(status, 401);
@@ -183,39 +274,66 @@ async fn the_drive_route_answers_the_cluster_with_its_space_and_refuses_anyone_e
 }
 
 #[tokio::test]
-async fn a_request_the_cluster_did_not_sign_is_refused_and_writes_nothing() {
-    let (state, dir) = internal();
+async fn a_node_that_is_not_an_admitted_member_is_refused_and_writes_nothing() {
+    let admissions = Arc::new(Admissions::default());
+    let (state, dir) = internal_with(Arc::new(|| NOW), Arc::clone(&admissions));
     let put = shard(0, "?block=64&size=160");
-    let other = "another-secret-0123456789abcdef0123";
-    // Signed for a shorter shard than it asks for: the query is part of what is signed.
-    let mut retargeted = signed(
-        "PUT",
-        &shard(0, "?block=64&size=96"),
-        NOW,
-        CLUSTER_SECRET,
-        body(),
-    );
-    *retargeted.uri_mut() = put.parse().expect("uri");
-    let mut nameless = signed("PUT", &put, NOW, CLUSTER_SECRET, body());
-    nameless.headers_mut().remove(INTERNAL_NODE_HEADER);
-    let refusals = [
-        signed("PUT", &put, NOW, other, body()),
-        signed("PUT", &put, NOW - 301, CLUSTER_SECRET, body()),
-        signed("PUT", &put, NOW + 301, CLUSTER_SECRET, body()),
-        retargeted,
-        nameless,
-        signed("GET", "/internal/v1/elsewhere", NOW, other, Vec::new()),
-    ];
-    for (turn, request) in refusals.into_iter().enumerate() {
-        let (status, bytes) = send(&state, request).await;
-        assert_eq!(status, 401, "refusal {turn}");
+    // Each answer under its own node, so no answer is served from an earlier one's cache.
+    for (code, node) in [(1, "n3"), (2, "n4"), (3, "n5"), (4, "n6")] {
+        admissions.answer(code);
+        let own = certificate(&format!("{node}.peer.tessari-s3"));
+        let (status, bytes) = send(&state, from("PUT", &put, Some(node), Some(own), body())).await;
         assert_eq!(
-            String::from_utf8(bytes).expect("utf-8"),
-            r#"{"code":"unauthorized","message":"the request is not signed by the cluster"}"#
+            (status, String::from_utf8(bytes).expect("utf-8").as_str()),
+            (403, NOT_ADMITTED),
+            "answer {code}"
         );
     }
+    admissions.answer(9);
+    let own = certificate("n7.peer.tessari-s3");
+    let (status, _) = send(&state, from("PUT", &put, Some("n7"), Some(own), body())).await;
+    assert_eq!(
+        status, 503,
+        "membership that cannot be read refuses rather than admits"
+    );
+    let unsigned = send(&state, from("PUT", &put, Some("n1"), None, body())).await;
+    assert_eq!(unsigned.0, 401);
+    admissions.answer(0);
     let after = sent(&state, "GET", &shard(0, "?size=160"), Vec::new()).await;
     assert_eq!(after.0, 404, "nothing was written");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn a_removal_reaches_this_surface_within_five_seconds() {
+    let admissions = Arc::new(Admissions::default());
+    let now = Arc::new(AtomicI64::new(NOW));
+    let clock = Arc::clone(&now);
+    let (state, dir) = internal_with(
+        Arc::new(move || clock.load(Ordering::SeqCst)),
+        Arc::clone(&admissions),
+    );
+    // One certificate throughout: the answer is kept per node and certificate.
+    let own = certificate("n1.peer.tessari-s3");
+    let health = || {
+        from(
+            "GET",
+            "/internal/v1/health",
+            Some("n1"),
+            Some(own.clone()),
+            Vec::new(),
+        )
+    };
+    assert_eq!(send(&state, health()).await.0, 204);
+    admissions.answer(2);
+    now.store(NOW + 4, Ordering::SeqCst);
+    assert_eq!(
+        send(&state, health()).await.0,
+        204,
+        "an answer is kept for up to five seconds"
+    );
+    now.store(NOW + 5, Ordering::SeqCst);
+    assert_eq!(send(&state, health()).await.0, 403);
     std::fs::remove_dir_all(dir).ok();
 }
 

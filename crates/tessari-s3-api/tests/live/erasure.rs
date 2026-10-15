@@ -4,13 +4,16 @@
 //! healing; three nodes down acknowledge nothing and commit nothing.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use tessari_s3_api::{ApiState, InternalState, internal_router};
+use tessari_s3_api::{ApiState, InternalState, serve_internal};
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool};
+use tessari_s3_infrastructure::tls::server_config;
 use tessari_s3_storage::Storage;
-use tessari_s3_types::{NodeId, SecretKey};
+use tessari_s3_types::NodeId;
 
+use crate::authority::Authority;
 use crate::{ACCESS_KEY, IGNORED, SCHEMA_TURN, SECRET, call, need, scratch_dir, test_node};
 
 const CLUSTER_SECRET: &str = "cluster-secret-0123456789abcdef0123";
@@ -33,6 +36,8 @@ pub(crate) struct Member {
     pub(crate) peers: Vec<Peer>,
     /// The member's configuration, for a test that starts more peers in its namespace.
     pub(crate) config: S3Config,
+    /// The authority that issued every node's certificate, for a test that starts more peers.
+    pub(crate) authority: Authority,
 }
 
 impl Drop for Member {
@@ -45,7 +50,24 @@ impl Drop for Member {
     }
 }
 
-fn configuration(namespace: &str, dir: &Path) -> S3Config {
+/// `n1`'s TLS material from `authority`, written into `dir`: the certificate, key and authority files.
+fn tls_files(authority: &Authority, dir: &Path) -> [String; 3] {
+    let tls = authority.issue("n1");
+    std::fs::create_dir_all(dir).expect("the data directory");
+    let contents = [
+        ("n1-cert.pem", tls.certificate_pem.as_slice()),
+        ("n1-key.pem", tls.key_pem()),
+        ("ca.pem", tls.authority_pem.as_slice()),
+    ];
+    contents.map(|(name, bytes)| {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).expect("written");
+        path.display().to_string()
+    })
+}
+
+fn configuration(namespace: &str, dir: &Path, tls: [String; 3]) -> S3Config {
+    let [cert, key, ca] = tls;
     let vars = [
         ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
         ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET.to_owned()),
@@ -66,6 +88,9 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         ("TESSARIDB_S3_INTERNAL_LISTEN", "127.0.0.1:0".to_owned()),
         ("TESSARIDB_S3_INTERNAL_ADVERTISE", "127.0.0.1:1".to_owned()),
         ("TESSARIDB_S3_CLUSTER_SECRET", CLUSTER_SECRET.to_owned()),
+        ("TESSARIDB_S3_INTERNAL_TLS_CERT", cert),
+        ("TESSARIDB_S3_INTERNAL_TLS_KEY", key),
+        ("TESSARIDB_S3_INTERNAL_TLS_CA", ca),
         ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
         // The live suite's own root key for sealing user access-key secrets, as `live_config` sets it.
         ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
@@ -74,24 +99,23 @@ fn configuration(namespace: &str, dir: &Path) -> S3Config {
         .expect("live configuration")
 }
 
-pub(crate) async fn peer(config: &S3Config) -> Peer {
+/// Peer `node` in `config`'s namespace, holding the certificate `authority` issued for it, admitting the members that
+/// namespace approved.
+pub(crate) async fn peer(config: &S3Config, authority: &Authority, node: &str) -> Peer {
     let dir = scratch_dir();
     let storage = Storage::new(
         MetaPool::new(config.meta.clone()).expect("pool"),
         dir.clone(),
     );
-    let state = InternalState::new(
-        SecretKey::new(CLUSTER_SECRET.to_owned()),
-        ApiState::system_clock(),
-        storage,
-        64,
-    );
+    let members = Arc::new(storage.members().clone());
+    let state = InternalState::new(ApiState::system_clock(), storage, members, 64);
+    let tls = server_config(&authority.issue(node)).expect("server TLS");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a free port");
     let address = listener.local_addr().expect("bound").to_string();
     let server = tokio::spawn(async move {
-        axum::serve(listener, internal_router(state))
+        serve_internal(listener, state, Some(tls), std::future::pending())
             .await
             .expect("serves");
     });
@@ -106,7 +130,8 @@ pub(crate) async fn peer(config: &S3Config) -> Peer {
 pub(crate) async fn member() -> Member {
     let namespace = crate::namespaces::name();
     let dir = scratch_dir();
-    let config = configuration(&namespace, &dir);
+    let authority = Authority::new();
+    let config = configuration(&namespace, &dir, tls_files(&authority, &dir));
     crate::namespaces::removed_at_end(&config.meta);
     let storage = Storage::clustered(
         MetaPool::new(config.meta.clone()).expect("pool"),
@@ -128,10 +153,12 @@ pub(crate) async fn member() -> Member {
         .register(&NodeId::new("n1").expect("id"), "127.0.0.1:1", None)
         .await
         .expect("registered");
+    admitted(&storage, "n1").await;
     let mut peers = Vec::new();
     for n in 2..=6 {
-        let peer = peer(&config).await;
+        let peer = peer(&config, &authority, &format!("n{n}")).await;
         let node = NodeId::new(&format!("n{n}")).expect("id");
+        admitted(&storage, node.as_str()).await;
         storage
             .cluster()
             .register(&node, &peer.address, None)
@@ -153,7 +180,22 @@ pub(crate) async fn member() -> Member {
         dir,
         peers,
         config,
+        authority,
     }
+}
+
+/// `node` approved as a member of the cluster, presenting any certificate the authority issued for it.
+pub(crate) async fn admitted(storage: &Storage, node: &str) {
+    storage
+        .members()
+        .approve(
+            &NodeId::new(node).expect("id"),
+            None,
+            "live-test",
+            "a member of the test cluster",
+        )
+        .await
+        .expect("approved");
 }
 
 /// Shard files under `dir`, temporary ones included.

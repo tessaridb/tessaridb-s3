@@ -2,19 +2,23 @@
 //! from any k shards read back from them; nodes down within the parity still acknowledged; below the write quorum
 //! never acknowledged; a node that stops taking blocks given up within the stall time.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Bytes;
 use futures_util::TryStreamExt;
 use tessari_s3_core::erasure::{Code, Stripes};
 use tessari_s3_core::objects::checksum::Hashes;
+use tessari_s3_infrastructure::InternalTls;
+use tessari_s3_infrastructure::tls::server_config;
 use tessari_s3_storage::Error;
 use tessari_s3_storage::erasure::{Destination, ErasurePlan, ErasureUpload, ErasureUploaded};
-use tessari_s3_storage::peers::{RemoteShards, ShardRef};
+use tessari_s3_storage::peers::{PeerAt, RemoteShards, ShardRef};
 use tessari_s3_storage::shards::ShardService;
+use tessari_s3_types::NodeId;
 
-use crate::internal::{CLUSTER_SECRET, storage_at};
-use crate::peers::{caller, serving};
+use crate::internal::storage_at;
+use crate::peers::{Authority, caller, serving_as};
 
 const ID: [u8; 16] = [5; 16];
 const STRIPE: u32 = 4096;
@@ -22,6 +26,7 @@ const STALL: Duration = Duration::from_millis(200);
 
 /// What one test's cluster is made of, removed when it is dropped.
 struct Cluster {
+    authority: Authority,
     local: ShardService,
     peers: RemoteShards,
     destinations: Vec<Destination>,
@@ -46,26 +51,36 @@ fn closed_port() -> String {
     listener.local_addr().expect("bound").to_string()
 }
 
+/// Shard `index`'s node, `s<index>`, answering at `endpoint`.
+fn at(index: usize, endpoint: String) -> Destination {
+    Destination::Remote(PeerAt {
+        node: NodeId::new(&format!("s{index}")).expect("node id"),
+        endpoint,
+    })
+}
+
 /// This node for shard 0 and a serving peer for every other shard, except the shard indexes in `down`, which point
-/// at closed ports.
+/// at closed ports. Every node holds a certificate one authority issued for it.
 async fn cluster(width: usize, down: &[usize]) -> Cluster {
     let local_dir =
         std::env::temp_dir().join(format!("tessari-s3-data-{}", uuid::Uuid::new_v4().simple()));
+    let authority = Authority::new();
+    let peers = caller(&authority.issue("n2"));
     let mut cluster = Cluster {
+        authority,
         local: storage_at(local_dir.clone()).shards().clone(),
-        peers: caller(CLUSTER_SECRET),
+        peers,
         destinations: vec![Destination::Local],
         servers: Vec::new(),
         dirs: vec![local_dir],
     };
     for index in 1..width {
         if down.contains(&index) {
-            cluster
-                .destinations
-                .push(Destination::Remote(closed_port()));
+            cluster.destinations.push(at(index, closed_port()));
         } else {
-            let (address, server, dir) = serving().await;
-            cluster.destinations.push(Destination::Remote(address));
+            let tls = cluster.authority.issue(&format!("s{index}"));
+            let (address, server, dir) = serving_as(&tls, Arc::default()).await;
+            cluster.destinations.push(at(index, address));
             cluster.servers.push(server);
             cluster.dirs.push(dir);
         }
@@ -120,10 +135,10 @@ async fn shard(cluster: &Cluster, index: usize, size: u64) -> Vec<u8> {
             }
             bytes
         }
-        Destination::Remote(address) => {
+        Destination::Remote(peer) => {
             let parts: Vec<Bytes> = cluster
                 .peers
-                .get(address, shard, size, None, Duration::from_secs(10))
+                .get(peer, shard, size, None, Duration::from_secs(10))
                 .await
                 .expect("read")
                 .try_collect()
@@ -231,7 +246,7 @@ async fn a_node_that_stops_answering_is_given_up_within_its_budget() {
     let silent = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a free port");
-    cluster.destinations[5] = Destination::Remote(silent.local_addr().expect("bound").to_string());
+    cluster.destinations[5] = at(5, silent.local_addr().expect("bound").to_string());
     let holder = tokio::spawn(async move {
         let mut held = Vec::new();
         while let Ok((socket, _)) = silent.accept().await {
@@ -251,18 +266,38 @@ async fn a_node_that_stops_answering_is_given_up_within_its_budget() {
     holder.abort();
 }
 
-/// A peer that takes every byte it is sent and then refuses, so its failure is known only once the body is through.
-async fn refusing_peer() -> (String, tokio::task::JoinHandle<()>) {
+/// A peer holding `tls` that takes every byte it is sent and then refuses, so its failure is known only once the body
+/// is through.
+async fn refusing_peer(tls: &InternalTls) -> (String, tokio::task::JoinHandle<()>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a free port");
     let address = listener.local_addr().expect("bound").to_string();
+    let acceptor = tokio_rustls::TlsAcceptor::from(server_config(tls).expect("server TLS"));
     let app = axum::Router::new().fallback(|body: axum::body::Body| async move {
         let _drained = axum::body::to_bytes(body, 1 << 20).await;
         axum::http::StatusCode::SERVICE_UNAVAILABLE
     });
     let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serves");
+        // Connections live in this task's set, so aborting the task closes them.
+        let mut connections = tokio::task::JoinSet::new();
+        while let Ok((stream, _)) = listener.accept().await {
+            let (acceptor, app) = (acceptor.clone(), app.clone());
+            connections.spawn(async move {
+                let Ok(stream) = acceptor.accept(stream).await else {
+                    return;
+                };
+                let builder = hyper_util::server::conn::auto::Builder::new(
+                    hyper_util::rt::TokioExecutor::new(),
+                );
+                let _served = builder
+                    .serve_connection(
+                        hyper_util::rt::TokioIo::new(stream),
+                        hyper_util::service::TowerToHyperService::new(app),
+                    )
+                    .await;
+            });
+        }
     });
     (address, server)
 }
@@ -271,8 +306,9 @@ async fn refusing_peer() -> (String, tokio::task::JoinHandle<()>) {
 async fn shards_refused_after_their_last_block_still_count_against_the_quorum() {
     let mut cluster = cluster(6, &[]).await;
     for index in [1, 3, 5] {
-        let (address, server) = refusing_peer().await;
-        cluster.destinations[index] = Destination::Remote(address);
+        let tls = cluster.authority.issue(&format!("s{index}"));
+        let (address, server) = refusing_peer(&tls).await;
+        cluster.destinations[index] = at(index, address);
         cluster.servers.push(server);
     }
     assert_eq!(

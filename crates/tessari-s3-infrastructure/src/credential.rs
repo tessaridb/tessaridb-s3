@@ -68,6 +68,20 @@ pub fn speaks_for(
     })
 }
 
+/// Refuses a node whose own certificate does not speak for it, so a mis-issued file stops the node at start rather
+/// than at every peer it calls.
+///
+/// # Errors
+/// [`crate::Error::InvalidConfig`] naming the certificate file when it holds no certificate or one issued for
+/// another node.
+pub fn speaks_for_itself(tls: &crate::tls::InternalTls, node: &NodeId) -> crate::Result<()> {
+    let own = crate::tls::leaf(tls)?;
+    speaks_for(Some(&own), node).map_err(|_| crate::Error::InvalidConfig {
+        key: "TESSARIDB_S3_INTERNAL_TLS_CERT",
+        reason: "issued for another node than TESSARIDB_S3_NODE_ID",
+    })
+}
+
 /// The certificate's SHA-256 over its DER, lowercase hex.
 #[must_use]
 pub fn fingerprint(certificate: &CertificateDer<'_>) -> String {

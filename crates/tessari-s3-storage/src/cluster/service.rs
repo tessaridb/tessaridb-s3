@@ -14,7 +14,7 @@ use super::repository::ClusterRepository;
 use super::staging::{Apply, Stage, StagedLayout, apply_of, stage_of, staged_of};
 use super::tessaridb::TessariCluster;
 use crate::data::DriveSpace;
-use crate::peers::RemoteShards;
+use crate::peers::{PeerAt, RemoteShards};
 use crate::{Error, Result};
 
 /// A registered node, where its internal surface answers, and its failure domain.
@@ -26,6 +26,17 @@ pub struct Member {
     pub endpoint: String,
     /// Its zone; `None`: a domain of its own.
     pub zone: Option<Zone>,
+}
+
+impl Member {
+    /// The member as a peer to call.
+    #[must_use]
+    pub fn peer(&self) -> PeerAt {
+        PeerAt {
+            node: self.node.clone(),
+            endpoint: self.endpoint.clone(),
+        }
+    }
 }
 
 /// Topology operations.
@@ -57,24 +68,24 @@ impl ClusterService {
         }
     }
 
-    /// The data drive space of the member at `endpoint`, when it answers within `budget` and stores data; `None`
-    /// otherwise, including off a cluster.
-    pub async fn drive(&self, endpoint: &str, budget: Duration) -> Option<DriveSpace> {
+    /// The data drive space of `member`, when it answers within `budget` and stores data; `None` otherwise,
+    /// including off a cluster.
+    pub async fn drive(&self, member: &Member, budget: Duration) -> Option<DriveSpace> {
         let peers = self.peers.as_ref()?;
-        match peers.drive(endpoint, budget).await {
+        match peers.drive(&member.peer(), budget).await {
             Ok(drive) => drive,
             Err(error) => {
-                tracing::debug!(endpoint, error = %error, "a member's drive was not read");
+                tracing::debug!(node = %member.node.as_str(), error = %error, "a member's drive was not read");
                 None
             }
         }
     }
 
-    /// Whether the member at `endpoint` answers a signed probe within `budget`. A node outside a cluster reaches
-    /// nobody, so it is always `false` there.
-    pub async fn answers(&self, endpoint: &str, budget: Duration) -> bool {
+    /// Whether `member` answers a probe within `budget`. A node outside a cluster reaches nobody, so it is always
+    /// `false` there.
+    pub async fn answers(&self, member: &Member, budget: Duration) -> bool {
         match &self.peers {
-            Some(peers) => peers.probe(endpoint, budget).await.is_ok(),
+            Some(peers) => peers.probe(&member.peer(), budget).await.is_ok(),
             None => false,
         }
     }

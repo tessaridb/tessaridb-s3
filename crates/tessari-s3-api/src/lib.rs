@@ -12,7 +12,7 @@ mod xml;
 
 pub use console::{ConsoleState, console_router, serve_console};
 pub use error::{Error, Result};
-pub use internal::{InternalState, internal_router, serve_internal};
+pub use internal::{Admit, InternalState, PeerCertificate, internal_router, serve_internal};
 pub use state::{ApiState, Clock};
 
 /// The router: every request goes through the dispatch pipeline behind an in-flight limit that sheds load.

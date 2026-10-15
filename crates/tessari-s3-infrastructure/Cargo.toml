@@ -23,6 +23,7 @@ serde_json.workspace = true
 rustls.workspace = true
 rustls-webpki.workspace = true
 sha2.workspace = true
+scc.workspace = true
 rustls-platform-verifier.workspace = true
 rskafka.workspace = true
 siphasher.workspace = true

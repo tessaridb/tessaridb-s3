@@ -15,7 +15,7 @@ use super::repository::{ShardSet, ShardSetRepository};
 use super::tessaridb::TessariShardSets;
 use super::upload::{Destination, ErasurePlan, ErasureUpload};
 use crate::cluster::ClusterService;
-use crate::peers::{RemoteShards, ShardRef};
+use crate::peers::{PeerAt, RemoteShards, ShardRef};
 use crate::shards::ShardService;
 use crate::{Error, Result};
 
@@ -118,7 +118,12 @@ impl ErasureWrites {
                 members
                     .iter()
                     .find(|member| member.node == *node)
-                    .map(|member| Destination::Remote(member.endpoint.clone()))
+                    .map(|member| {
+                        Destination::Remote(PeerAt {
+                            node: member.node.clone(),
+                            endpoint: member.endpoint.clone(),
+                        })
+                    })
                     .ok_or(Error::Malformed {
                         record: "s3_nodes",
                         reason: "a layout node is not registered",

@@ -82,9 +82,9 @@ pub struct ClusterSettings {
     pub heal_interval_secs: u64,
     /// `TESSARIDB_S3_MOVE_BYTES_PER_SEC` — how many bytes a second moving data onto a new layout may copy; `0` pauses it.
     pub move_bytes_per_sec: u64,
-    /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS; `None` speaks in the
-    /// clear.
-    pub tls: Option<crate::tls::InternalTls>,
+    /// `TESSARIDB_S3_INTERNAL_TLS_CERT`, `_KEY` and `_CA` — the internal surface over mutual TLS, required: the certificate
+    /// speaks for this node, and peers are admitted by theirs.
+    pub tls: crate::tls::InternalTls,
 }
 
 impl S3Config {

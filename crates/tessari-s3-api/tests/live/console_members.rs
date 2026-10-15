@@ -118,10 +118,13 @@ async fn root_approves_issues_a_token_once_and_removes_and_every_act_is_recorded
         .collect();
     assert_eq!(
         nodes,
-        vec![
-            ("n7".to_owned(), "approved".to_owned(), false),
-            ("n8".to_owned(), "approved".to_owned(), true)
-        ]
+        (1..=6)
+            .map(|n| (format!("n{n}"), "approved".to_owned(), false))
+            .chain([
+                ("n7".to_owned(), "approved".to_owned(), false),
+                ("n8".to_owned(), "approved".to_owned(), true),
+            ])
+            .collect::<Vec<_>>()
     );
 
     let in_layout = send(
@@ -212,6 +215,9 @@ async fn a_user_is_refused_every_membership_route() {
     let member = member().await;
     let key = user_with_key(&member.storage, "mem", "mem-space", Role::SpaceAdmin, true).await;
     let user = sign_in_as(&member.console, &key).await.expect("signed in");
+    // The founding members the cluster was built with, and nothing else.
+    let before = member.storage.members().list().await.expect("listed");
+    assert_eq!(before.len(), 6, "n1..n6");
     for (method, path, body) in [
         ("GET", MEMBERS, ""),
         ("POST", APPROVE, r#"{"node":"n7","reason":"r"}"#),
@@ -227,5 +233,5 @@ async fn a_user_is_refused_every_membership_route() {
         assert_eq!(answer.status, 403, "{method} {path}");
     }
     let untouched = member.storage.members().list().await.expect("listed");
-    assert!(untouched.is_empty(), "a refused route wrote {untouched:?}");
+    assert_eq!(untouched, before, "a refused route wrote");
 }

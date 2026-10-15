@@ -11,7 +11,7 @@ use tessari_s3_storage::cluster::{Apply, Stage};
 use tessari_s3_types::NodeId;
 
 use crate::IGNORED;
-use crate::erasure::{Member, count, peer, shard_files};
+use crate::erasure::{Member, admitted, count, peer, shard_files};
 use crate::erasure_heals::data_id;
 use crate::erasure_reads::{read_back, striped, written};
 
@@ -22,7 +22,8 @@ fn code() -> Code {
 /// Six more peers, `n7`..`n12`, registered and served.
 pub(crate) async fn grown(member: &mut Member) {
     for n in 7..=12 {
-        let added = peer(&member.config).await;
+        let added = peer(&member.config, &member.authority, &format!("n{n}")).await;
+        admitted(&member.storage, &format!("n{n}")).await;
         member
             .storage
             .cluster()

@@ -74,6 +74,12 @@ fn certificates(pem: &[u8], key: &'static str) -> Result<Vec<CertificateDer<'sta
     Ok(chain)
 }
 
+/// The certificate this node presents: the first in its certificate file.
+pub(crate) fn leaf(tls: &InternalTls) -> Result<CertificateDer<'static>> {
+    let mut chain = certificates(&tls.certificate_pem, CERT)?;
+    Ok(chain.swap_remove(0))
+}
+
 fn private_key(tls: &InternalTls) -> Result<PrivateKeyDer<'static>> {
     PrivateKeyDer::from_pem_slice(tls.key_pem()).map_err(|_| invalid(KEY, "not a PEM private key"))
 }

@@ -3,6 +3,7 @@
 
 #![cfg(test)]
 
+mod authority;
 mod console;
 mod console_page;
 mod erasure;
@@ -12,7 +13,6 @@ mod oidc_logout;
 mod oidc_provider;
 mod operations;
 mod peers;
-mod peers_tls;
 mod refusals;
 mod signer;
 

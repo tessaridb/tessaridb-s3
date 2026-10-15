@@ -3153,6 +3153,7 @@ dependencies = [
  "rustls",
  "rustls-platform-verifier",
  "rustls-webpki",
+ "scc",
  "serde",
  "serde_json",
  "sha2",

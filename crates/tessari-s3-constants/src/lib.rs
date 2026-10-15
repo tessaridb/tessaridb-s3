@@ -54,10 +54,6 @@ pub const MIN_SECRET_KEY_LEN: usize = 16;
 /// Connections to the metadata store open at once, when `TESSARIDB_S3_META_MAX_CONNECTIONS` is unset.
 pub const DEFAULT_META_CONNECTIONS: usize = 32;
 
-/// Seconds an internal request's date may differ from the receiving node's clock: the window a captured request
-/// can be replayed in, kept short because the nodes of one cluster share a time source.
-pub const INTERNAL_MAX_SKEW_SECS: i64 = 5 * 60;
-
 /// The internal shard routes: `{INTERNAL_SHARDS_PATH}/{data id, 32 lowercase hex}/{shard index}`.
 pub const INTERNAL_SHARDS_PATH: &str = "/internal/v1/shards";
 
@@ -73,11 +69,9 @@ pub const INTERNAL_DRIVE_BODY_MAX: usize = 64;
 /// The header naming the node that sent an internal request.
 pub const INTERNAL_NODE_HEADER: &str = "x-tessari-node";
 
-/// The header carrying an internal request's date, in seconds since the Unix epoch.
-pub const INTERNAL_DATE_HEADER: &str = "x-tessari-date";
-
-/// The header carrying an internal request's signature, lowercase hex.
-pub const INTERNAL_SIGNATURE_HEADER: &str = "x-tessari-signature";
+/// Seconds a node keeps the membership's answer for a peer and certificate: the longest a removal takes to
+/// reach it.
+pub const INTERNAL_ADMISSION_CACHE_SECS: i64 = 5;
 
 /// Blocks queued for one shard before the encoder waits for its node: a stripe in flight and the next one.
 pub const SHARD_QUEUE_BLOCKS: usize = 2;

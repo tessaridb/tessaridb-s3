@@ -7,7 +7,7 @@ use bytes::Bytes;
 use tokio::sync::mpsc::Receiver;
 
 use crate::Result;
-use crate::peers::{RemoteShards, ShardRef};
+use crate::peers::{PeerAt, RemoteShards, ShardRef};
 use crate::shards::ShardService;
 
 /// The shape every shard of one upload shares.
@@ -41,7 +41,7 @@ pub(super) async fn local(
 /// Streams the shard to the peer at `endpoint`, which answers once it is durable there.
 pub(super) async fn remote(
     peers: RemoteShards,
-    endpoint: String,
+    endpoint: PeerAt,
     shard: ShardRef,
     shape: ShardShape,
     blocks: Receiver<Bytes>,

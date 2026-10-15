@@ -8,13 +8,13 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::stream::{BoxStream, Stream, StreamExt};
 use tessari_s3_constants::{
-    INTERNAL_DATE_HEADER, INTERNAL_DRIVE_BODY_MAX, INTERNAL_DRIVE_PATH, INTERNAL_HEALTH_PATH,
-    INTERNAL_NODE_HEADER, INTERNAL_SHARDS_PATH, INTERNAL_SIGNATURE_HEADER,
+    INTERNAL_DRIVE_BODY_MAX, INTERNAL_DRIVE_PATH, INTERNAL_HEALTH_PATH, INTERNAL_NODE_HEADER,
+    INTERNAL_SHARDS_PATH,
 };
-use tessari_s3_core::internal::{InternalRequest, sign};
 use tessari_s3_infrastructure::InternalTls;
+pub use tessari_s3_infrastructure::peer::PeerAt;
 use tessari_s3_infrastructure::peer::{PeerBody, PeerHttp, PeerMethod, PeerReply};
-use tessari_s3_types::{NodeId, SecretKey};
+use tessari_s3_types::NodeId;
 
 use crate::data::{DriveSpace, hex};
 use crate::{Error, Result};
@@ -28,35 +28,34 @@ pub struct ShardRef {
     pub index: u16,
 }
 
-/// Shard calls to other nodes, signed as `node` with the cluster secret.
+/// Shard calls to other nodes as `node`, over mutual TLS: this node's certificate speaks for it, and a peer is
+/// reached only when its certificate speaks for the node dialled.
 #[derive(Clone)]
 pub struct RemoteShards {
     http: PeerHttp,
     node: NodeId,
-    secret: SecretKey,
 }
 
 impl RemoteShards {
-    /// Calls made as `node`, signed with `secret`, over mutual TLS with `tls` or in the clear without.
+    /// Calls made as `node` with the cluster's TLS material `tls`.
     ///
     /// # Errors
     /// [`Error::Peer`] when the TLS material or the HTTP client cannot be used.
-    pub fn new(node: NodeId, secret: SecretKey, tls: Option<&InternalTls>) -> Result<Self> {
+    pub fn new(node: NodeId, tls: &InternalTls) -> Result<Self> {
         Ok(Self {
             http: PeerHttp::new(tls)?,
             node,
-            secret,
         })
     }
 
-    /// Stores `body` — `size` bytes in blocks of `block_size` — as `shard` on the node at `endpoint`; returns once
+    /// Stores `body` — `size` bytes in blocks of `block_size` — as `shard` on `peer`; returns once
     /// the peer has made it durable. `budget` covers sending the whole body.
     ///
     /// # Errors
     /// [`Error::PeerRefused`] with the peer's status, or [`Error::Peer`] when it does not answer in time.
     pub async fn put<S>(
         &self,
-        endpoint: &str,
+        peer: &PeerAt,
         shard: ShardRef,
         block_size: u32,
         size: u64,
@@ -69,12 +68,12 @@ impl RemoteShards {
         let target = format!("{}?block={block_size}&size={size}", path(shard));
         let body = PeerBody::Stream(body.boxed());
         let reply = self
-            .call(PeerMethod::Put, endpoint, &target, body, budget)
+            .call(PeerMethod::Put, peer, &target, body, budget)
             .await?;
         answered(&reply, 200)
     }
 
-    /// Reads `shard` of `size` bytes from the node at `endpoint`, all of it or the blocks in `blocks`; each block is
+    /// Reads `shard` of `size` bytes from `peer`, all of it or the blocks in `blocks`; each block is
     /// verified by the peer before it is sent. The stream ending early is the peer's failure part way — the caller
     /// knows the length it asked for.
     ///
@@ -82,7 +81,7 @@ impl RemoteShards {
     /// [`Error::PeerRefused`] (404: the peer holds no such shard), or [`Error::Peer`].
     pub async fn get(
         &self,
-        endpoint: &str,
+        peer: &PeerAt,
         shard: ShardRef,
         size: u64,
         blocks: Option<Range<u64>>,
@@ -93,7 +92,7 @@ impl RemoteShards {
         });
         let target = format!("{}?size={size}{range}", path(shard));
         let reply = self
-            .call(PeerMethod::Get, endpoint, &target, PeerBody::Empty, budget)
+            .call(PeerMethod::Get, peer, &target, PeerBody::Empty, budget)
             .await?;
         answered(&reply, 200)?;
         Ok(reply
@@ -102,15 +101,15 @@ impl RemoteShards {
             .boxed())
     }
 
-    /// Removes `shard` from the node at `endpoint`; a shard the peer does not hold is not an error.
+    /// Removes `shard` from `peer`; a shard the peer does not hold is not an error.
     ///
     /// # Errors
     /// [`Error::PeerRefused`] or [`Error::Peer`].
-    pub async fn delete(&self, endpoint: &str, shard: ShardRef, budget: Duration) -> Result<()> {
+    pub async fn delete(&self, peer: &PeerAt, shard: ShardRef, budget: Duration) -> Result<()> {
         let reply = self
             .call(
                 PeerMethod::Delete,
-                endpoint,
+                peer,
                 &path(shard),
                 PeerBody::Empty,
                 budget,
@@ -119,16 +118,16 @@ impl RemoteShards {
         answered(&reply, 204)
     }
 
-    /// Asks the node at `endpoint` whether it is up: it answers only a request the cluster signed, so an answer within
-    /// `budget` means it is serving its internal surface and shares this node's secret.
+    /// Asks `peer` whether it is up: it answers only an admitted member presenting its own
+    /// certificate, so an answer within `budget` means it is serving and admits this node.
     ///
     /// # Errors
     /// [`Error::PeerRefused`] or [`Error::Peer`].
-    pub async fn probe(&self, endpoint: &str, budget: Duration) -> Result<()> {
+    pub async fn probe(&self, peer: &PeerAt, budget: Duration) -> Result<()> {
         let reply = self
             .call(
                 PeerMethod::Get,
-                endpoint,
+                peer,
                 INTERNAL_HEALTH_PATH,
                 PeerBody::Empty,
                 budget,
@@ -137,15 +136,15 @@ impl RemoteShards {
         answered(&reply, 204)
     }
 
-    /// The space of the data drive of the node at `endpoint`; `None` when it has no data directory.
+    /// The space of the data drive of `peer`; `None` when it has no data directory.
     ///
     /// # Errors
     /// [`Error::PeerRefused`], [`Error::Peer`], or [`Error::Malformed`] for an answer not in the drive form.
-    pub async fn drive(&self, endpoint: &str, budget: Duration) -> Result<Option<DriveSpace>> {
+    pub async fn drive(&self, peer: &PeerAt, budget: Duration) -> Result<Option<DriveSpace>> {
         let reply = self
             .call(
                 PeerMethod::Get,
-                endpoint,
+                peer,
                 INTERNAL_DRIVE_PATH,
                 PeerBody::Empty,
                 budget,
@@ -174,32 +173,18 @@ impl RemoteShards {
     async fn call(
         &self,
         method: PeerMethod,
-        endpoint: &str,
+        peer: &PeerAt,
         target: &str,
         body: PeerBody,
         budget: Duration,
     ) -> Result<PeerReply> {
-        let date = now();
-        let signature = sign(
-            self.secret.expose().as_bytes(),
-            &InternalRequest {
-                method: match method {
-                    PeerMethod::Put => "PUT",
-                    PeerMethod::Get => "GET",
-                    PeerMethod::Delete => "DELETE",
-                },
-                path: target,
-                date,
-                node: self.node.as_str(),
-            },
-        );
-        let headers = [
-            (INTERNAL_NODE_HEADER, self.node.as_str().to_owned()),
-            (INTERNAL_DATE_HEADER, date.to_string()),
-            (INTERNAL_SIGNATURE_HEADER, signature),
-        ];
-        let url = format!("{}://{endpoint}{target}", self.http.scheme());
-        Ok(self.http.send(method, &url, &headers, body, budget).await?)
+        // The certificate proves who calls; the header says who it claims to be, and the peer asks the one about the
+        // other.
+        let headers = [(INTERNAL_NODE_HEADER, self.node.as_str().to_owned())];
+        Ok(self
+            .http
+            .send(method, peer, target, &headers, body, budget)
+            .await?)
     }
 }
 
@@ -217,13 +202,4 @@ fn answered(reply: &PeerReply, expected: u16) -> Result<()> {
             status: reply.status(),
         })
     }
-}
-
-/// Seconds since the epoch by this node's clock; the peer judges the request's date against its own.
-fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|elapsed| i64::try_from(elapsed.as_secs()).ok())
-        .unwrap_or(i64::MAX)
 }

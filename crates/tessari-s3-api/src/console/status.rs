@@ -132,9 +132,9 @@ pub(super) async fn view(
     let (answering, drive) = if member.node.as_str() == this {
         (true, local)
     } else {
-        let drive = cluster.drive(&member.endpoint, budget).await;
+        let drive = cluster.drive(&member, budget).await;
         // A member that reported its drive answered; one with no data directory still answers its probe.
-        let answering = drive.is_some() || cluster.answers(&member.endpoint, budget).await;
+        let answering = drive.is_some() || cluster.answers(&member, budget).await;
         (answering, drive)
     };
     MemberView {

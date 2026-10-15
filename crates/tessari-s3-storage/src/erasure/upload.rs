@@ -15,7 +15,7 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio::task::JoinSet;
 
 use super::senders::{self, ShardShape};
-use crate::peers::{RemoteShards, ShardRef};
+use crate::peers::{PeerAt, RemoteShards, ShardRef};
 use crate::shards::ShardService;
 use crate::{Error, Result};
 
@@ -29,8 +29,8 @@ const ENCODER_STOPPED: Error = Error::InvalidShard {
 pub enum Destination {
     /// This node's drive.
     Local,
-    /// The peer whose internal surface is at this `host:port`.
-    Remote(String),
+    /// Another node, and where its internal surface answers.
+    Remote(PeerAt),
 }
 
 /// What one erasure upload writes and where.

@@ -142,7 +142,8 @@ pub(crate) fn cluster_settings(
         zone,
         heal_interval_secs,
         move_bytes_per_sec,
-        tls: internal_tls(get)?,
+        // A member speaks mutual TLS to its peers: the certificate is what proves which node it is.
+        tls: internal_tls(get)?.ok_or(Error::MissingConfig { key: TLS[0] })?,
     }))
 }
 

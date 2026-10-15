@@ -79,11 +79,7 @@ impl Storage {
     /// [`crate::Error::Peer`] when the peer client cannot be built.
     pub fn clustered(pool: MetaPool, data_dir: PathBuf, cluster: &ClusterSettings) -> Result<Self> {
         let mut storage = Self::new(pool.clone(), data_dir);
-        let peers = RemoteShards::new(
-            cluster.node.clone(),
-            cluster.secret.clone(),
-            cluster.tls.as_ref(),
-        )?;
+        let peers = RemoteShards::new(cluster.node.clone(), &cluster.tls)?;
         storage.cluster = storage.cluster.clone().with_peers(peers.clone());
         let writes = ErasureWrites::new(
             cluster,

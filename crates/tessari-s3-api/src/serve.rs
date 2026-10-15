@@ -1,6 +1,7 @@
 //! Serving a surface on a listener: in the clear, or over TLS where the handshake must complete before a request is
 //! read — each connection's handshake in its own tracked task under a deadline, so a slow client holds only itself.
-//! Handlers see the client's address as `ConnectInfo` either way. On shutdown the listener stops accepting and the
+//! Handlers see the client's address as `ConnectInfo` either way, and over TLS the certificate the client presented
+//! as [`PeerCertificate`]. On shutdown the listener stops accepting and the
 //! connections in flight finish.
 
 use std::future::Future;
@@ -18,6 +19,8 @@ use tessari_s3_constants::INTERNAL_TLS_HANDSHAKE_SECS;
 use tokio::net::TcpListener;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
+
+use crate::PeerCertificate;
 
 /// Serves `router` on `listener` until `shutdown` completes, over TLS when `tls` is given; `surface` names it in the
 /// log.
@@ -71,6 +74,13 @@ pub(crate) async fn serve(
                 tracing::warn!(surface, %peer, "a connection did not complete its TLS handshake");
                 return;
             };
+            let presented = stream
+                .get_ref()
+                .1
+                .peer_certificates()
+                .and_then(|chain| chain.first())
+                .map(|leaf| leaf.clone().into_owned());
+            let router = router.layer(axum::Extension(PeerCertificate(presented)));
             let connection = builder
                 .serve_connection_with_upgrades(
                     TokioIo::new(stream),

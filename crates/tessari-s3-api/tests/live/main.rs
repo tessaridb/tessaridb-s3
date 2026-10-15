@@ -10,6 +10,8 @@ mod access;
 mod access_crossing;
 mod access_probe;
 mod access_window;
+#[path = "../wire/authority.rs"]
+mod authority;
 mod buckets;
 mod cluster;
 mod cluster_staging;

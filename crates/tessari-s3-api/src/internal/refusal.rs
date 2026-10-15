@@ -8,8 +8,12 @@ use tessari_s3_storage::Error as StorageError;
 /// Why an internal request was not served.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Refusal {
-    /// No valid cluster signature.
-    Unauthorized,
+    /// No certificate speaks for the node the request names.
+    Unidentified,
+    /// The node is not an admitted member presenting this certificate.
+    NotAdmitted,
+    /// The cluster membership could not be read.
+    MembershipUnavailable,
     /// A malformed id, index or parameter, or a body that is not the declared length.
     Invalid(&'static str),
     /// No such shard here.
@@ -27,10 +31,20 @@ pub(super) enum Refusal {
 impl Refusal {
     const fn parts(self) -> (StatusCode, &'static str, &'static str) {
         match self {
-            Self::Unauthorized => (
+            Self::Unidentified => (
                 StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "the request is not signed by the cluster",
+                "unidentified",
+                "no certificate speaks for the node the request names",
+            ),
+            Self::NotAdmitted => (
+                StatusCode::FORBIDDEN,
+                "not_admitted",
+                "the node is not an admitted member of the cluster",
+            ),
+            Self::MembershipUnavailable => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "membership_unavailable",
+                "the cluster membership could not be read",
             ),
             Self::Invalid(reason) => (StatusCode::BAD_REQUEST, "invalid_request", reason),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found", "no such shard here"),

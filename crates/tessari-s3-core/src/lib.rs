@@ -8,7 +8,6 @@ pub mod console;
 pub mod dispatch;
 pub mod erasure;
 mod error;
-pub mod internal;
 pub mod lifecycle;
 pub mod media;
 pub mod multipart;
