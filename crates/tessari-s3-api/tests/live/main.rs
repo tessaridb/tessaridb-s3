@@ -64,6 +64,8 @@ mod oidc_provider;
 mod quota;
 mod quota_window;
 mod reclaim;
+mod region_drill;
+mod region_failover;
 mod regions;
 mod replication;
 mod replication_regions;

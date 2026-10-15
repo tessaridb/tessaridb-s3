@@ -6,6 +6,7 @@ mod authenticate;
 pub(crate) mod authorize;
 pub(crate) mod body;
 pub(crate) mod call;
+mod fence;
 mod handler;
 mod overload;
 mod query;

@@ -10,6 +10,9 @@ section records which TessariDB version its metadata runs on.
   Role's user, keeping its version id; `x-amz-replication-status` answers `PENDING`, `COMPLETED`, `FAILED` or
   `REPLICA`, and a replica is never sent on. A replicating bucket cannot suspend versioning. The console status
   reports the replication backlog.
+- Region failover: root fails a region over to another from the console and restores it, each under the next
+  epoch; a failed-over region refuses client writes (`ServiceUnavailable`) and still takes the replicas that catch it
+  up.
 - Regions: each region's object metadata (objects, uploads, the cluster, the queues) is kept in its own database
   `<database>_<region>`, buckets and identities in the shared one, so a region's database can be led by its own
   metadata nodes. A request for another region's bucket is answered `301 PermanentRedirect` with

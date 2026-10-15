@@ -128,6 +128,14 @@ impl ConsoleError {
         }
     }
 
+    pub(crate) const fn failed_over() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "region_failed_over",
+            message: "this region is failed over to another; write there",
+        }
+    }
+
     pub(crate) const fn unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,

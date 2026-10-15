@@ -12,6 +12,7 @@ use super::address::resolve;
 use super::authenticate::authenticate;
 use super::authorize::authorize_operation;
 use super::call::Call;
+use super::fence::writable;
 use super::query::decode_query;
 use super::response::{error_response, new_request_id, with_request_id};
 use crate::state::ApiState;
@@ -94,18 +95,19 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
             format!("{} is not implemented", spec.name),
         ));
     }
+    let replica = parts
+        .headers
+        .contains_key(crate::routes::objects::REPLICA_VERSION);
     authorize_operation(
         &state,
         spec.operation,
         &principal,
         &addressed,
         &parts.headers,
-        query.iter().any(|(name, _)| name == "versionId")
-            || parts
-                .headers
-                .contains_key(crate::routes::objects::REPLICA_VERSION),
+        query.iter().any(|(name, _)| name == "versionId") || replica,
     )
     .await?;
+    writable(&state, method, replica).await?;
     let call = Call {
         state: &state,
         addressed: &addressed,

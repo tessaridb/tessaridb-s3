@@ -92,6 +92,7 @@ pub(super) async fn create(
     } = json(&headers, &body, "expected name and reason")?;
     let why = reason(given, false)?;
     let name = bucket_name(&name)?;
+    super::regions::writable(&state).await?;
     let (space, creator) = match &principal {
         Principal::Root => (SpaceName::default_space(), None),
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
@@ -152,6 +153,7 @@ pub(super) async fn delete(
     let why = reason(given, true)?;
     let name = bucket_name(&bucket)?;
     on_bucket(&state, &principal, &name, Action::DeleteBucket).await?;
+    super::regions::writable(&state).await?;
     let deleted = state.storage().buckets().delete(&name).await?;
     let outcome = match deleted {
         Deleted::Deleted => "done",

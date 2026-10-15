@@ -17,6 +17,7 @@ pub mod notifications;
 pub mod objects;
 mod params;
 pub mod peers;
+pub mod regions;
 pub mod replication;
 mod schema;
 mod schema_queues;

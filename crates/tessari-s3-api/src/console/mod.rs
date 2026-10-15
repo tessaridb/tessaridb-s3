@@ -26,6 +26,7 @@ mod objects;
 mod oidc;
 mod page;
 mod quotas;
+mod regions;
 mod session;
 mod spaces;
 mod status;
@@ -261,6 +262,9 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/cluster/members/approve", post(members::approve))
         .route("/api/v1/cluster/members/token", post(members::token))
         .route("/api/v1/cluster/members/remove", post(members::remove))
+        .route("/api/v1/regions", get(regions::list))
+        .route("/api/v1/regions/failover", post(regions::fail_over))
+        .route("/api/v1/regions/restore", post(regions::restore))
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))

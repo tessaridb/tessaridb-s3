@@ -35,7 +35,7 @@ async fn serving(state: &ApiState) {
 }
 
 /// A versioned bucket made on `state`'s region, replicating every `logs/` key to `destination`.
-async fn bucket(state: &ApiState, name: &str) {
+pub(crate) async fn bucket(state: &ApiState, name: &str) {
     assert_eq!(
         call(state, "PUT", &format!("/{name}"), vec![], b"")
             .await
@@ -56,7 +56,7 @@ async fn bucket(state: &ApiState, name: &str) {
     );
 }
 
-async fn replicate(state: &ApiState, name: &str, destination: &str) {
+pub(crate) async fn replicate(state: &ApiState, name: &str, destination: &str) {
     let rule = configuration(destination, "").replace(
         "arn:aws:iam::000000000000:role/replication",
         "arn:aws:iam::000000000000:role/replicator",

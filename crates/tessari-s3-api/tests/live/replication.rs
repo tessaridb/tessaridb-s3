@@ -306,11 +306,16 @@ async fn a_version_its_rule_covers_is_pending_and_its_task_queued_in_the_same_co
 const REPLICA: &str = "x-tessaridb-replica-version-id";
 
 /// A version id this server issues for sequence `seq`.
-fn sequence_id(seq: u64, nonce: u64) -> String {
+pub(crate) fn sequence_id(seq: u64, nonce: u64) -> String {
     format!("{seq:016x}{nonce:016x}")
 }
 
-async fn replica_put(state: &tessari_s3_api::ApiState, path: &str, id: &str, bytes: &[u8]) -> Seen {
+pub(crate) async fn replica_put(
+    state: &tessari_s3_api::ApiState,
+    path: &str,
+    id: &str,
+    bytes: &[u8],
+) -> Seen {
     call_with(state, "PUT", path, vec![], vec![(REPLICA, id)], bytes).await
 }
 

@@ -201,6 +201,7 @@ pub(super) async fn delete(
     let why = reason(given, true)?;
     let bucket = bucket_name(&bucket)?;
     on_bucket(&state, &principal, &bucket, Action::WriteObject).await?;
+    super::regions::writable(&state).await?;
     let key = object_key(query.key.as_deref())?;
     let removed = state
         .storage()

@@ -48,6 +48,8 @@ use crate::Result;
 /// spaces existed are moved into the default space by [`apply`] (see [`fill_spaces`]).
 /// `s3_regions:<region>` holds the URL a region's S3 surface is reached at, as its nodes advertise it; a replicator
 /// sends a version to its destination bucket's region there.
+/// `region_failovers:<region>` records a region an operator failed over to another (`promoted`) under its epoch; a
+/// failed-over region refuses client writes until a restore, which takes the next epoch again.
 /// `spaces`, `users` (one space each), `access_keys` (the secret sealed, never plain) and `grants` (a user's access to
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
@@ -100,6 +102,8 @@ DEFINE TABLE IF NOT EXISTS console_logouts (after int REQUIRED);
 DEFINE TABLE IF NOT EXISTS oidc_logout_ids (seen int REQUIRED);
 ALTER TABLE oidc_logout_ids SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS s3_regions (endpoint string REQUIRED, seen datetime REQUIRED);
+DEFINE TABLE IF NOT EXISTS region_failovers (region string REQUIRED, epoch int REQUIRED, promoted string, \
+ reason string REQUIRED, actor string REQUIRED, at datetime REQUIRED);
 COMMIT;
 ";
 

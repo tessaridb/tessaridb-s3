@@ -1,5 +1,5 @@
 //! Privileged acts — issuing a key or an upload key, linking an identity, setting or removing a grant, setting a
-//! quota, deleting a bucket, staging, discarding or applying a layout — require that the operator authenticated within the last five minutes; an older session
+//! quota, deleting a bucket, staging, discarding or applying a layout, failing a region over or restoring it — require that the operator authenticated within the last five minutes; an older session
 //! is refused with `reauthentication_required` while ordinary reads go on. A key holder authenticates by signing in;
 //! a person through the provider, whose `auth_time` is what counts, and a fresh start asks the provider for `max_age`.
 
@@ -13,7 +13,7 @@ use crate::oidc_provider::{Provider, SUBJECT, Shape};
 use crate::users::user;
 
 /// Every privileged act, each sent with a body its handler would otherwise read.
-const PRIVILEGED: [(&str, &str, &str); 10] = [
+const PRIVILEGED: [(&str, &str, &str); 12] = [
     (
         "PUT",
         "/api/v1/cluster/layout/staged",
@@ -56,6 +56,16 @@ const PRIVILEGED: [(&str, &str, &str); 10] = [
         r#"{"max_bytes":1,"reason":"r"}"#,
     ),
     ("DELETE", "/api/v1/buckets/fresh-b", r#"{"reason":"r"}"#),
+    (
+        "POST",
+        "/api/v1/regions/failover",
+        r#"{"region":"us-east-1","promoted":"eu-west-1","reason":"r"}"#,
+    ),
+    (
+        "POST",
+        "/api/v1/regions/restore",
+        r#"{"region":"us-east-1","reason":"r"}"#,
+    ),
 ];
 
 fn reauthentication(seen: &Seen) -> bool {
@@ -82,13 +92,13 @@ async fn a_key_session_does_privileged_acts_only_within_five_minutes_of_signing_
     now.store(signed_at + 10, Ordering::Release);
     assert_eq!(
         each_privileged(&console, &token).await,
-        [false; 10],
+        [false; PRIVILEGED.len()],
         "fresh: every act reaches its own checks"
     );
     now.store(signed_at + 301, Ordering::Release);
     assert_eq!(
         each_privileged(&console, &token).await,
-        [true; 10],
+        [true; PRIVILEGED.len()],
         "stale: every act is refused for re-authentication"
     );
     // The session itself is still good for everything else.
@@ -100,7 +110,10 @@ async fn a_key_session_does_privileged_acts_only_within_five_minutes_of_signing_
     );
     // Signing in again is the re-authentication.
     let again = sign_in(&console).await;
-    assert_eq!(each_privileged(&console, &again).await, [false; 10]);
+    assert_eq!(
+        each_privileged(&console, &again).await,
+        [false; PRIVILEGED.len()]
+    );
 }
 
 #[tokio::test]
@@ -141,13 +154,22 @@ async fn a_persons_freshness_is_the_providers_auth_time_and_a_fresh_start_asks_f
     };
     // Authenticated at the provider an hour ago (its session reused): signed in, but not for privileged acts.
     let stale = person("code-stale", Shape::StaleAuth).await;
-    assert_eq!(each_privileged(&console, &stale).await, [true; 10]);
+    assert_eq!(
+        each_privileged(&console, &stale).await,
+        [true; PRIVILEGED.len()]
+    );
     // Saying nothing about when counts as long ago.
     let unknown = person("code-unknown", Shape::NoAuthTime).await;
-    assert_eq!(each_privileged(&console, &unknown).await, [true; 10]);
+    assert_eq!(
+        each_privileged(&console, &unknown).await,
+        [true; PRIVILEGED.len()]
+    );
     // Authenticated seconds ago: the acts reach their own checks.
     let fresh = person("code-fresh", Shape::Good).await;
-    assert_eq!(each_privileged(&console, &fresh).await, [false; 10]);
+    assert_eq!(
+        each_privileged(&console, &fresh).await,
+        [false; PRIVILEGED.len()]
+    );
     // The way to a fresh session: the start asks the provider for a recent authentication.
     let started = send(
         &console,

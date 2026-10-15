@@ -2,7 +2,7 @@
 //! published requests authenticate and reach the same answer.
 
 use tessari_s3_core::dispatch::{
-    CATALOG, DispatchRequest, Operation, Target, dispatch, is_implemented,
+    CATALOG, DispatchRequest, Method, Operation, Target, dispatch, is_implemented,
 };
 
 use crate::signer::{EMPTY_SHA256, Unsigned, sign};
@@ -58,29 +58,12 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
             header_names: spec.required_headers,
         })
         .map_or(spec.operation, |answering| answering.operation);
-        let (status, code) = if answering == Operation::DeleteObjects {
-            // Its handler refuses a body with neither Content-MD5 nor a checksum before reading the store.
-            (400, "InvalidRequest")
-        } else if matches!(
-            answering,
-            Operation::PutBucketVersioning
-                | Operation::PutBucketLifecycleConfiguration
-                | Operation::PutBucketNotificationConfiguration
-                | Operation::PutBucketReplication
-        ) {
-            // An empty body is not the configuration document: refused before reading the store.
-            (400, "MalformedXML")
-        } else if answering == Operation::CopyObject {
-            // `x-amz-copy-source: value` is not bucket/key: refused before reading the store.
-            (400, "InvalidArgument")
-        } else if matches!(
-            answering,
-            Operation::UploadPart
-                | Operation::UploadPartCopy
-                | Operation::AbortMultipartUpload
-                | Operation::ListParts
-                | Operation::CompleteMultipartUpload
-        ) {
+        let writes = !matches!(spec.method, Method::Get | Method::Head);
+        let (status, code) = if writes && is_implemented(answering) {
+            // A write first asks whether this region is failed over — a read of the unreachable metadata store, as
+            // `resident` does for a bucket's own operations — so it answers 503 before its handler's own checks.
+            (503, "ServiceUnavailable")
+        } else if answering == Operation::ListParts {
             // `uploadId=1` is not an id this server could have issued: refused before reading the store.
             (404, "NoSuchUpload")
         } else if is_implemented(answering) {

@@ -23,6 +23,7 @@ use crate::multipart::{MultipartService, TessariMultipart};
 use crate::notifications::{NotificationService, TessariNotifications};
 use crate::objects::{ObjectService, TessariObjects};
 use crate::peers::RemoteShards;
+use crate::regions::{RegionService, TessariRegions};
 use crate::replication::{ReplicationService, TessariReplication};
 use crate::shards::ShardService;
 use crate::spaces::{SpaceService, TessariSpaces};
@@ -199,6 +200,12 @@ impl Storage {
             TessariNotifications::new(self.regional.clone()),
             self.buckets.clone(),
         )
+    }
+
+    /// Which regions are failed over, and failing a region over or restoring it.
+    #[must_use]
+    pub fn regions(&self) -> RegionService {
+        RegionService::new(TessariRegions::new(self.pool.clone()))
     }
 
     /// Replication of this region's versions to their destination buckets.
