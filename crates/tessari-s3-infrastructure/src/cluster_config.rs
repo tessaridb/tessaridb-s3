@@ -1,0 +1,176 @@
+//! The cluster half of the configuration: read together or not at all, because a node with some of it would join a
+//! cluster it cannot serve.
+
+use tessari_s3_constants::{
+    CLUSTER_SECRET_MIN_LEN, DEFAULT_HEAL_INTERVAL_SECS, DEFAULT_MOVE_BYTES_PER_SEC,
+};
+use tessari_s3_types::{Code, NodeId, SecretKey, Zone};
+
+use crate::config::{ClusterSettings, parse_positive};
+use crate::tls::InternalTls;
+use crate::{Error, Result};
+
+/// Every variable of the cluster group but the code itself.
+const COMPANIONS: [&str; 5] = [
+    "TESSARIDB_S3_NODE_ID",
+    "TESSARIDB_S3_INTERNAL_LISTEN",
+    "TESSARIDB_S3_INTERNAL_ADVERTISE",
+    "TESSARIDB_S3_CLUSTER_SECRET",
+    "TESSARIDB_S3_DATA_DIR",
+];
+
+/// How this node takes part in membership: founding members admitted by id, and a join token offered at start.
+const MEMBERSHIP: [&str; 2] = ["TESSARIDB_S3_FOUNDING_MEMBERS", "TESSARIDB_S3_JOIN_TOKEN"];
+
+/// The internal surface's TLS files: certificate chain, private key, cluster authority.
+const TLS: [&str; 3] = [
+    "TESSARIDB_S3_INTERNAL_TLS_CERT",
+    "TESSARIDB_S3_INTERNAL_TLS_KEY",
+    "TESSARIDB_S3_INTERNAL_TLS_CA",
+];
+
+/// The three TLS files read, all of them or none: a node told some of them would otherwise serve in the clear
+/// while its operator believes it does not.
+fn internal_tls(get: &impl Fn(&str) -> Option<String>) -> Result<Option<InternalTls>> {
+    if TLS.iter().all(|key| get(key).is_none()) {
+        return Ok(None);
+    }
+    let mut read = Vec::with_capacity(TLS.len());
+    for key in TLS {
+        let path = get(key).ok_or(Error::MissingConfig { key })?;
+        read.push(
+            std::fs::read(path.trim()).map_err(|_| Error::InvalidConfig {
+                key,
+                reason: "not a readable file",
+            })?,
+        );
+    }
+    let mut files = read.into_iter();
+    match (files.next(), files.next(), files.next()) {
+        (Some(certificate), Some(key), Some(authority)) => {
+            Ok(Some(InternalTls::new(certificate, key, authority)))
+        }
+        _ => Err(Error::MissingConfig { key: TLS[0] }),
+    }
+}
+
+/// `TESSARIDB_S3_ERASURE` with `_NODE_ID`, `_INTERNAL_LISTEN`, `_INTERNAL_ADVERTISE`, `_CLUSTER_SECRET` and
+/// `TESSARIDB_S3_DATA_DIR`, and optionally `_ZONE`; no code means a node on its own, which may still have a data
+/// directory.
+pub(crate) fn cluster_settings(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<ClusterSettings>> {
+    let Some(code) = get("TESSARIDB_S3_ERASURE") else {
+        let stray = COMPANIONS
+            .iter()
+            .take(4)
+            .chain(TLS.iter())
+            .chain(MEMBERSHIP.iter())
+            .chain(std::iter::once(&"TESSARIDB_S3_ZONE"))
+            .any(|key| get(key).is_some());
+        return if stray {
+            Err(Error::InvalidConfig {
+                key: "TESSARIDB_S3_ERASURE",
+                reason: "cluster settings are set without the erasure code they belong to",
+            })
+        } else {
+            Ok(None)
+        };
+    };
+    let invalid = |key: &'static str, reason: &'static str| Error::InvalidConfig { key, reason };
+    let code = Code::parse(code.trim()).map_err(|_| {
+        invalid(
+            "TESSARIDB_S3_ERASURE",
+            "not k+m with k and m at least 1 and k+m at most 16",
+        )
+    })?;
+    for key in COMPANIONS {
+        if get(key).is_none() {
+            return Err(Error::MissingConfig { key });
+        }
+    }
+    let required = |key: &'static str| {
+        get(key)
+            .map(|value| value.trim().to_owned())
+            .ok_or(Error::MissingConfig { key })
+    };
+    let node = NodeId::new(&required("TESSARIDB_S3_NODE_ID")?).map_err(|_| {
+        invalid(
+            "TESSARIDB_S3_NODE_ID",
+            "1 to 63 lowercase letters, digits and inner hyphens",
+        )
+    })?;
+    let internal_listen = required("TESSARIDB_S3_INTERNAL_LISTEN")?
+        .parse()
+        .map_err(|_| invalid("TESSARIDB_S3_INTERNAL_LISTEN", "not an IP address and port"))?;
+    let internal_advertise = required("TESSARIDB_S3_INTERNAL_ADVERTISE")?;
+    let secret = required("TESSARIDB_S3_CLUSTER_SECRET")?;
+    if secret.len() < CLUSTER_SECRET_MIN_LEN {
+        return Err(invalid(
+            "TESSARIDB_S3_CLUSTER_SECRET",
+            "shorter than 32 bytes",
+        ));
+    }
+    let zone = get("TESSARIDB_S3_ZONE")
+        .map(|zone| {
+            Zone::new(zone.trim()).map_err(|_| {
+                invalid(
+                    "TESSARIDB_S3_ZONE",
+                    "1 to 32 lowercase letters, digits and inner hyphens",
+                )
+            })
+        })
+        .transpose()?;
+    let heal_interval_secs = parse_positive(
+        get("TESSARIDB_S3_HEAL_INTERVAL_SECS"),
+        "TESSARIDB_S3_HEAL_INTERVAL_SECS",
+    )?
+    .map_or(Ok(DEFAULT_HEAL_INTERVAL_SECS), |secs| {
+        u64::try_from(secs).map_err(|_| invalid("TESSARIDB_S3_HEAL_INTERVAL_SECS", "too large"))
+    })?;
+    let move_bytes_per_sec = match get("TESSARIDB_S3_MOVE_BYTES_PER_SEC") {
+        None => DEFAULT_MOVE_BYTES_PER_SEC,
+        Some(text) => text.trim().parse().map_err(|_| {
+            invalid(
+                "TESSARIDB_S3_MOVE_BYTES_PER_SEC",
+                "not a whole number of bytes",
+            )
+        })?,
+    };
+    Ok(Some(ClusterSettings {
+        node,
+        code,
+        internal_listen,
+        internal_advertise,
+        secret: SecretKey::new(secret),
+        zone,
+        heal_interval_secs,
+        move_bytes_per_sec,
+        // A member speaks mutual TLS to its peers: the certificate is what proves which node it is.
+        tls: internal_tls(get)?.ok_or(Error::MissingConfig { key: TLS[0] })?,
+        founding: founding(get(MEMBERSHIP[0]).as_deref())?,
+        join_token: get(MEMBERSHIP[1]).map(|token| SecretKey::new(token.trim().to_owned())),
+    }))
+}
+
+/// `TESSARIDB_S3_FOUNDING_MEMBERS`: node ids separated by commas; unset is none.
+fn founding(list: Option<&str>) -> Result<Vec<NodeId>> {
+    let Some(list) = list else {
+        return Ok(Vec::new());
+    };
+    list.split(',')
+        .map(|id| {
+            NodeId::new(id.trim()).map_err(|_| Error::InvalidConfig {
+                key: MEMBERSHIP[0],
+                reason: "node ids separated by commas",
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "cluster_membership_tests.rs"]
+mod membership_tests;
+#[cfg(test)]
+#[path = "cluster_config_tests.rs"]
+mod tests;

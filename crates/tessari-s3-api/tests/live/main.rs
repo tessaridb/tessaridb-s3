@@ -1,0 +1,423 @@
+//! The bucket operations end to end against a real TessariDB node.
+//!
+//! Needs `TESSARIDB_S3_TEST_META` (a node's wire `host:port`), `TESSARIDB_S3_TEST_META_USER` and
+//! `TESSARIDB_S3_TEST_META_PASSWORD`; each test works in its own fresh namespace. Without them every test is
+//! `ignored` — visible in the summary — and `cargo test -p tessari-s3-api --test live -- --ignored` runs them.
+
+#![cfg(test)]
+
+mod access;
+mod access_crossing;
+mod access_probe;
+mod access_window;
+#[path = "../wire/authority.rs"]
+mod authority;
+mod buckets;
+mod cluster;
+mod cluster_staging;
+mod complete;
+mod confined_account;
+mod console;
+mod console_admin;
+mod console_break_glass;
+mod console_explorer;
+mod console_fresh_auth;
+mod console_keys;
+mod console_layout;
+mod console_logout;
+mod console_media;
+mod console_members;
+mod console_oidc;
+mod console_quota;
+mod console_store;
+mod console_users;
+mod copy;
+mod copy_part;
+mod delete_many;
+mod erasure;
+mod erasure_heals;
+mod erasure_moves;
+mod erasure_pacing;
+mod erasure_reads;
+mod erasure_retires;
+mod identities;
+mod large;
+mod lifecycle;
+mod listing;
+mod media;
+mod members;
+mod meta_pool;
+mod metadata;
+mod multipart;
+mod namespaces;
+mod namespaces_dropped;
+mod no_bytes;
+mod notifications;
+mod notify_delivery;
+mod objects;
+#[path = "../wire/oidc_provider.rs"]
+#[allow(
+    dead_code,
+    reason = "shared with the wire tests; each binary uses part of it"
+)]
+mod oidc_provider;
+mod quota;
+mod quota_window;
+mod reclaim;
+mod region_drill;
+mod region_failover;
+mod regions;
+mod replication;
+mod replication_regions;
+mod replication_send;
+mod replication_tasks;
+#[path = "../wire/signer.rs"]
+#[allow(
+    dead_code,
+    reason = "shared with the wire tests; each binary uses part of it"
+)]
+mod signer;
+mod spaces;
+mod upload_keys;
+mod uploads;
+mod usage;
+mod users;
+mod users_sealed;
+mod versioning;
+mod versions_convert;
+mod versions_delete;
+mod versions_kept;
+mod versions_list;
+mod versions_read;
+
+use axum::body::{Body, to_bytes};
+use axum::http::Request;
+use tessari_s3_api::{ApiState, router};
+use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_storage::Storage;
+use tessari_s3_types::Timestamp;
+use tower::ServiceExt;
+
+pub(crate) const ACCESS_KEY: &str = "AKLIVETEST0000000001";
+pub(crate) const SECRET: &str = "live-test-secret-0123456789abcdef";
+/// Schema application, one test at a time.
+static SCHEMA_TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub(crate) const IGNORED: &str =
+    "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD";
+
+/// `node` admitted by its id and registered at `endpoint` in `zone`, as a member the operator approved would be.
+pub(crate) async fn joined(
+    storage: &Storage,
+    node: &tessari_s3_types::NodeId,
+    endpoint: &str,
+    zone: Option<&tessari_s3_types::Zone>,
+) {
+    storage
+        .members()
+        .approve(node, None, "live-test", "a member of the test cluster")
+        .await
+        .expect("approved");
+    let any =
+        tessari_s3_storage::members::Fingerprint::new(&"0".repeat(64)).expect("a fingerprint");
+    let registered = storage
+        .cluster()
+        .register(node, &any, endpoint, zone)
+        .await
+        .expect("answered");
+    assert!(
+        registered,
+        "{} registers as an approved member",
+        node.as_str()
+    );
+}
+
+/// A server state over a fresh namespace on the test node, schema applied, and a separate pool into the same
+/// namespace for a test that must plant a record directly. Large objects go to a fresh data directory that is
+/// created on first use.
+pub(crate) async fn fresh() -> (ApiState, MetaPool) {
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    (state, planter)
+}
+
+/// A directory of this test's own under the system temp dir; the test that inspects it removes it.
+pub(crate) fn scratch_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("tessari-s3-live-{}", uuid::Uuid::new_v4().simple()))
+}
+
+/// As [`fresh`], with the data directory chosen by the caller, which it gets back.
+pub(crate) async fn fresh_with(
+    data_dir: std::path::PathBuf,
+) -> (ApiState, MetaPool, std::path::PathBuf) {
+    fresh_at(test_node(), None, data_dir).await
+}
+
+/// The test node's wire address.
+pub(crate) fn test_node() -> String {
+    need("TESSARIDB_S3_TEST_META")
+}
+
+fn need(key: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| panic!("{key} is required for the live suite"))
+}
+
+/// As [`fresh_with`], with the metadata addresses (comma-separated) and replication chosen by the caller.
+pub(crate) async fn fresh_at(
+    meta_addresses: String,
+    replication: Option<&str>,
+    data_dir: std::path::PathBuf,
+) -> (ApiState, MetaPool, std::path::PathBuf) {
+    let config = live_config(meta_addresses, replication, &data_dir);
+    let storage = prepared(&config).await;
+    // Nearly everything a test plants is the region's: objects, queues, the cluster.
+    let planter = MetaPool::new(config.meta.clone())
+        .expect("pool")
+        .regional(&config.region)
+        .expect("the region's database");
+    (
+        ApiState::new(&config, ApiState::system_clock(), storage),
+        planter,
+        data_dir,
+    )
+}
+
+/// A server state and a console state over ONE storage in a fresh namespace on the test node: what an operator does
+/// through the console is what an S3 client then sees.
+pub(crate) async fn fresh_console() -> (ApiState, tessari_s3_api::ConsoleState) {
+    let (state, console, _) = fresh_console_with(scratch_dir()).await;
+    (state, console)
+}
+
+/// As [`fresh_console`], with the data directory chosen by the caller, which it gets back.
+pub(crate) async fn fresh_console_with(
+    data_dir: std::path::PathBuf,
+) -> (ApiState, tessari_s3_api::ConsoleState, std::path::PathBuf) {
+    let config = live_config(test_node(), None, &data_dir);
+    let storage = prepared(&config).await;
+    let console =
+        tessari_s3_api::ConsoleState::new(&config, ApiState::system_clock(), storage.clone())
+            .expect("built")
+            .expect("a console is configured");
+    (
+        ApiState::new(&config, ApiState::system_clock(), storage),
+        console,
+        data_dir,
+    )
+}
+
+/// The configuration of a node over a fresh namespace, removed when the test ends; its console configured too.
+pub(crate) fn live_config(
+    meta_addresses: String,
+    replication: Option<&str>,
+    data_dir: &std::path::Path,
+) -> S3Config {
+    let namespace = namespaces::name();
+    let mut vars = vec![
+        ("TESSARIDB_S3_ROOT_ACCESS_KEY", ACCESS_KEY.to_owned()),
+        ("TESSARIDB_S3_ROOT_SECRET_KEY", SECRET.to_owned()),
+        ("TESSARIDB_S3_META_ADDRESS", meta_addresses),
+        (
+            "TESSARIDB_S3_META_USER",
+            need("TESSARIDB_S3_TEST_META_USER"),
+        ),
+        (
+            "TESSARIDB_S3_META_PASSWORD",
+            need("TESSARIDB_S3_TEST_META_PASSWORD"),
+        ),
+        ("TESSARIDB_S3_META_NAMESPACE", namespace),
+        ("TESSARIDB_S3_DATA_DIR", data_dir.display().to_string()),
+        // A queued file is reclaimable at once, so a test drives reclamation by calling a pass.
+        ("TESSARIDB_S3_RECLAIM_GRACE_SECS", "0".to_owned()),
+        ("TESSARIDB_S3_CONSOLE_LISTEN", "127.0.0.1:9101".to_owned()),
+        // The live suite's own root key for sealing user access-key secrets; it seals nothing outside the test node.
+        ("TESSARIDB_S3_IAM_KEY", "7e".repeat(32)),
+        // The one destination bucket notifications may name; nothing in the suite delivers to it.
+        (
+            "TESSARIDB_S3_NOTIFY_TARGETS",
+            "hooks=webhook:http://127.0.0.1:9/hooks".to_owned(),
+        ),
+    ];
+    if let Some(replication) = replication {
+        vars.push(("TESSARIDB_S3_META_REPLICATION", replication.to_owned()));
+    }
+    let config =
+        S3Config::from_lookup(|key| vars.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()))
+            .expect("live configuration");
+    namespaces::removed_at_end(&config.meta);
+    config
+}
+
+/// The account the server signs in as for `config`'s namespace: created by the test node's owner as an editor of that
+/// one namespace — never the owner — the way an operator sets a deployment up. Its password is derived from the
+/// namespace, so every node of one test signs in alike; it guards nothing outside the throwaway test node.
+pub(crate) async fn confined(
+    config: &S3Config,
+) -> tessari_s3_infrastructure::tessaridb::MetaSettings {
+    let owner = MetaPool::new(config.meta.clone()).expect("pool");
+    let (namespace, database) = owner.scope();
+    let (namespace, database) = (namespace.to_owned(), database.to_owned());
+    let user = format!("svc_{namespace}");
+    let password = format!("svc_{namespace}_password");
+    owner
+        .run_unscoped(&format!(
+            "DEFINE NAMESPACE IF NOT EXISTS {namespace} {} ACKNOWLEDGE MAJORITY OR WEAKER; \
+             USE NAMESPACE {namespace}; DEFINE DATABASE IF NOT EXISTS {database};",
+            owner.replication().clause()
+        ))
+        .await
+        .expect("the owner declares the tenancy");
+    // 0.33.2 takes the password as text and refuses a parameter there; this one is built from the namespace, which
+    // is checked to `[a-z0-9_]`, so it can carry no quote.
+    owner
+        .run(
+            &format!(
+                "DEFINE USER IF NOT EXISTS {user} ON NAMESPACE {namespace} ROLE editor PASSWORD '{password}';"
+            ),
+            Vec::new(),
+        )
+        .await
+        .expect("the owner declares the server's account");
+    let mut settings = config.meta.clone();
+    settings.user = user;
+    settings.password = tessari_s3_types::SecretKey::new(password);
+    settings
+}
+
+/// The storage `config` describes, signed in as its [`confined`] account, schema applied.
+pub(crate) async fn prepared(config: &S3Config) -> Storage {
+    // Containment, not a fix (Q-S3-2): see below; declaring the account writes the same store-wide catalog.
+    let turn = SCHEMA_TURN.lock().await;
+    let account = confined(config).await;
+    drop(turn);
+    let storage = Storage::new(
+        MetaPool::new(account).expect("pool"),
+        &config.region,
+        config.data_dir.clone(),
+    )
+    .expect("storage")
+    .with_iam_key(config.iam_key.clone())
+    .with_reclaim_grace(config.reclaim_grace_secs);
+    // Containment, not a fix (Q-S3-2): concurrent schema applies in different namespaces conflict on one store-wide
+    // catalog record, and thirty tests starting at once exhaust the bounded retry. The tests are not about
+    // concurrent start-up, so their setup takes turns; each still gets its own namespace.
+    let _turn = SCHEMA_TURN.lock().await;
+    storage
+        .prepare()
+        .await
+        .expect("schema applies on the test node");
+    storage
+}
+
+/// What a client sees.
+pub(crate) struct Seen {
+    pub(crate) status: u16,
+    pub(crate) headers: axum::http::HeaderMap,
+    pub(crate) code: Option<String>,
+    pub(crate) body: String,
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// `YYYYMMDDTHHMMSSZ` for now.
+pub(crate) fn amz_now_for_tests() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_secs()).expect("seconds fit"))
+        .expect("after the epoch");
+    let iso = Timestamp { seconds, nanos: 0 }.iso8601_millis();
+    format!(
+        "{}{}{}T{}{}{}Z",
+        &iso[0..4],
+        &iso[5..7],
+        &iso[8..10],
+        &iso[11..13],
+        &iso[14..16],
+        &iso[17..19]
+    )
+}
+
+/// Signs and sends one request carrying `body`, declared by its SHA-256.
+pub(crate) async fn call(
+    state: &ApiState,
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    body: &[u8],
+) -> Seen {
+    call_with(state, method, path, query, Vec::new(), body).await
+}
+
+/// As [`call`], with extra headers that are signed (as every `x-amz-*` header must be).
+pub(crate) async fn call_with(
+    state: &ApiState,
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Seen {
+    call_as(
+        state,
+        (ACCESS_KEY, SECRET),
+        method,
+        path,
+        query,
+        headers,
+        body,
+    )
+    .await
+}
+
+/// As [`call_with`], signed with `credential` (access key, secret) rather than the root credential.
+pub(crate) async fn call_as(
+    state: &ApiState,
+    credential: (&str, &str),
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Seen {
+    let (access_key, secret) = credential;
+    let amz_date = amz_now_for_tests();
+    let unsigned = signer::Unsigned {
+        method,
+        host: "localhost:9100",
+        path,
+        query,
+        headers,
+        access_key,
+        secret,
+        region: state.region(),
+        amz_date: &amz_date,
+    };
+    let (target, mut headers) = signer::sign_with_body(&unsigned, body);
+    headers.push(("content-length".to_owned(), body.len().to_string()));
+    let mut builder = Request::builder().method(method).uri(target);
+    for (name, value) in &headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    let request = builder.body(Body::from(body.to_vec())).expect("request");
+    let response = router(state.clone())
+        .oneshot(request)
+        .await
+        .expect("infallible router");
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let bytes = to_bytes(response.into_body(), 64 << 20)
+        .await
+        .map(|bytes| bytes.to_vec())
+        .unwrap_or_default();
+    let body = String::from_utf8_lossy(&bytes).into_owned();
+    let code = body
+        .split_once("<Code>")
+        .and_then(|(_, rest)| rest.split_once("</Code>"))
+        .map(|(c, _)| c.to_owned());
+    Seen {
+        status,
+        headers,
+        code,
+        body,
+        bytes,
+    }
+}

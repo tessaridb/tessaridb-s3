@@ -1,0 +1,26 @@
+[package]
+name = "tessari-s3-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+tessari-s3-types.workspace = true
+tessari-s3-constants.workspace = true
+thiserror.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+md-5.workspace = true
+sha1.workspace = true
+crc-fast.workspace = true
+base64.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+reed-solomon-simd.workspace = true
+blake3.workspace = true
+siphasher.workspace = true
+
+[lints]
+workspace = true

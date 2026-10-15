@@ -1,0 +1,205 @@
+//! Users as the rest of the server sees them, what creating one takes, and what issuing or resolving a key answers.
+
+use tessari_s3_core::authz::{Role, SpaceName, UserName};
+use tessari_s3_types::{BucketName, ObjectKey, SecretKey, Timestamp};
+
+use super::entity::{AccessKeyEntity, UserEntity};
+use super::sealer::ScopeBinding;
+use crate::{Error, Result};
+
+/// How a role is stored.
+pub(crate) const fn role_text(role: Role) -> &'static str {
+    match role {
+        Role::SpaceAdmin => "admin",
+        Role::Member => "member",
+    }
+}
+
+/// One user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct User {
+    /// Its name.
+    pub name: UserName,
+    /// The space it belongs to.
+    pub space: SpaceName,
+    /// Its role in that space.
+    pub role: Role,
+    /// Whether a member may create buckets in the space.
+    pub create_buckets: bool,
+    /// Store-wide: every space, users, quotas.
+    pub operator: bool,
+    /// Store-wide: the cluster's members, drives and healing.
+    pub cluster_viewer: bool,
+    /// A disabled user's keys resolve to nothing.
+    pub disabled: bool,
+    /// When it was created.
+    pub created: Timestamp,
+}
+
+/// What creating a user takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewUser {
+    /// Its name, unique across the store.
+    pub name: UserName,
+    /// The space it joins; it must exist.
+    pub space: SpaceName,
+    /// Its role there.
+    pub role: Role,
+    /// Whether a member may create buckets in the space.
+    pub create_buckets: bool,
+    /// Store-wide operator.
+    pub operator: bool,
+    /// Store-wide cluster viewer.
+    pub cluster_viewer: bool,
+}
+
+/// A key just issued: the only time its secret is shown. Not `Clone`: every copy of the secret is a deliberate act.
+#[derive(Debug)]
+pub struct IssuedKey {
+    /// The access key id, `TS` and 18 more characters.
+    pub access_key_id: String,
+    /// The secret, 40 characters; stored only sealed.
+    pub secret: SecretKey,
+}
+
+/// What a one-key credential may do: upload one key of one bucket, until it expires.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyScope {
+    /// The bucket it may write.
+    pub bucket: BucketName,
+    /// The one key it may write.
+    pub key: ObjectKey,
+    /// When it stops working, in whole seconds since the epoch.
+    pub expires: i64,
+}
+
+impl KeyScope {
+    /// The scope as bound into the sealed secret's associated data.
+    pub(crate) fn binding(&self) -> ScopeBinding<'_> {
+        ScopeBinding {
+            bucket: self.bucket.as_str(),
+            key: self.key.as_str(),
+            expires: self.expires,
+        }
+    }
+}
+
+/// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
+pub(crate) fn scope_of(key: &AccessKeyEntity) -> Result<Option<KeyScope>> {
+    scope_from(
+        key.scope_bucket.as_ref(),
+        key.scope_key.as_ref(),
+        key.expires,
+    )
+}
+
+/// A scope from its three stored fields, under the same all-or-none rule as [`scope_of`].
+pub(crate) fn scope_from(
+    bucket: Option<&String>,
+    key: Option<&String>,
+    expires: Option<(i64, u32)>,
+) -> Result<Option<KeyScope>> {
+    let malformed = |reason| Error::Malformed {
+        record: "access key",
+        reason,
+    };
+    match (bucket, key, expires) {
+        (None, None, None) => Ok(None),
+        (Some(bucket), Some(object), Some((expires, _))) => Ok(Some(KeyScope {
+            bucket: BucketName::new(bucket).map_err(|_| malformed("scope_bucket"))?,
+            key: ObjectKey::new(object).map_err(|_| malformed("scope_key"))?,
+            expires,
+        })),
+        _ => Err(malformed(
+            "a scope needs scope_bucket, scope_key and expires together",
+        )),
+    }
+}
+
+/// The token a console form carries so that submitting it twice issues one key, not two: 16 to 64 characters of
+/// ASCII letters, digits and `-` (a UUID fits).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueToken(String);
+
+impl IssueToken {
+    /// The token `text` spells; `None` for any other shape.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let fits = (16..=64).contains(&text.len())
+            && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        fits.then(|| Self(text.to_owned()))
+    }
+
+    /// The token as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// What issuing a key under a token ended in.
+#[derive(Debug)]
+pub enum IssuedOnce {
+    /// A new key; its secret is in this answer and nowhere else.
+    Issued(IssuedKey),
+    /// The token already issued this user a key: its id, and no secret.
+    AlreadyIssued(String),
+    /// The token issued a key to another user; nothing was issued.
+    TokenReused,
+    /// There is no such user.
+    NoSuchUser,
+}
+
+/// One of a user's keys as a listing shows it: never its secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedKey {
+    /// The access key id.
+    pub access_key_id: String,
+    /// When it was issued.
+    pub created: Timestamp,
+    /// A disabled key resolves to nothing.
+    pub disabled: bool,
+    /// A one-key credential's scope; `None` for a full key.
+    pub scope: Option<KeyScope>,
+}
+
+/// A live key's user and secret, for verifying a request it signed. Not `Clone`, for the same reason.
+#[derive(Debug)]
+pub struct Resolved {
+    /// The user holding the key — for a one-key credential, the user who issued it.
+    pub user: User,
+    /// The key's secret.
+    pub secret: SecretKey,
+    /// A one-key credential's scope; `None` for a user's full key.
+    pub scope: Option<KeyScope>,
+}
+
+impl TryFrom<UserEntity> for User {
+    type Error = Error;
+
+    fn try_from(entity: UserEntity) -> Result<Self> {
+        let malformed = |reason| Error::Malformed {
+            record: "user",
+            reason,
+        };
+        let name = UserName::new(&entity.name).ok_or(malformed("name is not a valid user name"))?;
+        let space = SpaceName::new(&entity.space_name)
+            .ok_or(malformed("space_name is not a valid space name"))?;
+        let role = match entity.space_role.as_str() {
+            "admin" => Role::SpaceAdmin,
+            "member" => Role::Member,
+            _ => return Err(malformed("space_role")),
+        };
+        let (seconds, nanos) = entity.created;
+        Ok(Self {
+            name,
+            space,
+            role,
+            create_buckets: entity.create_buckets,
+            operator: entity.operator,
+            cluster_viewer: entity.cluster_viewer,
+            disabled: entity.disabled,
+            created: Timestamp { seconds, nanos },
+        })
+    }
+}

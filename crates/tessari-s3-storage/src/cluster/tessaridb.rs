@@ -1,0 +1,231 @@
+//! Topology in TessariDB: `s3_nodes:<node id>` per node, `layouts:<version>` per layout, `layout_current:'cluster'`
+//! naming the version new objects are written under and `layout_staged:'cluster'` the change an operator proposes;
+//! every value is bound.
+
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
+
+use super::entity::{LayoutEntity, NodeEntity, StagedEntity};
+use super::repository::{Applied, ClusterRepository, Proposed};
+use crate::answers::first_record;
+use crate::{Error, Result};
+
+/// The TessariDB topology repository.
+#[derive(Clone)]
+pub struct TessariCluster {
+    pool: MetaPool,
+}
+
+impl TessariCluster {
+    /// A repository over `pool`.
+    #[must_use]
+    pub const fn new(pool: MetaPool) -> Self {
+        Self { pool }
+    }
+}
+
+/// Every record of a single-statement read.
+fn records(answers: Vec<Answer>) -> Result<Vec<Value>> {
+    match answers.into_iter().next() {
+        Some(Answer::Records { records, .. }) => {
+            Ok(records.into_iter().map(|(_, value)| value).collect())
+        }
+        Some(Answer::Value {
+            value: Value::None, ..
+        })
+        | Some(Answer::Done) => Ok(Vec::new()),
+        Some(Answer::Value { value, .. }) => Ok(vec![value]),
+        _ => Err(Error::Malformed {
+            record: "cluster",
+            reason: "unexpected answer kind",
+        }),
+    }
+}
+
+impl ClusterRepository for TessariCluster {
+    async fn register(
+        &self,
+        node: &str,
+        fingerprint: &str,
+        endpoint: &str,
+        zone: Option<&str>,
+    ) -> Result<bool> {
+        let parameters = vec![
+            ("node".to_owned(), Value::String(node.to_owned())),
+            (
+                "fingerprint".to_owned(),
+                Value::String(fingerprint.to_owned()),
+            ),
+            ("endpoint".to_owned(), Value::String(endpoint.to_owned())),
+            (
+                "zone".to_owned(),
+                zone.map_or(Value::None, |zone| Value::String(zone.to_owned())),
+            ),
+        ];
+        // The member record is written to, conditioned on admitting this node, in the registration's transaction: an
+        // unknown node (`NoSuchRecord`) or one not admitted (`ConditionNotMet`), both class `conflict`, writes nothing,
+        // and a removal racing it writes the same registration record, so one of the two gives way.
+        let script = "BEGIN; \
+             UPDATE s3_members:$node SET state = state WHERE state = 'approved' \
+             AND (token_digest ?? '') = '' AND (fingerprint ?? $fingerprint) = $fingerprint; \
+             UPSERT s3_nodes:$node SET node = $node, endpoint = $endpoint, zone = $zone, seen = time::now(); \
+             COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn nodes(&self) -> Result<Vec<NodeEntity>> {
+        // 256: the most nodes this server reads a cluster as; a layout uses at most sixteen of them.
+        let answers = self
+            .pool
+            .run(
+                "SELECT node, endpoint, zone FROM s3_nodes ORDER BY node LIMIT 256;",
+                Vec::new(),
+            )
+            .await?;
+        records(answers)?
+            .iter()
+            .map(NodeEntity::from_value)
+            .collect()
+    }
+
+    async fn current(&self) -> Result<Option<i64>> {
+        let answers = self
+            .pool
+            .run(
+                "SELECT version FROM ONLY layout_current:'cluster';",
+                Vec::new(),
+            )
+            .await?;
+        let Some(record) = first_record(answers.into_iter().next())? else {
+            return Ok(None);
+        };
+        match record {
+            Value::Object(fields) => match fields.get("version") {
+                Some(Value::Number(Number::Integer(version))) => Ok(Some(*version)),
+                _ => Err(Error::Malformed {
+                    record: "layout_current",
+                    reason: "version",
+                }),
+            },
+            _ => Err(Error::Malformed {
+                record: "layout_current",
+                reason: "not an object",
+            }),
+        }
+    }
+
+    async fn layout(&self, version: i64) -> Result<Option<LayoutEntity>> {
+        let parameters = vec![(
+            "version".to_owned(),
+            Value::Number(Number::Integer(version)),
+        )];
+        let answers = self
+            .pool
+            .run("SELECT * FROM ONLY layouts:$version;", parameters)
+            .await?;
+        first_record(answers.into_iter().next())?
+            .as_ref()
+            .map(LayoutEntity::from_value)
+            .transpose()
+    }
+
+    async fn propose(&self, layout: &LayoutEntity) -> Result<Proposed> {
+        let parameters = vec![
+            (
+                "version".to_owned(),
+                Value::Number(Number::Integer(layout.version)),
+            ),
+            (
+                "data".to_owned(),
+                Value::Number(Number::Integer(layout.data)),
+            ),
+            (
+                "parity".to_owned(),
+                Value::Number(Number::Integer(layout.parity)),
+            ),
+            ("sets".to_owned(), layout.sets_value()),
+        ];
+        // One transaction: the first layout never exists without the pointer naming it, nor the pointer without it.
+        let script = "BEGIN; CREATE layouts:$version = { version: $version, data: $data, parity: $parity, \
+                      sets: $sets, created: time::now() }; CREATE layout_current:'cluster' = { version: $version }; \
+                      COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(Proposed::Created),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(Proposed::Exists),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn staged(&self) -> Result<Option<StagedEntity>> {
+        let answers = self
+            .pool
+            .run(
+                "SELECT id, base, sets FROM ONLY layout_staged:'cluster';",
+                Vec::new(),
+            )
+            .await?;
+        first_record(answers.into_iter().next())?
+            .as_ref()
+            .map(StagedEntity::from_value)
+            .transpose()
+    }
+
+    async fn stage(&self, staged: &StagedEntity) -> Result<()> {
+        let parameters = vec![
+            ("id".to_owned(), Value::String(staged.id.clone())),
+            (
+                "base".to_owned(),
+                Value::Number(Number::Integer(staged.base)),
+            ),
+            ("sets".to_owned(), staged.sets_value()),
+        ];
+        self.pool
+            .run(
+                "UPSERT layout_staged:'cluster' SET id = $id, base = $base, sets = $sets, \
+                 staged = time::now();",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn unstage(&self) -> Result<()> {
+        self.pool
+            .run("DELETE layout_staged:'cluster';", Vec::new())
+            .await?;
+        Ok(())
+    }
+
+    async fn apply(&self, base: i64, id: &str, layout: &LayoutEntity) -> Result<Applied> {
+        let parameters = vec![
+            ("base".to_owned(), Value::Number(Number::Integer(base))),
+            ("id".to_owned(), Value::String(id.to_owned())),
+            (
+                "version".to_owned(),
+                Value::Number(Number::Integer(layout.version)),
+            ),
+            (
+                "data".to_owned(),
+                Value::Number(Number::Integer(layout.data)),
+            ),
+            (
+                "parity".to_owned(),
+                Value::Number(Number::Integer(layout.parity)),
+            ),
+            ("sets".to_owned(), layout.sets_value()),
+        ];
+        // Both conditions are compare-and-set: either one failing discards the whole transaction.
+        let script = "BEGIN; UPDATE layout_current:'cluster' SET version = $version WHERE version = $base; \
+                      UPDATE layout_staged:'cluster' SET id = $id WHERE id = $id; \
+                      CREATE layouts:$version = { version: $version, data: $data, parity: $parity, sets: $sets, \
+                      created: time::now() }; DELETE layout_staged:'cluster'; COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(Applied::Applied),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(Applied::Refused),
+            Err(error) => Err(error.into()),
+        }
+    }
+}

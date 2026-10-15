@@ -1,0 +1,13 @@
+# How the gates are run here, by the same names the sibling workspaces use.
+#
+# `cargo t` is the per-wave test command: every lib and integration test and no
+# doc examples. `cargo tdoc` runs the doc examples only; run it when a goal
+# closes or a doc example changed. `cargo lint` is the full clippy gate.
+#
+# Run the gates in one batch at the end of a wave (`cargo fmt --all --check`,
+# `cargo t`, `cargo lint`) so the compile modes do not evict each other's cache
+# step by step.
+[alias]
+t = "test --workspace --tests"
+tdoc = "test --workspace --doc"
+lint = "clippy --workspace --all-targets --all-features -- -D warnings"

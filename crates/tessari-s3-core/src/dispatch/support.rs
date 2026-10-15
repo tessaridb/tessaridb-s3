@@ -1,0 +1,51 @@
+//! Which operations this server implements. Every other catalog operation is answered `NotImplemented` (501).
+
+use super::catalog::Operation;
+
+/// Operations with a handler; every other catalog operation is refused with 501.
+const IMPLEMENTED: &[Operation] = &[
+    Operation::AbortMultipartUpload,
+    Operation::CompleteMultipartUpload,
+    Operation::CopyObject,
+    Operation::CreateBucket,
+    Operation::CreateMultipartUpload,
+    Operation::DeleteBucket,
+    Operation::DeleteBucketLifecycle,
+    Operation::DeleteBucketReplication,
+    Operation::DeleteObject,
+    Operation::DeleteObjects,
+    Operation::GetBucketLifecycleConfiguration,
+    Operation::GetBucketLocation,
+    Operation::GetBucketNotificationConfiguration,
+    Operation::GetBucketReplication,
+    Operation::GetBucketVersioning,
+    Operation::GetObject,
+    Operation::GetObjectTagging,
+    Operation::HeadBucket,
+    Operation::HeadObject,
+    Operation::ListBuckets,
+    Operation::ListMultipartUploads,
+    Operation::ListObjectVersions,
+    Operation::ListObjects,
+    Operation::ListObjectsV2,
+    Operation::ListParts,
+    Operation::PutBucketLifecycleConfiguration,
+    Operation::PutBucketNotificationConfiguration,
+    Operation::PutBucketReplication,
+    Operation::PutBucketVersioning,
+    Operation::PutObject,
+    Operation::UploadPart,
+    Operation::UploadPartCopy,
+];
+
+/// The operations with a handler, in catalog order.
+#[must_use]
+pub const fn implemented() -> &'static [Operation] {
+    IMPLEMENTED
+}
+
+/// Whether `operation` has a handler; `false` means the request is answered `NotImplemented`.
+#[must_use]
+pub fn is_implemented(operation: Operation) -> bool {
+    IMPLEMENTED.contains(&operation)
+}

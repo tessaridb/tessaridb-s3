@@ -1,0 +1,22 @@
+//! The S3 object model as rules and use cases, with no I/O: what a bucket, an object, a version and a multipart upload
+//! may be, and what each operation does to them.
+
+pub mod auth;
+pub mod authz;
+pub mod buckets;
+pub mod console;
+pub mod dispatch;
+pub mod erasure;
+mod error;
+pub mod lifecycle;
+pub mod media;
+pub mod multipart;
+pub mod notification;
+pub mod objects;
+pub mod quota;
+#[cfg(test)]
+mod quota_tests;
+pub mod replication;
+pub mod versioning;
+
+pub use error::{Error, Result};

@@ -1,0 +1,303 @@
+//! Users, access keys and grants in TessariDB: `users:<name>`, `access_keys:<access key id>` and
+//! `grants:<user>/<bucket>` (neither name may hold a `/`); every value is bound.
+
+use tessari_s3_core::authz::{Access, UserName, Visible};
+use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, RefusalClass, Value};
+use tessari_s3_types::BucketName;
+
+use super::entity::{AccessKeyEntity, GrantEntity, IssueEntity, KeyListedEntity, UserEntity};
+use super::model::{IssueToken, KeyScope, NewUser, role_text};
+use super::repository::{Inserted, UserRepository};
+use super::sealer::Sealed;
+use crate::answers::{all_records, first_record};
+use crate::{Error, Result};
+
+/// The TessariDB user repository.
+#[derive(Clone)]
+pub struct TessariUsers {
+    pool: MetaPool,
+}
+
+impl TessariUsers {
+    /// A repository over `pool`.
+    #[must_use]
+    pub const fn new(pool: MetaPool) -> Self {
+        Self { pool }
+    }
+
+    /// The first record a single-statement script answers, if any.
+    async fn one(&self, script: &str, parameters: Vec<(String, Value)>) -> Result<Option<Value>> {
+        let answers = self.pool.run(script, parameters).await?;
+        first_record(answers.into_iter().next())
+    }
+
+    /// Every record a single-statement read answers.
+    async fn all(
+        &self,
+        script: &str,
+        parameters: Vec<(String, Value)>,
+        record: &'static str,
+    ) -> Result<Vec<Value>> {
+        let answers = self.pool.run(script, parameters).await?;
+        all_records(answers.into_iter().next(), record)
+    }
+}
+
+fn text(name: &str, value: &str) -> (String, Value) {
+    (name.to_owned(), Value::String(value.to_owned()))
+}
+
+fn flag(name: &str, value: bool) -> (String, Value) {
+    (name.to_owned(), Value::Bool(value))
+}
+
+/// A new key record's values: its id, holder and sealed secret.
+fn key_parameters(id: &str, user: &UserName, sealed: &Sealed) -> Vec<(String, Value)> {
+    vec![
+        text("id", id),
+        text("user", user.as_str()),
+        ("secret".to_owned(), Value::Bytes(sealed.ciphertext.clone())),
+        ("nonce".to_owned(), Value::Bytes(sealed.nonce.clone())),
+        text("kek_id", &sealed.kek_id),
+        text("algorithm", &sealed.algorithm),
+    ]
+}
+
+fn grant_id(user: &UserName, bucket: &BucketName) -> (String, Value) {
+    text("id", &format!("{}/{}", user.as_str(), bucket.as_str()))
+}
+
+impl UserRepository for TessariUsers {
+    async fn insert(&self, user: &NewUser) -> Result<Inserted> {
+        let parameters = vec![
+            text("name", user.name.as_str()),
+            text("space", user.space.as_str()),
+            text("role", role_text(user.role)),
+            flag("create_buckets", user.create_buckets),
+            flag("operator", user.operator),
+            flag("cluster_viewer", user.cluster_viewer),
+        ];
+        let script = "CREATE users:$name = { name: $name, space_name: $space, space_role: $role, \
+                      create_buckets: $create_buckets, operator: $operator, cluster_viewer: $cluster_viewer, \
+                      disabled: false, created: time::now() } RETURN AFTER;";
+        match self.one(script, parameters).await {
+            Ok(Some(value)) => Ok(Inserted::Created(UserEntity::from_value(&value)?)),
+            Ok(None) => Err(Error::Malformed {
+                record: "user",
+                reason: "CREATE answered no record",
+            }),
+            Err(Error::Meta(error)) if error.is_class(RefusalClass::Conflict) => {
+                Ok(Inserted::Exists)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn get(&self, name: &UserName) -> Result<Option<UserEntity>> {
+        self.one(
+            "SELECT * FROM ONLY users:$name;",
+            vec![text("name", name.as_str())],
+        )
+        .await?
+        .map(|value| UserEntity::from_value(&value))
+        .transpose()
+    }
+
+    async fn list(&self, visible: &Visible) -> Result<Vec<UserEntity>> {
+        let records = match visible {
+            Visible::All => self.all("SELECT * FROM users;", Vec::new(), "user").await?,
+            Visible::Space(space) => {
+                self.all(
+                    "SELECT * FROM users WHERE space_name = $space USING INDEX by_user_space;",
+                    vec![text("space", space.as_str())],
+                    "user",
+                )
+                .await?
+            }
+            // A member administers nobody; what it can see of the users is itself.
+            Visible::Reachable { space, user, .. } => {
+                self.all(
+                    "SELECT * FROM users WHERE space_name = $space AND name = $user USING INDEX by_user_space;",
+                    vec![text("space", space.as_str()), text("user", user)],
+                    "user",
+                )
+                .await?
+            }
+        };
+        records.iter().map(UserEntity::from_value).collect()
+    }
+
+    async fn set_disabled(&self, name: &UserName, disabled: bool) -> Result<()> {
+        let parameters = vec![text("name", name.as_str()), flag("disabled", disabled)];
+        self.pool
+            .run("UPDATE users:$name SET disabled = $disabled;", parameters)
+            .await?;
+        Ok(())
+    }
+
+    async fn insert_key(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        scope: Option<&KeyScope>,
+    ) -> Result<bool> {
+        let mut parameters = key_parameters(id, user, sealed);
+        let script = match scope {
+            None => {
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now() };"
+            }
+            Some(scope) => {
+                parameters.extend([
+                    text("scope_bucket", scope.bucket.as_str()),
+                    text("scope_key", scope.key.as_str()),
+                    (
+                        "expires".to_owned(),
+                        Value::Datetime {
+                            seconds: scope.expires,
+                            nanos: 0,
+                        },
+                    ),
+                ]);
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
+                 scope_bucket: $scope_bucket, scope_key: $scope_key, expires: $expires } EXPIRE $expires;"
+            }
+        };
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn insert_key_once(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        token: &IssueToken,
+        token_secs: i64,
+    ) -> Result<bool> {
+        let mut parameters = key_parameters(id, user, sealed);
+        parameters.extend([
+            text("token", token.as_str()),
+            ("token_secs".to_owned(), Value::from(token_secs)),
+        ]);
+        // One transaction: a submission that loses the race on the token record writes no key either. It loses as
+        // `conflict` when the winner committed before its snapshot and as `retry` when the two overlapped; both wrote
+        // nothing, and the caller reads the token to learn which key the winner issued.
+        let script = "BEGIN; \
+             CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, kek_id: $kek_id, \
+             algorithm: $algorithm, disabled: false, created: time::now() }; \
+             CREATE key_issues:$token = { user_name: $user, key_id: $id } \
+             EXPIRE time::from_unix(time::unix(time::now()) + $token_secs); \
+             COMMIT;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error)
+                if error.is_class(RefusalClass::Conflict)
+                    || error.is_class(RefusalClass::Retry) =>
+            {
+                Ok(false)
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    async fn get_issue(&self, token: &IssueToken) -> Result<Option<IssueEntity>> {
+        self.one(
+            "SELECT * FROM ONLY key_issues:$token;",
+            vec![text("token", token.as_str())],
+        )
+        .await?
+        .map(|value| IssueEntity::from_value(&value))
+        .transpose()
+    }
+
+    async fn keys_of(&self, user: &UserName, limit: usize) -> Result<Vec<KeyListedEntity>> {
+        // The projection names no secret, so a listing never fetches one.
+        let script = "SELECT disabled, created, scope_bucket, scope_key, expires FROM access_keys \
+             WHERE user_name = $user LIMIT $limit USING INDEX by_key_user;";
+        let parameters = vec![
+            text("user", user.as_str()),
+            ("limit".to_owned(), crate::params::count(limit)),
+        ];
+        let answers = self.pool.run(script, parameters).await?;
+        match answers.into_iter().next() {
+            Some(Answer::Records { records, .. }) => records
+                .iter()
+                .map(|(identity, value)| KeyListedEntity::from_record(identity, value))
+                .collect(),
+            _ => Err(Error::Malformed {
+                record: "access key",
+                reason: "a listing answered no records",
+            }),
+        }
+    }
+
+    async fn get_key(&self, id: &str) -> Result<Option<AccessKeyEntity>> {
+        self.one("SELECT * FROM ONLY access_keys:$id;", vec![text("id", id)])
+            .await?
+            .map(|value| AccessKeyEntity::from_value(&value))
+            .transpose()
+    }
+
+    async fn set_key_disabled(&self, id: &str, disabled: bool) -> Result<()> {
+        let parameters = vec![text("id", id), flag("disabled", disabled)];
+        self.pool
+            .run(
+                "UPDATE access_keys:$id SET disabled = $disabled;",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_key(&self, id: &str) -> Result<bool> {
+        let removed = self
+            .one(
+                "DELETE access_keys:$id RETURN BEFORE;",
+                vec![text("id", id)],
+            )
+            .await?;
+        Ok(removed.is_some())
+    }
+
+    async fn put_grant(&self, user: &UserName, bucket: &BucketName, access: Access) -> Result<()> {
+        let parameters = vec![
+            grant_id(user, bucket),
+            text("user", user.as_str()),
+            text("bucket", bucket.as_str()),
+            flag("can_read", access.read),
+            flag("can_write", access.write),
+        ];
+        let script = "UPSERT grants:$id = { user_name: $user, bucket_name: $bucket, can_read: $can_read, \
+                      can_write: $can_write };";
+        self.pool.run(script, parameters).await?;
+        Ok(())
+    }
+
+    async fn remove_grant(&self, user: &UserName, bucket: &BucketName) -> Result<bool> {
+        let removed = self
+            .one(
+                "DELETE grants:$id RETURN BEFORE;",
+                vec![grant_id(user, bucket)],
+            )
+            .await?;
+        Ok(removed.is_some())
+    }
+
+    async fn grants(&self, user: &UserName) -> Result<Vec<GrantEntity>> {
+        self.all(
+            "SELECT * FROM grants WHERE user_name = $user USING INDEX by_grant_user;",
+            vec![text("user", user.as_str())],
+            "grant",
+        )
+        .await?
+        .iter()
+        .map(GrantEntity::from_value)
+        .collect()
+    }
+}

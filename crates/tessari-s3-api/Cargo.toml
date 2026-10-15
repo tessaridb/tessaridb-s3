@@ -1,0 +1,46 @@
+[package]
+name = "tessari-s3-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+scc.workspace = true
+tessari-s3-storage.workspace = true
+tessari-s3-core.workspace = true
+tessari-s3-types.workspace = true
+tessari-s3-constants.workspace = true
+tessari-s3-infrastructure.workspace = true
+tessari-s3-observability.workspace = true
+thiserror.workspace = true
+axum.workspace = true
+tower.workspace = true
+uuid.workspace = true
+quick-xml.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["sync", "net", "rt", "time", "macros"] }
+tracing.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+hyper-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+getrandom.workspace = true
+subtle.workspace = true
+
+[dev-dependencies]
+tessari-s3-daemons.workspace = true
+rskafka.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs"] }
+hmac.workspace = true
+sha2.workspace = true
+rcgen.workspace = true
+image.workspace = true
+openidconnect.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

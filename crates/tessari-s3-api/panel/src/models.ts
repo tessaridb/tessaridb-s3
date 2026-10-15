@@ -1,0 +1,425 @@
+//! What the console API answers, and the guards that check an answer has that
+//! shape before anything reads it. The API is ours, but the page is the boundary
+//! where its bytes become values, so nothing is cast — each reader returns the
+//! typed value or null.
+
+export type Drive = { readonly capacity: number; readonly free: number; readonly available: number };
+export type Member = { readonly node: string; readonly endpoint: string; readonly zone: string | null; readonly answering: boolean; readonly drive: Drive | null };
+export type Backlog = { readonly listed: number; readonly more: boolean; readonly at_risk: number };
+export type Status = {
+  readonly version: string;
+  readonly node: string | null;
+  readonly region: string;
+  readonly erasure: string | null;
+  readonly members: readonly Member[] | null;
+  readonly heal_backlog: Backlog | null;
+  /** How this region's replication stands; null when the viewer may not see it or the store did not answer. */
+  readonly replication: Replication | null;
+  readonly drive: Drive | null;
+};
+export type Replication = { readonly backlog: number; readonly in_flight: number; readonly failed: number };
+/** A bucket's figures as last measured: logical bytes and the bytes on the drives (with erasure overhead on a
+ * cluster). */
+export type BucketUsage = {
+  readonly bucket: string;
+  readonly objects: number;
+  readonly bytes: number;
+  readonly raw_bytes: number;
+};
+export type Usage = {
+  readonly taken: string | null;
+  /** Too old (or missing) for a quota check: each write to a limited bucket counts the bucket itself instead. */
+  readonly stale: boolean;
+  readonly buckets: readonly BucketUsage[];
+  readonly objects: number;
+  readonly bytes: number;
+  readonly raw_bytes: number;
+};
+export type Bucket = {
+  readonly name: string;
+  readonly created: string;
+  readonly region: string;
+  /** The most bytes it may hold; null is no limit. */
+  readonly maxBytes: number | null;
+  /** The most objects it may hold; null is no limit. */
+  readonly maxObjects: number | null;
+  /** Who acknowledges its writes: the majority keeping its metadata, or its region's majority alone. */
+  readonly acknowledgement: "majority" | "region";
+};
+export type ObjectRow = {
+  readonly key: string;
+  readonly size: number;
+  readonly etag: string;
+  readonly modified: string;
+  readonly contentType: string | null;
+};
+export type Listing = { readonly objects: readonly ObjectRow[]; readonly prefixes: readonly string[]; readonly next: string | null };
+export type Detail = {
+  readonly key: string;
+  readonly size: number;
+  readonly etag: string;
+  readonly modified: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly metadata: Readonly<Record<string, string>>;
+  readonly checksums: Readonly<Record<string, string>>;
+  readonly parts: number | null;
+};
+export type Action = {
+  readonly position: number;
+  readonly at: string;
+  readonly operator: string;
+  readonly operation: string;
+  readonly target: string;
+  readonly reason: string | null;
+  readonly outcome: string;
+};
+export type Actions = { readonly actions: readonly Action[]; readonly next: number | null };
+export type Role = "space_admin" | "member";
+export type User = {
+  readonly name: string;
+  readonly space: string;
+  readonly role: Role;
+  readonly create_buckets: boolean;
+  readonly operator: boolean;
+  readonly cluster_viewer: boolean;
+  readonly disabled: boolean;
+  readonly created: string;
+};
+export type Space = { readonly name: string; readonly created: string };
+/** A key just issued: the only answer that ever carries its secret. */
+export type IssuedKey = { readonly access_key_id: string; readonly secret_access_key: string };
+/** A one-key upload credential just issued: as a key, and when it stops working. */
+export type UploadKey = IssuedKey & { readonly expires: string };
+/** What the signed-in key may do, as the server's evaluator answers it. */
+export type Capabilities = {
+  readonly access_key_id: string;
+  readonly operate: boolean;
+  readonly administer: boolean;
+  readonly view_cluster: boolean;
+  readonly issue_upload_keys: boolean;
+};
+/** A node of a layout's erasure set and the zone it was in when the layout was made (null: a domain of its own). */
+export type LayoutMember = { readonly node: string; readonly zone: string | null };
+export type Layout = { readonly version: number; readonly sets: readonly (readonly LayoutMember[])[] };
+export type Cluster = {
+  readonly node: string | null;
+  readonly erasure: string | null;
+  readonly members: readonly Member[] | null;
+  readonly layout: Layout | null;
+  readonly heal_backlog: Backlog;
+  /** Objects still on a layout older than the current one, counted up to a bound. */
+  readonly moving: { readonly listed: number; readonly more: boolean };
+  readonly metadata: { readonly addresses: readonly string[] };
+};
+export type Problem = { readonly code: string; readonly message: string };
+
+type Fields = Readonly<Record<string, unknown>>;
+
+export const record = (value: unknown): value is Fields =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+export const text = (value: unknown): value is string => typeof value === "string";
+export const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const textOrNull = (value: unknown): value is string | null => value === null || text(value);
+const countOrNull = (value: unknown): value is number | null => value === null || count(value);
+
+export function list<T>(value: unknown, item: (entry: unknown) => T | null): T[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const items: T[] = [];
+  for (const entry of value) {
+    const read = item(entry);
+    if (read === null) {
+      return null;
+    }
+    items.push(read);
+  }
+  return items;
+}
+
+function strings(value: unknown): Record<string, string> | null {
+  if (!record(value)) {
+    return null;
+  }
+  const out: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (!text(entry)) {
+      return null;
+    }
+    out[name] = entry;
+  }
+  return out;
+}
+
+/** A drive, null for an explicit null, and undefined for anything else. */
+function drive(v: unknown): Drive | null | undefined {
+  if (v === null) {
+    return null;
+  }
+  return record(v) && count(v["capacity"]) && count(v["free"]) && count(v["available"])
+    ? { capacity: v["capacity"], free: v["free"], available: v["available"] }
+    : undefined;
+}
+
+function member(v: unknown): Member | null {
+  if (!record(v) || !text(v["node"]) || !text(v["endpoint"]) || !textOrNull(v["zone"]) || typeof v["answering"] !== "boolean") {
+    return null;
+  }
+  const space = drive(v["drive"]);
+  return space === undefined ? null : { node: v["node"], endpoint: v["endpoint"], zone: v["zone"], answering: v["answering"], drive: space };
+}
+
+export function readStatus(v: unknown): Status | null {
+  if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
+    return null;
+  }
+  const members = v["members"] === null ? null : list(v["members"], member);
+  const backlog = v["heal_backlog"];
+  const heal =
+    backlog === null
+      ? null
+      : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"])
+        ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] }
+        : undefined;
+  const sent = v["replication"];
+  const replication =
+    sent === null
+      ? null
+      : record(sent) && count(sent["backlog"]) && count(sent["in_flight"]) && count(sent["failed"])
+        ? { backlog: sent["backlog"], in_flight: sent["in_flight"], failed: sent["failed"] }
+        : undefined;
+  const space = drive(v["drive"]);
+  if ((v["members"] !== null && members === null) || heal === undefined || replication === undefined || space === undefined) {
+    return null;
+  }
+  return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, replication, drive: space };
+}
+
+const bucketUsage = (v: unknown): BucketUsage | null =>
+  record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"])
+    ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] }
+    : null;
+
+export function readUsage(v: unknown): Usage | null {
+  if (!record(v) || !textOrNull(v["taken"]) || !flag(v["stale"]) || !count(v["objects"]) || !count(v["bytes"]) || !count(v["raw_bytes"])) {
+    return null;
+  }
+  const buckets = list(v["buckets"], bucketUsage);
+  return buckets === null
+    ? null
+    : { taken: v["taken"], stale: v["stale"], buckets, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
+}
+
+const acknowledgement = (v: unknown): v is Bucket["acknowledgement"] => v === "majority" || v === "region";
+
+const bucket = (v: unknown): Bucket | null =>
+  record(v) &&
+  text(v["name"]) &&
+  text(v["created"]) &&
+  text(v["region"]) &&
+  countOrNull(v["max_bytes"]) &&
+  countOrNull(v["max_objects"]) &&
+  acknowledgement(v["acknowledgement"])
+    ? {
+        name: v["name"],
+        created: v["created"],
+        region: v["region"],
+        maxBytes: v["max_bytes"],
+        maxObjects: v["max_objects"],
+        acknowledgement: v["acknowledgement"],
+      }
+    : null;
+
+export function readBuckets(v: unknown): readonly Bucket[] | null {
+  return record(v) ? list(v["buckets"], bucket) : null;
+}
+
+const objectRow = (v: unknown): ObjectRow | null =>
+  record(v) && text(v["key"]) && count(v["size"]) && text(v["etag"]) && text(v["modified"]) && textOrNull(v["content_type"])
+    ? { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], contentType: v["content_type"] }
+    : null;
+
+export function readListing(v: unknown): Listing | null {
+  if (!record(v) || !textOrNull(v["next"])) {
+    return null;
+  }
+  const objects = list(v["objects"], objectRow);
+  const prefixes = list(v["prefixes"], (entry) => (text(entry) ? entry : null));
+  return objects === null || prefixes === null ? null : { objects, prefixes, next: v["next"] };
+}
+
+export function readDetail(v: unknown): Detail | null {
+  if (!record(v) || !text(v["key"]) || !count(v["size"]) || !text(v["etag"]) || !text(v["modified"]) || !countOrNull(v["parts"])) {
+    return null;
+  }
+  const headers = strings(v["headers"]);
+  const metadata = strings(v["metadata"]);
+  const checksums = strings(v["checksums"]);
+  if (headers === null || metadata === null || checksums === null) {
+    return null;
+  }
+  return { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], headers, metadata, checksums, parts: v["parts"] };
+}
+
+const action = (v: unknown): Action | null =>
+  record(v) && count(v["position"]) && text(v["at"]) && text(v["operator"]) && text(v["operation"]) &&
+  text(v["target"]) && textOrNull(v["reason"]) && text(v["outcome"])
+    ? {
+        position: v["position"],
+        at: v["at"],
+        operator: v["operator"],
+        operation: v["operation"],
+        target: v["target"],
+        reason: v["reason"],
+        outcome: v["outcome"],
+      }
+    : null;
+
+export function readActions(v: unknown): Actions | null {
+  if (!record(v) || !countOrNull(v["next"])) {
+    return null;
+  }
+  const actions = list(v["actions"], action);
+  return actions === null ? null : { actions, next: v["next"] };
+}
+
+export const flag = (value: unknown): value is boolean => typeof value === "boolean";
+const role = (value: unknown): value is Role => value === "space_admin" || value === "member";
+
+const user = (v: unknown): User | null =>
+  record(v) && text(v["name"]) && text(v["space"]) && role(v["role"]) && flag(v["create_buckets"]) &&
+  flag(v["operator"]) && flag(v["cluster_viewer"]) && flag(v["disabled"]) && text(v["created"])
+    ? {
+        name: v["name"],
+        space: v["space"],
+        role: v["role"],
+        create_buckets: v["create_buckets"],
+        operator: v["operator"],
+        cluster_viewer: v["cluster_viewer"],
+        disabled: v["disabled"],
+        created: v["created"],
+      }
+    : null;
+
+export function readUsers(v: unknown): readonly User[] | null {
+  return record(v) ? list(v["users"], user) : null;
+}
+
+const space = (v: unknown): Space | null =>
+  record(v) && text(v["name"]) && text(v["created"]) ? { name: v["name"], created: v["created"] } : null;
+
+export function readSpaces(v: unknown): readonly Space[] | null {
+  return record(v) ? list(v["spaces"], space) : null;
+}
+
+export function readIssued(v: unknown): IssuedKey | null {
+  return record(v) && text(v["access_key_id"]) && text(v["secret_access_key"])
+    ? { access_key_id: v["access_key_id"], secret_access_key: v["secret_access_key"] }
+    : null;
+}
+
+export function readUploadKey(v: unknown): UploadKey | null {
+  const key = readIssued(v);
+  return key !== null && record(v) && text(v["expires"]) ? { ...key, expires: v["expires"] } : null;
+}
+
+export function readCapabilities(v: unknown): Capabilities | null {
+  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"])
+    ? {
+        access_key_id: v["access_key_id"],
+        operate: v["operate"],
+        administer: v["administer"],
+        view_cluster: v["view_cluster"],
+        issue_upload_keys: v["issue_upload_keys"],
+      }
+    : null;
+}
+
+const names = (value: unknown): string[] | null => list(value, (entry) => (text(entry) ? entry : null));
+
+/** A layout, null for none, undefined for a shape this page does not understand. */
+export function layout(v: unknown): Layout | null | undefined {
+  if (v === null) {
+    return null;
+  }
+  const placed = (entry: unknown): LayoutMember | null => (record(entry) && text(entry["node"]) && textOrNull(entry["zone"]) ? { node: entry["node"], zone: entry["zone"] } : null);
+  const sets = record(v) && count(v["version"]) ? list(v["sets"], (set) => list(set, placed)) : null;
+  return record(v) && count(v["version"]) && sets !== null ? { version: v["version"], sets } : undefined;
+}
+
+export function readCluster(v: unknown): Cluster | null {
+  if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
+    return null;
+  }
+  const members = v["members"] === null ? null : list(v["members"], member);
+  const placed = layout(v["layout"]);
+  const backlog = v["heal_backlog"];
+  const addresses = names(v["metadata"]["addresses"]);
+  if ((v["members"] !== null && members === null) || placed === undefined || addresses === null) {
+    return null;
+  }
+  if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
+    return null;
+  }
+  const moving = v["moving"];
+  if (!record(moving) || !count(moving["listed"]) || !flag(moving["more"])) {
+    return null;
+  }
+  return {
+    node: v["node"],
+    erasure: v["erasure"],
+    members,
+    layout: placed,
+    heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
+    moving: { listed: moving["listed"], more: moving["more"] },
+    metadata: { addresses },
+  };
+}
+
+export function readProblem(v: unknown): Problem | null {
+  return record(v) && text(v["code"]) && text(v["message"]) ? { code: v["code"], message: v["message"] } : null;
+}
+
+/** For answers whose body is not read (204, or a 201 whose only content is the name we sent). */
+export const ignored = (_v: unknown): true => true;
+
+/** A rendition no longer tried: its queue, original, output, hand-outs and the last error a worker recorded. */
+export interface FailedRendition {
+  readonly queue: "images" | "videos";
+  readonly bucket: string;
+  readonly key: string;
+  readonly version_id: string | null;
+  readonly output: string;
+  readonly attempts: number;
+  readonly error: string | null;
+}
+
+/** The failures, up to a page per queue; `more` when a queue holds others. */
+export interface FailedRenditions {
+  readonly failed: readonly FailedRendition[];
+  readonly more: boolean;
+}
+
+const renditionQueue = (value: unknown): value is FailedRendition["queue"] => value === "images" || value === "videos";
+
+const failedRendition = (v: unknown): FailedRendition | null =>
+  record(v) && renditionQueue(v["queue"]) && text(v["bucket"]) && text(v["key"]) && textOrNull(v["version_id"]) &&
+  text(v["output"]) && count(v["attempts"]) && textOrNull(v["error"])
+    ? {
+        queue: v["queue"],
+        bucket: v["bucket"],
+        key: v["key"],
+        version_id: v["version_id"],
+        output: v["output"],
+        attempts: v["attempts"],
+        error: v["error"],
+      }
+    : null;
+
+export function readFailedRenditions(v: unknown): FailedRenditions | null {
+  if (!record(v) || !flag(v["more"])) {
+    return null;
+  }
+  const failed = list(v["failed"], failedRendition);
+  return failed === null ? null : { failed, more: v["more"] };
+}
