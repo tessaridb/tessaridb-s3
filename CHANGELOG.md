@@ -5,6 +5,14 @@ section records which TessariDB version its metadata runs on.
 
 ## Unreleased
 
+- Regions: each region's object metadata (objects, uploads, the cluster, the queues) is kept in its own database
+  `<database>_<region>`, buckets and identities in the shared one, so a region's database can be led by its own
+  metadata nodes. A request for another region's bucket is answered `301 PermanentRedirect` with
+  `x-amz-bucket-region`, and the console refuses it. The server's TessariDB account is now an editor of its
+  namespace, and metadata from an earlier build must start in a fresh namespace.
+- An operator may set a bucket's writes to be acknowledged by its region's majority alone (console, `PUT
+  /api/v1/buckets/{bucket}/acknowledgement`): faster when the metadata spans regions, and a write so acknowledged can
+  be lost to a failover. The store is asked to prove the level first, and its refusal is shown.
 - A console key form submitted twice at once no longer answers one of the two with an internal error.
 - Cluster members are admitted, not trusted: a node joins only as a founding member
   (`TESSARIDB_S3_FOUNDING_MEMBERS`), when root approves it in the console, or with a one-time join token
