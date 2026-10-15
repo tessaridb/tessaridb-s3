@@ -43,7 +43,10 @@ async fn a_node_approved_by_id_is_admitted_and_an_unknown_one_is_not() {
     let approved = members
         .approve(&node("n1"), None, "root", "first node")
         .await;
-    assert_eq!(approved.expect("answered"), Approval::Approved);
+    assert!(
+        matches!(approved.expect("answered"), Approval::Approved(member) if member.node == node("n1")),
+        "not approved as asked"
+    );
     assert_eq!(
         members
             .admits(&node("n1"), &print('a'))

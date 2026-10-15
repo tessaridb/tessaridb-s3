@@ -122,11 +122,15 @@ impl MembershipService {
             reason,
             by,
         };
-        Ok(if self.repository.grant(&grant).await? {
-            Approval::Approved
-        } else {
-            Approval::Removed
-        })
+        if !self.repository.grant(&grant).await? {
+            return Ok(Approval::Removed);
+        }
+        // Records are never deleted, so the one just written is there to read.
+        let member = self.get(node).await?.ok_or(Error::Malformed {
+            record: "member",
+            reason: "an approved record was not read back",
+        })?;
+        Ok(Approval::Approved(member))
     }
 
     /// Issues a one-time join token for `node`, lapsing after `lifetime`; until the node offers it, no certificate

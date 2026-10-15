@@ -108,8 +108,8 @@ pub struct Membership {
 /// What approving or issuing a token for a node ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Approval {
-    /// The node is approved as asked.
-    Approved,
+    /// The node is approved as asked; its record as it now stands.
+    Approved(Membership),
     /// The node was removed; it is never admitted again.
     Removed,
 }

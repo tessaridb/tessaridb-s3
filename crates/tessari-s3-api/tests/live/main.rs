@@ -24,6 +24,7 @@ mod console_keys;
 mod console_layout;
 mod console_logout;
 mod console_media;
+mod console_members;
 mod console_oidc;
 mod console_quota;
 mod console_store;

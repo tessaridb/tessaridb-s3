@@ -862,8 +862,8 @@
       opener.focus();
     };
     const route = `/users/${encodeURIComponent(user2.name)}/keys`;
-    const done2 = el("button", { type: "button", class: "quiet" }, "Close");
-    done2.addEventListener("click", back);
+    const done3 = el("button", { type: "button", class: "quiet" }, "Close");
+    done3.addEventListener("click", back);
     const revoke = (key, button) => {
       const ask = el("div", {});
       button.after(ask);
@@ -896,12 +896,12 @@
       if (!answer.ok) {
         const shown = settle(screen, answer);
         if (shown !== null) {
-          fill(region, refusal(shown), done2);
+          fill(region, refusal(shown), done3);
         }
         return;
       }
       if (answer.value.length === 0) {
-        fill(region, el("p", {}, `${user2.name} has no access keys.`), done2);
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done3);
         return;
       }
       const rows = answer.value.map((key) => {
@@ -909,7 +909,7 @@
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
-      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done2);
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done3);
     };
     void show();
   }
@@ -920,7 +920,7 @@
   //! sealed and will not hand it back), listing and revoking keys, disabling or
   //! enabling the user, and granting or removing access to one bucket. Every
   //! change takes a reason.
-  function shownOnce(key, done2) {
+  function shownOnce(key, done3) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -932,7 +932,7 @@
         said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done2);
+    finish.addEventListener("click", done3);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -943,9 +943,9 @@
       said
     );
   }
-  function alreadyIssued(id, done2) {
+  function alreadyIssued(id, done3) {
     const finish = el("button", { type: "button", class: "primary" }, "Close");
-    finish.addEventListener("click", done2);
+    finish.addEventListener("click", done3);
     queueMicrotask(() => finish.focus());
     return el(
       "div",
@@ -1050,7 +1050,7 @@
       opener.focus();
     };
     const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done2 = (words) => {
+    const done3 = (words) => {
       announce(words);
       back();
     };
@@ -1070,7 +1070,7 @@
       event.preventDefault();
       const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
       if (answer.ok) {
-        done2(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+        done3(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1078,7 +1078,7 @@
     remove.addEventListener("click", async () => {
       const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
       if (answer.ok) {
-        done2(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+        done3(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1555,6 +1555,227 @@
     );
   }
 
+  // src/members-model.ts
+  //! Cluster membership as the console sees it: every member and tombstone with
+  //! its pin and whether a join token waits, the token answer shown once, and the
+  //! fingerprint an operator types to pin a node to one certificate.
+  var HEX64 = /^[0-9a-f]{64}$/;
+  var textOrNull2 = (value) => value === null || text(value);
+  var memberState = (value) => value === "approved" || value === "removed";
+  function readMember(v) {
+    if (!record(v) || !text(v["node"]) || !memberState(v["state"]) || !textOrNull2(v["fingerprint"]) || !flag(v["awaiting_token"]) || !textOrNull2(v["token_expires"]) || !text(v["reason"]) || !text(v["by"]) || !text(v["at"])) {
+      return null;
+    }
+    return {
+      node: v["node"],
+      state: v["state"],
+      fingerprint: v["fingerprint"],
+      awaiting_token: v["awaiting_token"],
+      token_expires: v["token_expires"],
+      reason: v["reason"],
+      by: v["by"],
+      at: v["at"]
+    };
+  }
+  function readMembers(v) {
+    return record(v) ? list(v["members"], readMember) : null;
+  }
+  function readToken(v) {
+    if (!record(v) || !text(v["node"]) || !text(v["token"]) || !HEX64.test(v["token"]) || !text(v["expires"])) {
+      return null;
+    }
+    return { node: v["node"], token: v["token"], expires: v["expires"] };
+  }
+  function isFingerprint(typed) {
+    return HEX64.test(typed.trim());
+  }
+
+  // src/cluster-members.ts
+  //! Cluster admission: every node an operator admitted or removed, with its
+  //! pinned certificate and whether a join token waits; and, for an operator, the
+  //! forms that admit a node, issue a one-time join token (shown once, here, and
+  //! nowhere else) and remove a node for good. The server refuses everyone else
+  //! and wants a reason and a recent sign-in for every change.
+  var BASE = "/cluster/members";
+  var LIFETIMES2 = [
+    ["10 minutes", 600],
+    ["1 hour", 3600],
+    ["1 day", 86400]
+  ];
+  function done(screen, failure, said) {
+    if (failure === null) {
+      announce(said);
+      screen.redraw();
+      return null;
+    }
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function stateChip(member2) {
+    if (member2.state === "removed") {
+      return el("span", { class: "chip bad" }, "Removed");
+    }
+    return member2.awaiting_token ? el("span", { class: "chip warn" }, "Awaiting token") : el("span", { class: "chip ok" }, "Admitted");
+  }
+  function certificate(member2) {
+    if (member2.fingerprint !== null) {
+      return el("code", { title: member2.fingerprint }, `${member2.fingerprint.slice(0, 16)}…`);
+    }
+    if (member2.state === "removed") {
+      return "—";
+    }
+    return member2.awaiting_token && member2.token_expires !== null ? `Token lapses ${moment(member2.token_expires)}` : "Any the cluster issued for it";
+  }
+  function removeButton(screen, member2, region) {
+    const button = el("button", { type: "button", class: "danger" }, "Remove…");
+    button.addEventListener(
+      "click",
+      () => fill(
+        region,
+        confirmation(
+          `member-remove-${member2.node}`,
+          mono(member2.node),
+          "The node is removed for good: it is never admitted again and its registration is deleted. Refused while the current layout places shards on it — apply a layout without it first.",
+          "Remove",
+          async (reason) => {
+            const answer = await call("POST", `${BASE}/remove`, ignored, { node: member2.node, reason });
+            return done(screen, answer.ok ? null : answer, `Removed ${member2.node}.`);
+          },
+          () => fill(region)
+        )
+      )
+    );
+    return button;
+  }
+  function memberRows(screen, members, region) {
+    if (members.length === 0) {
+      return empty("No node has been admitted yet.");
+    }
+    const operate = screen.may?.operate === true;
+    const head2 = ["Node", "State", "Certificate", "Reason", "By", "When", ...operate ? [""] : []];
+    return table(
+      "Cluster admission",
+      head2,
+      members.map(
+        (member2) => row(
+          mono(member2.node),
+          stateChip(member2),
+          certificate(member2),
+          member2.reason,
+          member2.by,
+          moment(member2.at),
+          ...operate ? [member2.state === "approved" ? removeButton(screen, member2, region) : ""] : []
+        )
+      )
+    );
+  }
+  function reasonField(id) {
+    return el("textarea", { id, rows: "2", maxlength: "500", required: "" });
+  }
+  function admitForm(screen) {
+    const node = field("admit-node", "Node id", { autocomplete: "off", spellcheck: "false", required: "" });
+    const print = field("admit-fingerprint", "Certificate fingerprint (optional)", { autocomplete: "off", spellcheck: "false" }, "The SHA-256 of the one certificate the node may present, 64 hex digits. Empty: any certificate the cluster issued for this node.");
+    const reason = reasonField("admit-reason");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "admit-title" },
+      el("p", { id: "admit-title" }, el("strong", {}, "Admit a node")),
+      node.row,
+      print.row,
+      el("div", { class: "field" }, el("label", { for: reason.id }, "Reason"), reason),
+      el("div", { class: "actions" }, el("button", { type: "submit" }, "Admit")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const typed = print.input.value.trim();
+      if (typed !== "" && !isFingerprint(typed)) {
+        print.input.setAttribute("aria-invalid", "true");
+        fill(said, el("p", { class: "message bad", role: "alert" }, "A fingerprint is 64 lowercase hex digits."));
+        return;
+      }
+      print.input.removeAttribute("aria-invalid");
+      const body = { node: node.input.value.trim(), fingerprint: typed === "" ? null : typed, reason: reason.value.trim() };
+      const answer = await call("POST", `${BASE}/approve`, readMember, body);
+      const failure = done(screen, answer.ok ? null : answer, `Admitted ${body.node}.`);
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function shownOnce2(node, token, expires, done3) {
+    const copy = el("button", { type: "button" }, "Copy token");
+    const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
+    const said = el("p", { class: "hint", "aria-live": "polite" });
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(token);
+        said.textContent = "Copied.";
+      } catch {
+        said.textContent = "Copying is not allowed here; select the token and copy it by hand.";
+      }
+    });
+    finish.addEventListener("click", done3);
+    queueMicrotask(() => copy.focus());
+    return el(
+      "div",
+      { class: "once", role: "alert" },
+      el("p", {}, el("strong", {}, "Store this token now. "), "It is shown once; the server keeps only its digest."),
+      el("dl", {}, el("dt", {}, "Node"), el("dd", {}, mono(node)), el("dt", {}, "Lapses"), el("dd", {}, moment(expires)), el("dt", {}, "Join token"), el("dd", {}, mono(token))),
+      el("div", { class: "actions" }, copy, finish),
+      said
+    );
+  }
+  function tokenForm(screen) {
+    const node = field("token-node", "Node id", { autocomplete: "off", spellcheck: "false", required: "" });
+    const lifetime = el("select", { id: "token-lifetime" }, ...LIFETIMES2.map(([label, secs]) => el("option", { value: String(secs) }, label)));
+    const reason = reasonField("token-reason");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "token-title" },
+      el("p", { id: "token-title" }, el("strong", {}, "Issue a join token")),
+      el("p", { class: "muted" }, "Until the node offers the token, no certificate is accepted for it; the first certificate to offer it becomes the node's."),
+      node.row,
+      el("div", { class: "field" }, el("label", { for: lifetime.id }, "Lapses after"), lifetime),
+      el("div", { class: "field" }, el("label", { for: reason.id }, "Reason"), reason),
+      el("div", { class: "actions" }, el("button", { type: "submit" }, "Issue")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const body = { node: node.input.value.trim(), lifetime_secs: Number(lifetime.value), reason: reason.value.trim() };
+      const answer = await call("POST", `${BASE}/token`, readToken, body);
+      if (!answer.ok) {
+        fill(said, refusal(answer));
+        return;
+      }
+      const { token, expires } = answer.value;
+      announce(`Issued a join token for ${body.node}. Store it now.`);
+      fill(said, shownOnce2(body.node, token, expires, () => screen.redraw()));
+    });
+    return form;
+  }
+  async function admissionCard(screen) {
+    const answer = await call("GET", BASE, readMembers);
+    const region = el("div", {});
+    const card = el("section", { class: "card" }, el("h2", {}, "Admission"));
+    if (answer.ok) {
+      card.append(memberRows(screen, answer.value, region), region);
+    } else {
+      card.append(refusal(answer));
+    }
+    if (screen.may?.operate === true) {
+      card.append(admitForm(screen), tokenForm(screen));
+    }
+    return card;
+  }
+
   // src/layout-model.ts
   //! A layout change as the console sees it: the staged layout (what applying it
   //! would make the next version) and the sets an operator types to stage one —
@@ -1587,7 +1808,7 @@
       (set, i) => el("div", {}, el("h3", {}, `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member2) => el("li", {}, mono(member2.node), member2.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member2.zone}`)))))
     );
   }
-  function done(screen, failure, said) {
+  function done2(screen, failure, said) {
     if (failure === null) {
       announce(said);
       screen.redraw();
@@ -1616,7 +1837,7 @@
           "Apply",
           async (reason) => {
             const answer = await call("POST", "/cluster/layout/apply", readLayout, { id, reason });
-            return done(screen, answer.ok ? null : answer, `Applied layout version ${layout2.version}.`);
+            return done2(screen, answer.ok ? null : answer, `Applied layout version ${layout2.version}.`);
           },
           close
         )
@@ -1633,7 +1854,7 @@
           "Discard",
           async (reason) => {
             const answer = await call("DELETE", STAGED, ignored, { reason });
-            return done(screen, answer.ok ? null : answer, "Discarded the staged layout.");
+            return done2(screen, answer.ok ? null : answer, "Discarded the staged layout.");
           },
           close
         )
@@ -1671,7 +1892,7 @@
       }
       nodes.removeAttribute("aria-invalid");
       const answer = await call("PUT", STAGED, readStaged, { sets: typed, reason: reason.value.trim() });
-      const failure = done(screen, answer.ok ? null : answer, "Staged a layout.");
+      const failure = done2(screen, answer.ok ? null : answer, "Staged a layout.");
       if (failure !== null) {
         fill(said, refusal(failure));
       }
@@ -1844,7 +2065,7 @@
   // src/cluster.ts
   //! The cluster: its members with whether each answers and its disk, the
   //! layout objects are placed by and its erasure code, the healing backlog,
-  //! the metadata nodes, and a layout change staged or to stage. Only a key that
+  //! the metadata nodes, which nodes are admitted, and a layout change staged or to stage. Only a key that
   //! may see the cluster is shown this view; the server refuses everyone else.
   var TITLE4 = "Cluster";
   function layoutCard(cluster2) {
@@ -1886,6 +2107,7 @@
     }
     const view = answer.value;
     const staging = view.layout === null ? null : await stagingCard(screen);
+    const admission = view.erasure === null ? null : await admissionCard(screen);
     if (!screen.live()) {
       return;
     }
@@ -1901,6 +2123,7 @@
         tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)])))
       ),
       view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),
+      admission,
       layoutCard(view),
       staging
     );
@@ -2016,17 +2239,17 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${detail.etag}.`,
           "Delete object",
           async (why) => {
-            const done2 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
-            if (done2.ok) {
+            const done3 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
+            if (done3.ok) {
               announce(`Deleted ${key} from ${bucket2}.`);
               location.hash = back;
               return null;
             }
-            if (done2.status === 401) {
+            if (done3.status === 401) {
               screen.signIn();
               return null;
             }
-            return deleteRefusal(done2);
+            return deleteRefusal(done3);
           },
           () => {
             fill(asking);
@@ -2080,9 +2303,9 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
           "Delete object",
           async (reason) => {
-            const done2 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
-            if (!done2.ok) {
-              const shown = settle(screen, done2);
+            const done3 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done3.ok) {
+              const shown = settle(screen, done3);
               return shown === null ? null : deleteRefusal(shown);
             }
             close();
@@ -2483,7 +2706,7 @@
       intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
     };
   }
-  function signIn(main2, done2) {
+  function signIn(main2, done3) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
     const secret = field("secret-key", "Secret access key", { type: "password", autocomplete: "current-password", required: "" });
     const reason = field("reason", "Reason", { autocomplete: "off" }, "Why the root key, now: it is recorded and announced.");
@@ -2519,7 +2742,7 @@
       if (answer.ok) {
         key.input.value = "";
         reason.input.value = "";
-        done2();
+        done3();
         return;
       }
       if (answer.code === "reason_required") {

@@ -1,9 +1,10 @@
 //! The cluster: its members with whether each answers and its disk, the
 //! layout objects are placed by and its erasure code, the healing backlog,
-//! the metadata nodes, and a layout change staged or to stage. Only a key that
+//! the metadata nodes, which nodes are admitted, and a layout change staged or to stage. Only a key that
 //! may see the cluster is shown this view; the server refuses everyone else.
 
 import { call } from "./api.ts";
+import { admissionCard } from "./cluster-members.ts";
 import { stagingCard } from "./cluster-layout.ts";
 import { el, fill, mono } from "./dom.ts";
 import { readCluster, type Cluster } from "./models.ts";
@@ -54,6 +55,7 @@ export async function cluster(screen: Screen): Promise<void> {
   }
   const view = answer.value;
   const staging = view.layout === null ? null : await stagingCard(screen);
+  const admission = view.erasure === null ? null : await admissionCard(screen);
   if (!screen.live()) {
     return;
   }
@@ -69,6 +71,7 @@ export async function cluster(screen: Screen): Promise<void> {
       tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)]))),
     ),
     view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),
+    admission,
     layoutCard(view),
     staging,
   );

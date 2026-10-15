@@ -20,6 +20,7 @@ mod limits;
 mod logout;
 mod media;
 mod media_failed;
+mod members;
 mod objects;
 mod oidc;
 mod page;
@@ -255,6 +256,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
                 .delete(layout::discard),
         )
         .route("/api/v1/cluster/layout/apply", post(layout::apply))
+        .route("/api/v1/cluster/members", get(members::list))
+        .route("/api/v1/cluster/members/approve", post(members::approve))
+        .route("/api/v1/cluster/members/token", post(members::token))
+        .route("/api/v1/cluster/members/remove", post(members::remove))
         .route("/api/v1/buckets", get(buckets::list).post(buckets::create))
         .route("/api/v1/buckets/{bucket}", delete(buckets::delete))
         .route("/api/v1/buckets/{bucket}/quota", put(quotas::set))
