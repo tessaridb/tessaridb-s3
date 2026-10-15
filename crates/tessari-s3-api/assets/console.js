@@ -153,8 +153,8 @@
       return null;
     }
     const placed = (entry) => record(entry) && text(entry["node"]) && textOrNull(entry["zone"]) ? { node: entry["node"], zone: entry["zone"] } : null;
-    const sets = record(v) && count(v["version"]) ? list(v["sets"], (set) => list(set, placed)) : null;
-    return record(v) && count(v["version"]) && sets !== null ? { version: v["version"], sets } : void 0;
+    const sets2 = record(v) && count(v["version"]) ? list(v["sets"], (set) => list(set, placed)) : null;
+    return record(v) && count(v["version"]) && sets2 !== null ? { version: v["version"], sets: sets2 } : void 0;
   }
   function readCluster(v) {
     if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
@@ -857,8 +857,8 @@
       opener.focus();
     };
     const route = `/users/${encodeURIComponent(user2.name)}/keys`;
-    const done = el("button", { type: "button", class: "quiet" }, "Close");
-    done.addEventListener("click", back);
+    const done2 = el("button", { type: "button", class: "quiet" }, "Close");
+    done2.addEventListener("click", back);
     const revoke = (key, button) => {
       const ask = el("div", {});
       button.after(ask);
@@ -891,12 +891,12 @@
       if (!answer.ok) {
         const shown = settle(screen, answer);
         if (shown !== null) {
-          fill(region, refusal(shown), done);
+          fill(region, refusal(shown), done2);
         }
         return;
       }
       if (answer.value.length === 0) {
-        fill(region, el("p", {}, `${user2.name} has no access keys.`), done);
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done2);
         return;
       }
       const rows = answer.value.map((key) => {
@@ -904,7 +904,7 @@
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
-      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done);
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done2);
     };
     void show();
   }
@@ -915,7 +915,7 @@
   //! sealed and will not hand it back), listing and revoking keys, disabling or
   //! enabling the user, and granting or removing access to one bucket. Every
   //! change takes a reason.
-  function shownOnce(key, done) {
+  function shownOnce(key, done2) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -927,7 +927,7 @@
         said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done);
+    finish.addEventListener("click", done2);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -938,9 +938,9 @@
       said
     );
   }
-  function alreadyIssued(id, done) {
+  function alreadyIssued(id, done2) {
     const finish = el("button", { type: "button", class: "primary" }, "Close");
-    finish.addEventListener("click", done);
+    finish.addEventListener("click", done2);
     queueMicrotask(() => finish.focus());
     return el(
       "div",
@@ -1045,7 +1045,7 @@
       opener.focus();
     };
     const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done = (words) => {
+    const done2 = (words) => {
       announce(words);
       back();
     };
@@ -1065,7 +1065,7 @@
       event.preventDefault();
       const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
       if (answer.ok) {
-        done(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+        done2(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1073,7 +1073,7 @@
     remove.addEventListener("click", async () => {
       const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
       if (answer.ok) {
-        done(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+        done2(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1550,6 +1550,145 @@
     );
   }
 
+  // src/layout-model.ts
+  //! A layout change as the console sees it: the staged layout (what applying it
+  //! would make the next version) and the sets an operator types to stage one —
+  //! one erasure set per line, its node ids separated by spaces or commas.
+  function readStaged(v) {
+    if (!record(v) || !text(v["id"]) || !count(v["base"])) {
+      return null;
+    }
+    const next2 = readLayout(v["layout"]);
+    return next2 === null ? null : { id: v["id"], base: v["base"], layout: next2 };
+  }
+  function readLayout(v) {
+    return layout(v) ?? null;
+  }
+  function parseSets(text2) {
+    const lines = text2.split("\n").filter((line) => line.trim() !== "");
+    const sets2 = lines.map((line) => line.split(/[\s,]+/).filter((node) => node !== ""));
+    return sets2.length === 0 || sets2.some((set) => set.length === 0) ? null : sets2;
+  }
+
+  // src/cluster-layout.ts
+  //! Changing the layout: the staged layout, if any, with Apply and Discard, and
+  //! the form that stages one — one erasure set per line. Applying names the
+  //! staging this page showed, so one staged again meanwhile is refused rather
+  //! than applied unseen. Only an operator is offered the controls; the server
+  //! refuses everyone else and wants a reason and a recent sign-in either way.
+  var STAGED = "/cluster/layout/staged";
+  function sets(layout2) {
+    return layout2.sets.map(
+      (set, i) => el("div", {}, el("h3", {}, `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member2) => el("li", {}, mono(member2.node), member2.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member2.zone}`)))))
+    );
+  }
+  function done(screen, failure, said) {
+    if (failure === null) {
+      announce(said);
+      screen.redraw();
+      return null;
+    }
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function stagedPart(screen, staged) {
+    const { id, base, layout: layout2 } = staged;
+    const region = el("div", {});
+    const apply = el("button", { type: "button", class: "primary" }, "Apply…");
+    const discard = el("button", { type: "button" }, "Discard…");
+    const close = () => fill(region);
+    apply.addEventListener(
+      "click",
+      () => fill(
+        region,
+        confirmation(
+          "layout-apply",
+          el("span", {}, `version ${layout2.version}, ${layout2.sets.length} erasure set${layout2.sets.length === 1 ? "" : "s"}`),
+          "New objects are written under this layout from now on; objects already written keep the layout they were written under. Refused if the layout or this staging changed since the page showed it.",
+          "Apply",
+          async (reason) => {
+            const answer = await call("POST", "/cluster/layout/apply", readLayout, { id, reason });
+            return done(screen, answer.ok ? null : answer, `Applied layout version ${layout2.version}.`);
+          },
+          close
+        )
+      )
+    );
+    discard.addEventListener(
+      "click",
+      () => fill(
+        region,
+        confirmation(
+          "layout-discard",
+          el("span", {}, `the layout staged over version ${base}`),
+          "The staged layout is removed; the cluster does not change.",
+          "Discard",
+          async (reason) => {
+            const answer = await call("DELETE", STAGED, ignored, { reason });
+            return done(screen, answer.ok ? null : answer, "Discarded the staged layout.");
+          },
+          close
+        )
+      )
+    );
+    return el(
+      "div",
+      {},
+      el("p", { class: "muted" }, `Staged over version ${base}; applying it makes it version ${layout2.version}.`),
+      ...sets(layout2),
+      screen.may?.operate === true ? el("div", { class: "actions" }, apply, discard) : null,
+      region
+    );
+  }
+  function stageForm(screen) {
+    const nodes = el("textarea", { id: "layout-sets", rows: "4", autocomplete: "off", spellcheck: "false", "aria-describedby": "layout-sets-hint" });
+    const reason = el("textarea", { id: "layout-reason", rows: "2", maxlength: "500", required: "", "aria-describedby": "layout-reason-hint" });
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "layout-stage-title" },
+      el("p", { id: "layout-stage-title" }, el("strong", {}, "Stage a layout")),
+      el("div", { class: "field" }, el("label", { for: nodes.id }, "Erasure sets"), nodes, el("p", { id: "layout-sets-hint", class: "hint" }, "One set per line: its node ids, one per shard, separated by spaces or commas.")),
+      el("div", { class: "field" }, el("label", { for: reason.id }, "Reason"), reason, el("p", { id: "layout-reason-hint", class: "hint" }, "Required. Recorded with your key id.")),
+      el("div", { class: "actions" }, el("button", { type: "submit" }, "Stage")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const typed = parseSets(nodes.value);
+      if (typed === null) {
+        nodes.setAttribute("aria-invalid", "true");
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Write at least one set, each line naming its nodes."));
+        return;
+      }
+      nodes.removeAttribute("aria-invalid");
+      const answer = await call("PUT", STAGED, readStaged, { sets: typed, reason: reason.value.trim() });
+      const failure = done(screen, answer.ok ? null : answer, "Staged a layout.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  async function stagingCard(screen) {
+    const answer = await call("GET", STAGED, readStaged);
+    const card = el("section", { class: "card" }, el("h2", {}, "Layout change"));
+    if (answer.ok) {
+      card.append(stagedPart(screen, answer.value));
+    } else if (answer.code === "nothing_staged") {
+      card.append(el("p", { class: "muted" }, "Nothing is staged."));
+    } else {
+      card.append(refusal(answer));
+    }
+    if (screen.may?.operate === true) {
+      card.append(stageForm(screen));
+    }
+    return card;
+  }
+
   // src/meter.ts
   //! How full a drive is: a bar on a zero baseline whose length is the used share,
   //! with the figures beside it in text, so the bar's colour is never the only
@@ -1700,15 +1839,15 @@
   // src/cluster.ts
   //! The cluster: its members with whether each answers and its disk, the
   //! layout objects are placed by and its erasure code, the healing backlog,
-  //! and the metadata nodes. Only a key that may see the cluster is shown this
-  //! view; the server refuses everyone else.
+  //! the metadata nodes, and a layout change staged or to stage. Only a key that
+  //! may see the cluster is shown this view; the server refuses everyone else.
   var TITLE4 = "Cluster";
   function layoutCard(cluster2) {
     if (cluster2.layout === null) {
       const why = cluster2.erasure === null ? "This node stores objects on its own." : "The layout is fixed once enough members have registered.";
       return el("section", { class: "card" }, el("h2", {}, "Layout"), el("p", { class: "muted" }, why));
     }
-    const { version, sets } = cluster2.layout;
+    const { version, sets: sets2 } = cluster2.layout;
     return el(
       "section",
       { class: "card" },
@@ -1718,8 +1857,8 @@
         { class: "muted" },
         `Version ${version}. Each object goes to one erasure set, chosen from its data id, and each node of that set holds one of its shards; no set keeps more shards in one zone than it can lose.`
       ),
-      ...sets.map(
-        (set, i) => el("div", {}, el("h3", {}, sets.length === 1 ? "Erasure set" : `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member2) => el("li", {}, mono(member2.node), member2.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member2.zone}`)))))
+      ...sets2.map(
+        (set, i) => el("div", {}, el("h3", {}, sets2.length === 1 ? "Erasure set" : `Erasure set ${i + 1}`), el("ol", {}, ...set.map((member2) => el("li", {}, mono(member2.node), member2.zone === null ? "" : el("span", { class: "muted" }, ` — zone ${member2.zone}`)))))
       )
     );
   }
@@ -1734,6 +1873,10 @@
       return;
     }
     const view = answer.value;
+    const staging = view.layout === null ? null : await stagingCard(screen);
+    if (!screen.live()) {
+      return;
+    }
     fill(
       screen.main,
       head(TITLE4, view.node === null ? "A node on its own" : el("span", {}, "This node: ", mono(view.node))),
@@ -1745,7 +1888,8 @@
         tile("node", "Metadata nodes", String(view.metadata.addresses.length), el("span", {}, ...view.metadata.addresses.flatMap((address, i) => [i === 0 ? "" : ", ", mono(address)])))
       ),
       view.members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), memberTable(view.members)),
-      layoutCard(view)
+      layoutCard(view),
+      staging
     );
   }
 
@@ -1859,17 +2003,17 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${detail.etag}.`,
           "Delete object",
           async (why) => {
-            const done = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
-            if (done.ok) {
+            const done2 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
+            if (done2.ok) {
               announce(`Deleted ${key} from ${bucket2}.`);
               location.hash = back;
               return null;
             }
-            if (done.status === 401) {
+            if (done2.status === 401) {
               screen.signIn();
               return null;
             }
-            return deleteRefusal(done);
+            return deleteRefusal(done2);
           },
           () => {
             fill(asking);
@@ -1923,9 +2067,9 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
           "Delete object",
           async (reason) => {
-            const done = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
-            if (!done.ok) {
-              const shown = settle(screen, done);
+            const done2 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done2.ok) {
+              const shown = settle(screen, done2);
               return shown === null ? null : deleteRefusal(shown);
             }
             close();
@@ -2326,7 +2470,7 @@
       intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
     };
   }
-  function signIn(main2, done) {
+  function signIn(main2, done2) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
     const secret = field("secret-key", "Secret access key", { type: "password", autocomplete: "current-password", required: "" });
     const reason = field("reason", "Reason", { autocomplete: "off" }, "Why the root key, now: it is recorded and announced.");
@@ -2362,7 +2506,7 @@
       if (answer.ok) {
         key.input.value = "";
         reason.input.value = "";
-        done();
+        done2();
         return;
       }
       if (answer.code === "reason_required") {

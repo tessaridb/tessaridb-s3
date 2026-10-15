@@ -308,7 +308,8 @@ export function readCapabilities(v: unknown): Capabilities | null {
 
 const names = (value: unknown): string[] | null => list(value, (entry) => (text(entry) ? entry : null));
 
-function layout(v: unknown): Layout | null | undefined {
+/** A layout, null for none, undefined for a shape this page does not understand. */
+export function layout(v: unknown): Layout | null | undefined {
   if (v === null) {
     return null;
   }
