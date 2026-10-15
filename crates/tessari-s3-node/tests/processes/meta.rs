@@ -65,6 +65,7 @@ fn pool(wire: &str) -> MetaPool {
         replication: None,
         internal_tls: None,
         notify_targets: None,
+        zones: None,
     };
     MetaPool::new(crate::s3::settings(&base, "probe")).expect("pool")
 }
@@ -256,6 +257,7 @@ impl MetaCluster {
             replication: Some("3".to_owned()),
             internal_tls: None,
             notify_targets: None,
+            zones: None,
         }
     }
 

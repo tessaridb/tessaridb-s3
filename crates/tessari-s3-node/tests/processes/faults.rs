@@ -14,11 +14,11 @@ use crate::s3::{Cluster, Meta, count, internal_tls};
 const HEALED_WITHIN: Duration = Duration::from_secs(60);
 /// How long the S3 nodes may take to acknowledge again once the metadata leader is gone.
 const RECOVERED_WITHIN: Duration = Duration::from_secs(120);
-const MIB: usize = 1024 * 1024;
+pub(crate) const MIB: usize = 1024 * 1024;
 
 /// `len` bytes that differ with `seed` and from stripe to stripe, so a block from another object or another stripe
 /// cannot pass for the right one.
-fn patterned(len: usize, seed: usize) -> Vec<u8> {
+pub(crate) fn patterned(len: usize, seed: usize) -> Vec<u8> {
     (0..len)
         .map(|i| {
             let mixed = i
@@ -30,7 +30,7 @@ fn patterned(len: usize, seed: usize) -> Vec<u8> {
         .collect()
 }
 
-async fn healed(cluster: &Cluster) {
+pub(crate) async fn healed(cluster: &Cluster) {
     let started = Instant::now();
     while count(&cluster.meta, "heal_queue").await > 0 {
         assert!(
@@ -43,14 +43,14 @@ async fn healed(cluster: &Cluster) {
 }
 
 /// The cluster's own nodes speak mutual TLS between them, as a deployment over a network would.
-fn with_tls(meta: Meta) -> Meta {
+pub(crate) fn with_tls(meta: Meta) -> Meta {
     Meta {
         internal_tls: Some(internal_tls()),
         ..meta
     }
 }
 
-fn require_docker() {
+pub(crate) fn require_docker() {
     if let Err(why) = docker::available() {
         panic!("{why}");
     }

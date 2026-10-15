@@ -28,6 +28,9 @@ pub struct Meta {
     pub internal_tls: Option<PathBuf>,
     /// `TESSARIDB_S3_NOTIFY_TARGETS` for every node; `None` declares no destination.
     pub notify_targets: Option<String>,
+    /// Each node's failure domain, `n1` first, which also says how many nodes there are; `None`: six nodes, each a
+    /// domain of its own.
+    pub zones: Option<&'static [&'static str]>,
 }
 
 /// A certificate authority minted for one cluster and the certificate it issues for `127.0.0.1`, which every local
@@ -139,6 +142,17 @@ fn environment(
             vars.push((key.to_owned(), dir.join(file).display().to_string()));
         }
     }
+    let zone = meta.zones.and_then(|zones| {
+        let index = node
+            .strip_prefix('n')?
+            .parse::<usize>()
+            .ok()?
+            .checked_sub(1)?;
+        zones.get(index)
+    });
+    if let Some(zone) = zone {
+        vars.push(("TESSARIDB_S3_ZONE".to_owned(), (*zone).to_owned()));
+    }
     if let Some(targets) = &meta.notify_targets {
         vars.push(("TESSARIDB_S3_NOTIFY_TARGETS".to_owned(), targets.clone()));
     }
@@ -213,14 +227,14 @@ async fn launch(
 }
 
 impl Cluster {
-    /// Six nodes over a fresh namespace of `meta`, started one after another: every node applies the schema, and
+    /// Six nodes (or one per zone `meta` names) over a fresh namespace of `meta`, started one after another: every node applies the schema, and
     /// concurrent applies conflict on the catalog (Q-S3-2).
     pub async fn start(meta: Meta) -> Self {
         let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
         let logs = scratch("logs");
         std::fs::create_dir_all(&logs).expect("log directory");
         let mut nodes = Vec::new();
-        for n in 1..=6 {
+        for n in 1..=meta.zones.map_or(6, <[&str]>::len) {
             let addresses = (
                 format!("127.0.0.1:{}", free_port()),
                 format!("127.0.0.1:{}", free_port()),

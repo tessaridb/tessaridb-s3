@@ -20,6 +20,7 @@ mod meta;
 mod notify;
 mod requests;
 mod s3;
+mod zones;
 
 use std::time::{Duration, Instant};
 
@@ -42,6 +43,7 @@ fn meta_from_env() -> Meta {
         replication: None,
         internal_tls: None,
         notify_targets: None,
+        zones: None,
     }
 }
 
