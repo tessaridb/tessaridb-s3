@@ -27,6 +27,7 @@ fn bucket(name: &str, in_space: &str, creator: Option<&str>) -> BucketResource {
         space: space(in_space),
         creator: creator.map(str::to_owned),
         policy: None,
+        public_access: super::policy::PublicAccessBlock::default(),
     }
 }
 

@@ -26,6 +26,8 @@ pub enum Denied {
     PolicyUnreadable,
     /// The bucket carries a policy and the caller asked without the policy question.
     Unasked,
+    /// Only a public statement allows it, and RestrictPublicBuckets keeps those to the bucket's own space.
+    Restricted,
 }
 
 /// The policy question a request asks: the S3 action, the key (none for the bucket itself) and its facts.
@@ -65,7 +67,10 @@ fn decide(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> 
     if matches!(principal, Principal::Root) {
         return Decision::Allow;
     }
-    let Some(stored) = action.bucket().and_then(|bucket| bucket.policy.as_deref()) else {
+    let Some((bucket, stored)) = action
+        .bucket()
+        .and_then(|bucket| Some((bucket, bucket.policy.as_deref()?)))
+    else {
         return identity(principal, action, asked);
     };
     let Some(asked) = asked else {
@@ -85,6 +90,14 @@ fn decide(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> 
         (_, Decision::Allow) => Decision::Allow,
         // A one-key credential's authority is its issuer's narrowed to its key: a policy never widens it.
         (PolicyAnswer::Allow { .. }, denied) if matches!(principal, Principal::Upload(_)) => denied,
+        // RestrictPublicBuckets: a public policy's Allows reach only the bucket's own space.
+        (PolicyAnswer::Allow { .. }, _)
+            if bucket.public_access.restrict_public_buckets
+                && policy.is_public()
+                && !matches!(principal, Principal::User(user) if user.space == bucket.space) =>
+        {
+            Decision::Deny(Denied::Restricted)
+        }
         (PolicyAnswer::Allow { .. }, _) => Decision::Allow,
         (PolicyAnswer::NotApplicable, denied) => denied,
     }

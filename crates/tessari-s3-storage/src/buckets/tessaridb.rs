@@ -144,6 +144,18 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
+    async fn set_public_access(&self, name: &BucketName, text: String) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("public_access".to_owned(), Value::String(text)));
+        self.pool
+            .run(
+                "UPDATE buckets:$name SET public_access = $public_access;",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn set_tags(&self, name: &BucketName, tags: Option<Value>) -> Result<()> {
         let mut parameters = name_param(name);
         parameters.push(("tags".to_owned(), tags.unwrap_or(Value::None)));

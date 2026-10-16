@@ -70,6 +70,7 @@ mod oidc_provider;
 mod policy;
 mod policy_enforced;
 mod policy_probe;
+mod public_access;
 mod quota;
 mod quota_window;
 mod reclaim;

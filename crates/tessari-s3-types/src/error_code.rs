@@ -62,6 +62,8 @@ pub enum ErrorCode {
     MalformedPolicy,
     /// 404: the bucket has no policy.
     NoSuchBucketPolicy,
+    /// 404: the bucket carries no Block Public Access configuration.
+    NoSuchPublicAccessBlockConfiguration,
     /// 400: the bucket would be created in another region than this server's.
     IllegalLocationConstraintException,
     /// 409: the bucket still holds objects.
@@ -157,6 +159,7 @@ impl ErrorCode {
             Self::MalformedXml => "MalformedXML",
             Self::MalformedPolicy => "MalformedPolicy",
             Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
+            Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
             Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
@@ -218,7 +221,8 @@ impl ErrorCode {
             | Self::ReplicationConfigurationNotFoundError
             | Self::ObjectLockConfigurationNotFoundError
             | Self::NoSuchTagSet
-            | Self::NoSuchBucketPolicy => 404,
+            | Self::NoSuchBucketPolicy
+            | Self::NoSuchPublicAccessBlockConfiguration => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -307,6 +311,11 @@ mod tests {
             (ErrorCode::MalformedXml, "MalformedXML", 400),
             (ErrorCode::MalformedPolicy, "MalformedPolicy", 400),
             (ErrorCode::NoSuchBucketPolicy, "NoSuchBucketPolicy", 404),
+            (
+                ErrorCode::NoSuchPublicAccessBlockConfiguration,
+                "NoSuchPublicAccessBlockConfiguration",
+                404,
+            ),
             (
                 ErrorCode::IllegalLocationConstraintException,
                 "IllegalLocationConstraintException",

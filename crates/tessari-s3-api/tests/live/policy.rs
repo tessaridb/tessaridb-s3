@@ -32,6 +32,7 @@ async fn a_policy_is_stored_read_back_as_written_and_removed() {
         (404, Some("NoSuchBucketPolicy"))
     );
     let text = public_read("held");
+    crate::public_access::allow_public(&state, "held").await;
     let put = put_policy(&state, "held", &text).await;
     assert_eq!(put.status, 204, "{}", put.body);
     let read = call(&state, "GET", "/held", vec![("policy", None)], b"").await;

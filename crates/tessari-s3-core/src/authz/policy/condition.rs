@@ -127,6 +127,25 @@ impl Condition {
         })
     }
 
+    /// Whether this condition alone keeps a statement to known callers: a positive address range no wider than
+    /// a /8 (IPv4) or a /32 (IPv6), or an exact user name — never one an absent key satisfies.
+    pub(super) fn fixes_who_asks(&self) -> bool {
+        if self.negated || self.if_exists {
+            return false;
+        }
+        match (self.test, self.key) {
+            (Test::InRange, Key::SourceIp) => self.values.iter().all(|value| match value {
+                Value::Range(address, prefix) => *prefix >= if address.is_ipv4() { 8 } else { 32 },
+                _ => false,
+            }),
+            (Test::Equals, Key::Username) => self
+                .values
+                .iter()
+                .all(|value| matches!(value, Value::Text(name) if !name.contains(['*', '?']))),
+            _ => false,
+        }
+    }
+
     /// Whether the condition holds for `requester` in `context`.
     pub(super) fn holds(&self, requester: Requester<'_>, context: &Context) -> bool {
         let observed = self.key.observe(requester, context);

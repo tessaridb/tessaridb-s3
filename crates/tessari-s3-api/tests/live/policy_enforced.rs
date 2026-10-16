@@ -49,6 +49,7 @@ async fn an_anonymous_caller_reaches_only_what_a_public_statement_grants() {
         (before.status, before.code.as_deref()),
         (403, Some("AccessDenied"))
     );
+    crate::public_access::allow_public(&state, "pub").await;
     assert_eq!(
         put_policy(&state, "pub", &public_read("pub")).await.status,
         204

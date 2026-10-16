@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::policy::{BucketPolicy, Context};
+use super::policy::{BucketPolicy, Context, PublicAccessBlock};
 use super::{
     Action, Asked, BucketResource, Decision, Denied, Principal, Role, SpaceName, UploadPrincipal,
     UserPrincipal, authorize, authorize_asked,
@@ -27,6 +27,7 @@ fn user(name: &str, in_space: &str, role: Role) -> UserPrincipal {
     }
 }
 
+/// A bucket governed by `statements` with Block Public Access off, so the policy alone decides.
 fn governed(statements: &str) -> BucketResource {
     let text = format!(r#"{{"Version":"2012-10-17","Statement":[{statements}]}}"#);
     BucketResource {
@@ -38,6 +39,18 @@ fn governed(statements: &str) -> BucketResource {
             "photos",
             &space("acme"),
         ))),
+        public_access: PublicAccessBlock::NONE,
+    }
+}
+
+/// The same bucket with RestrictPublicBuckets on.
+fn restricted(statements: &str) -> BucketResource {
+    BucketResource {
+        public_access: PublicAccessBlock {
+            restrict_public_buckets: true,
+            ..PublicAccessBlock::NONE
+        },
+        ..governed(statements)
     }
 }
 
@@ -235,5 +248,46 @@ fn a_policy_that_no_longer_parses_refuses_everyone_but_root() {
             &ask("s3:PutBucketPolicy", None, &c)
         ),
         Decision::Allow
+    );
+}
+
+#[test]
+fn restricting_public_buckets_keeps_a_public_allow_inside_the_buckets_space() {
+    let c = Context::default();
+    let read = |bucket: BucketResource, principal: &Principal| {
+        authorize_asked(
+            principal,
+            &Action::ReadObject(bucket),
+            &ask("s3:GetObject", Some("a"), &c),
+        )
+    };
+    let member = Principal::User(user("bob", "acme", Role::Member));
+    let stranger = Principal::User(user("eve", "other", Role::SpaceAdmin));
+    assert_eq!(
+        read(restricted(PUBLIC_READ), &Principal::Anonymous),
+        Decision::Deny(Denied::Restricted)
+    );
+    assert_eq!(
+        read(restricted(PUBLIC_READ), &stranger),
+        Decision::Deny(Denied::Restricted)
+    );
+    assert_eq!(read(restricted(PUBLIC_READ), &member), Decision::Allow);
+    // Control: the same policy with the switch off reaches everyone.
+    assert_eq!(
+        read(governed(PUBLIC_READ), &Principal::Anonymous),
+        Decision::Allow
+    );
+    assert_eq!(read(governed(PUBLIC_READ), &stranger), Decision::Allow);
+    // A policy that is not public is not restricted: a named user of the space is reached as before.
+    let named = r#"{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::acme:user/bob"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::photos/*"}"#;
+    assert_eq!(read(restricted(named), &member), Decision::Allow);
+    // A bucket with no configuration stored blocks everything public.
+    let defaulted = BucketResource {
+        public_access: PublicAccessBlock::default(),
+        ..governed(PUBLIC_READ)
+    };
+    assert_eq!(
+        read(defaulted, &Principal::Anonymous),
+        Decision::Deny(Denied::Restricted)
     );
 }

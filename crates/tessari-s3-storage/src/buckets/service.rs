@@ -208,6 +208,25 @@ impl BucketService {
         Ok(true)
     }
 
+    /// Sets `name`'s Block Public Access switches, or removes the configuration with `None`; `false` when there is
+    /// no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_public_access(
+        &self,
+        name: &BucketName,
+        block: Option<tessari_s3_core::authz::policy::PublicAccessBlock>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_public_access(name, super::public_access::to_text(block))
+            .await?;
+        Ok(true)
+    }
+
     /// Replaces `name`'s tags (already validated); an empty set removes them. `false` when there is no such bucket.
     ///
     /// # Errors

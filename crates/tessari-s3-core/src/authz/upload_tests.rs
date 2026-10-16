@@ -30,6 +30,7 @@ fn bucket(name: &str, in_space: &str) -> BucketResource {
         space: space(in_space),
         creator: None,
         policy: None,
+        public_access: super::policy::PublicAccessBlock::default(),
     }
 }
 

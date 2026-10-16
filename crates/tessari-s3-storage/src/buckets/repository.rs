@@ -76,6 +76,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         policy: Option<String>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s Block Public Access text (empty: removed).
+    fn set_public_access(
+        &self,
+        name: &BucketName,
+        text: String,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Replaces `name`'s tags, or removes them when `tags` is `None`.
     fn set_tags(
         &self,

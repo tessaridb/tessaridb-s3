@@ -41,6 +41,8 @@ pub struct BucketEntity {
     pub encryption: Option<Value>,
     /// The bucket policy's JSON text; absent while none is set.
     pub policy: Option<String>,
+    /// The Block Public Access switches as four `0`/`1` flags, empty once removed; absent while never set.
+    pub public_access: Option<String>,
     /// `local` when the bucket's writes are acknowledged by its region's majority alone; absent otherwise.
     pub acknowledge: Option<String>,
 }
@@ -128,6 +130,11 @@ impl BucketEntity {
             Some(Value::String(text)) => Some(text.clone()),
             Some(_) => return Err(malformed("policy")),
         };
+        let public_access = match fields.get("public_access") {
+            None | Some(Value::None) => None,
+            Some(Value::String(text)) => Some(text.clone()),
+            Some(_) => return Err(malformed("public_access")),
+        };
         let acknowledge = match fields.get("acknowledge") {
             None | Some(Value::None) => None,
             Some(Value::String(level)) => Some(level.clone()),
@@ -156,6 +163,7 @@ impl BucketEntity {
             tags,
             encryption,
             policy,
+            public_access,
             acknowledge,
         })
     }

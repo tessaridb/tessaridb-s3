@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::policy::{BucketPolicy, PolicyError};
+use super::policy::{BucketPolicy, PolicyError, PublicAccessBlock};
 
 /// A space's name: the tenant buckets and users belong to.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -182,6 +182,8 @@ pub struct BucketResource {
     pub creator: Option<String>,
     /// Its policy, parsed when the bucket was read; `Err` when the stored text no longer parses.
     pub policy: Option<Arc<Result<BucketPolicy, PolicyError>>>,
+    /// Its Block Public Access switches, as in force (every one on while none is stored).
+    pub public_access: PublicAccessBlock,
 }
 
 /// A user as the evaluator needs it when somebody manages them: who they are, where, and with what authority.

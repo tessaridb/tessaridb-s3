@@ -51,6 +51,8 @@ pub struct Bucket {
     pub encryption: Option<BucketEncryption>,
     /// Its policy's JSON text as written (validated then); `None` while none is set.
     pub policy: Option<String>,
+    /// Its Block Public Access configuration.
+    pub public_access: super::PublicAccess,
 }
 
 /// A bucket's default encryption: the key a write that names none is sealed under.
@@ -99,6 +101,7 @@ impl Bucket {
             policy: self.policy.as_deref().map(|text| {
                 std::sync::Arc::new(BucketPolicy::parse(text, self.name.as_str(), &self.space))
             }),
+            public_access: self.public_access.in_force(),
         }
     }
 }
@@ -192,6 +195,7 @@ impl TryFrom<BucketEntity> for Bucket {
                 .map(super::encryption::from_value)
                 .transpose()?,
             policy: entity.policy,
+            public_access: super::public_access::from_text(entity.public_access.as_deref())?,
             acknowledgement: match entity.acknowledge.as_deref() {
                 None => Acknowledgement::Majority,
                 Some(LOCAL) => Acknowledgement::RegionMajority,

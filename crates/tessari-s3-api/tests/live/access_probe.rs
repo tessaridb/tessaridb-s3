@@ -61,6 +61,7 @@ const TAGGING_BODY: &[u8] =
     b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
 const ENCRYPTION_BODY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
     <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const BLOCK_BODY: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicPolicy>true</BlockPublicPolicy></PublicAccessBlockConfiguration>";
 const POLICY_BODY: &[u8] = br#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::alpha:user/cid"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::ann-photos/*"}]}"#;
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
 const COMPLETE_BODY: &[u8] =
@@ -248,6 +249,33 @@ pub(crate) fn table(upload: &str) -> Vec<Probe> {
             "DELETE",
             "/ann-photos",
             &[("policy", None)],
+        ),
+        probe(
+            Operation::GetBucketPolicyStatus,
+            "GET",
+            "/ann-photos",
+            &[("policyStatus", None)],
+        ),
+        Probe {
+            body: BLOCK_BODY,
+            ..probe(
+                Operation::PutPublicAccessBlock,
+                "PUT",
+                "/ann-photos",
+                &[("publicAccessBlock", None)],
+            )
+        },
+        probe(
+            Operation::GetPublicAccessBlock,
+            "GET",
+            "/ann-photos",
+            &[("publicAccessBlock", None)],
+        ),
+        probe(
+            Operation::DeletePublicAccessBlock,
+            "DELETE",
+            "/ann-photos",
+            &[("publicAccessBlock", None)],
         ),
         Probe {
             body: TAGGING_BODY,

@@ -18,6 +18,7 @@ mod notification;
 mod object_lock;
 pub mod objects;
 mod policy;
+mod public_access;
 mod quota;
 mod replication;
 mod retention;
@@ -55,6 +56,9 @@ pub(crate) async fn route(
             | Operation::DeleteBucketTagging
             | Operation::GetBucketPolicy
             | Operation::DeleteBucketPolicy
+            | Operation::GetBucketPolicyStatus
+            | Operation::GetPublicAccessBlock
+            | Operation::DeletePublicAccessBlock
     ) {
         buckets::resident(call).await?;
     }
@@ -93,6 +97,10 @@ pub(crate) async fn route(
         Operation::GetBucketPolicy => policy::get(call).await,
         Operation::PutBucketPolicy => policy::put(call, body).await,
         Operation::DeleteBucketPolicy => policy::delete(call).await,
+        Operation::GetBucketPolicyStatus => policy::status(call).await,
+        Operation::GetPublicAccessBlock => public_access::get(call).await,
+        Operation::PutPublicAccessBlock => public_access::put(call, body).await,
+        Operation::DeletePublicAccessBlock => public_access::delete(call).await,
         Operation::GetObjectLockConfiguration => object_lock::get(call).await,
         Operation::PutObjectLockConfiguration => object_lock::put(call, body).await,
         Operation::GetObjectRetention => retention::get_retention(call, objects::key(call)?).await,

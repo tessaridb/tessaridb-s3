@@ -78,6 +78,7 @@ DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS encryption ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS policy ON buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS public_access ON buckets TYPE string;
 DEFINE EVENT OR REPLACE object_lock_kept ON buckets FOR UPDATE \
 WHEN $before.object_lock != NONE AND ($after.object_lock = NONE OR $after.versioning != 'Enabled') \
 THEN THROW 'ObjectLockKept: a bucket with Object Lock keeps it, and keeps versioning enabled';

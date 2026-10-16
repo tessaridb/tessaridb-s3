@@ -77,6 +77,8 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::DeleteBucketTagging
         | Operation::PutBucketPolicy
         | Operation::DeleteBucketPolicy
+        | Operation::PutPublicAccessBlock
+        | Operation::DeletePublicAccessBlock
         // Releasing a legal hold must not be a plain write: a hold exists to outlast who may write.
         | Operation::PutObjectLegalHold => on(Need::ConfigureBucket),
         Operation::HeadBucket
@@ -89,6 +91,8 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::GetObjectLockConfiguration
         | Operation::GetBucketTagging
         | Operation::GetBucketPolicy
+        | Operation::GetBucketPolicyStatus
+        | Operation::GetPublicAccessBlock
         | Operation::ListObjects
         | Operation::ListObjectsV2
         | Operation::ListObjectVersions
