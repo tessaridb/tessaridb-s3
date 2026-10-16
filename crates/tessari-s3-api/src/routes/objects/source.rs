@@ -11,8 +11,9 @@ use tessari_s3_core::objects::copy::{CopySource, CopySourceError};
 use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Uploaded};
 use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
 
-use tessari_s3_storage::encryption::Sealing;
+use tessari_s3_storage::encryption::CustomerKey;
 
+use super::data::Seal;
 use super::{body, data};
 use crate::{Error, Result};
 
@@ -21,20 +22,6 @@ pub(super) fn text<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
         .get(name)
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
-}
-
-/// Refuses the copy source's customer-key encryption headers, which `read_put_headers` does not see.
-pub(crate) fn refuse_encrypted_source(headers: &HeaderMap) -> Result<()> {
-    if headers.keys().any(|name| {
-        name.as_str()
-            .starts_with("x-amz-copy-source-server-side-encryption")
-    }) {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "server-side encryption is not implemented",
-        ));
-    }
-    Ok(())
 }
 
 /// The object `x-amz-copy-source` names.
@@ -97,10 +84,12 @@ pub(crate) async fn read_source(
     Ok(object)
 }
 
-/// The source's verified bytes `start..=end`, in order; nothing for an empty object.
+/// The source's verified bytes `start..=end`, in order — opened with `customer`'s key when a customer's key sealed
+/// it; nothing for an empty object.
 pub(crate) async fn bytes(
     objects: &ObjectService,
     object: &StoredObject,
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
@@ -112,7 +101,7 @@ pub(crate) async fn bytes(
                 *id,
                 object.size,
                 object.encryption.as_ref(),
-                None,
+                customer,
                 start,
                 end,
             )
@@ -120,7 +109,7 @@ pub(crate) async fn bytes(
         }
         Content::Parts(multipart) => {
             let parts = &multipart.parts;
-            body::stream_parts(objects, parts, None, start, end).await?
+            body::stream_parts(objects, parts, customer, start, end).await?
         }
     })
 }
@@ -133,16 +122,18 @@ pub(crate) fn read_failed(error: &std::io::Error) -> Error {
     )
 }
 
-/// Writes `stream` into a new data file of exactly `length` bytes; any failure releases the file.
+/// Writes `stream` into a new data file of exactly `length` bytes, sealed as `seal` says; any failure releases the
+/// file.
 pub(crate) async fn into_file(
     objects: &ObjectService,
     mut stream: BoxStream<'static, std::io::Result<Bytes>>,
     length: u64,
-    sealing: Option<&Sealing>,
+    seal: Seal<'_>,
 ) -> Result<Uploaded> {
-    let mut upload = match sealing {
-        Some(sealing) => objects.upload_sealed(length, sealing).await?,
-        None => objects.upload(length).await?,
+    let mut upload = match seal {
+        Seal::Plain => objects.upload(length).await?,
+        Seal::Under(sealing) => objects.upload_sealed(length, sealing).await?,
+        Seal::Customer(key, customer) => objects.upload_customer(length, key, customer).await?,
     };
     let id = upload.id();
     let mut written = Ok(());

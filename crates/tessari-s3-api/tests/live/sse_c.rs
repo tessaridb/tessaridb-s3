@@ -388,8 +388,8 @@ async fn every_part_of_a_customer_sealed_upload_must_bring_the_key_it_was_create
     .await;
     assert_eq!(
         refused(&copied),
-        (501, Some("NotImplemented")),
-        "a copied part would not be under the upload's key: {}",
+        (400, Some("InvalidRequest")),
+        "a copied part brings the upload's key too: {}",
         copied.body
     );
     let one = call_tls(&state, "PUT", path, at("1"), customer.headers(), &first).await;
@@ -444,5 +444,148 @@ async fn every_part_of_a_customer_sealed_upload_must_bring_the_key_it_was_create
     assert!(
         !drive_holds(&state, &dir, "sealed", "large", &first[..64]).await,
         "the drive holds no plaintext"
+    );
+}
+
+/// The three headers that bring the key a copy's source is sealed under.
+fn source_headers(customer: &Customer) -> Vec<(&str, &str)> {
+    vec![
+        (
+            "x-amz-copy-source-server-side-encryption-customer-algorithm",
+            "AES256",
+        ),
+        (
+            "x-amz-copy-source-server-side-encryption-customer-key",
+            customer.key.as_str(),
+        ),
+        (
+            "x-amz-copy-source-server-side-encryption-customer-key-md5",
+            customer.md5.as_str(),
+        ),
+    ]
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_copy_opens_its_source_and_seals_its_destination_each_under_the_key_it_names() {
+    let _why = IGNORED;
+    let (state, _, dir) = fresh_with(scratch_dir()).await;
+    allowing(&state, "sealed").await;
+    let first = Customer::of(&[7_u8; 32]);
+    let second = Customer::of(&[8_u8; 32]);
+    let bytes = body();
+    let put = call_tls(&state, "PUT", "/sealed/a", vec![], first.headers(), &bytes).await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    let copying = |source: &'static str| ("x-amz-copy-source", source);
+
+    let mut wrong = source_headers(&second);
+    wrong.push(copying("/sealed/a"));
+    let refused_wrong = call_tls(&state, "PUT", "/sealed/b", vec![], wrong, b"").await;
+    assert_eq!(refused_wrong.status, 403, "{}", refused_wrong.body);
+    let mut in_clear = source_headers(&first);
+    in_clear.push(copying("/sealed/a"));
+    let refused_clear = call_with(&state, "PUT", "/sealed/b", vec![], in_clear, b"").await;
+    assert_eq!(
+        refused(&refused_clear),
+        (400, Some("InvalidRequest")),
+        "{}",
+        refused_clear.body
+    );
+
+    let mut both = source_headers(&first);
+    both.extend(second.headers());
+    both.push(copying("/sealed/a"));
+    let copied = call_tls(&state, "PUT", "/sealed/b", vec![], both, b"").await;
+    assert_eq!(copied.status, 200, "{}", copied.body);
+    assert_eq!(header(&copied, KEY_MD5), Some(second.md5.as_str()));
+    assert_ne!(
+        text(&copied.body, "ETag"),
+        Some(format!("\"{}\"", crate::multipart::md5_hex(&bytes))),
+        "a copy's ETag does not tell its bytes either"
+    );
+    let under_second = call_tls(&state, "GET", "/sealed/b", vec![], second.headers(), b"").await;
+    assert!(
+        under_second.bytes == bytes,
+        "the destination opens under its own key"
+    );
+    let under_first = call_tls(&state, "GET", "/sealed/b", vec![], first.headers(), b"").await;
+    assert_eq!(under_first.status, 403, "{}", under_first.body);
+    assert!(
+        !drive_holds(&state, &dir, "sealed", "b", &bytes[..64]).await,
+        "the copy's drive holds no plaintext"
+    );
+
+    let mut rotate = source_headers(&first);
+    rotate.extend(second.headers());
+    rotate.push(copying("/sealed/a"));
+    let rotated = call_tls(&state, "PUT", "/sealed/a", vec![], rotate, b"").await;
+    assert_eq!(
+        rotated.status, 200,
+        "a copy onto itself changes its key: {}",
+        rotated.body
+    );
+    let reread = call_tls(&state, "GET", "/sealed/a", vec![], second.headers(), b"").await;
+    assert!(reread.bytes == bytes, "the object opens under its new key");
+
+    let plain = call(&state, "PUT", "/sealed/plain", vec![], b"plain bytes").await;
+    assert_eq!(plain.status, 200, "{}", plain.body);
+    let mut sealing_plain = first.headers();
+    sealing_plain.push(copying("/sealed/plain"));
+    let sealed_copy = call_tls(&state, "PUT", "/sealed/c", vec![], sealing_plain, b"").await;
+    assert_eq!(sealed_copy.status, 200, "{}", sealed_copy.body);
+    let keyless = call_tls(&state, "GET", "/sealed/c", vec![], vec![], b"").await;
+    assert_eq!(
+        refused(&keyless),
+        (400, Some("InvalidRequest")),
+        "{}",
+        keyless.body
+    );
+
+    let created = call_tls(
+        &state,
+        "POST",
+        "/sealed/parts",
+        vec![("uploads", None)],
+        first.headers(),
+        b"",
+    )
+    .await;
+    assert_eq!(created.status, 200, "{}", created.body);
+    let upload = text(&created.body, "UploadId").expect("an upload id");
+    let at = vec![
+        ("partNumber", Some("1")),
+        ("uploadId", Some(upload.as_str())),
+    ];
+    let mut source_only = source_headers(&second);
+    source_only.push(copying("/sealed/a"));
+    let without_upload_key =
+        call_tls(&state, "PUT", "/sealed/parts", at.clone(), source_only, b"").await;
+    assert_eq!(
+        refused(&without_upload_key),
+        (400, Some("InvalidRequest")),
+        "a part copied into the upload brings the upload's key too: {}",
+        without_upload_key.body
+    );
+    let mut part_both = source_headers(&second);
+    part_both.extend(first.headers());
+    part_both.push(copying("/sealed/a"));
+    let part = call_tls(&state, "PUT", "/sealed/parts", at, part_both, b"").await;
+    assert_eq!(part.status, 200, "{}", part.body);
+    let part_etag = text(&part.body, "ETag").expect("a part ETag");
+    let listed = crate::complete::document(&[("1", part_etag.as_str())]);
+    let done = call_tls(
+        &state,
+        "POST",
+        "/sealed/parts",
+        vec![("uploadId", Some(upload.as_str()))],
+        vec![],
+        &listed,
+    )
+    .await;
+    assert_eq!(done.status, 200, "{}", done.body);
+    let assembled = call_tls(&state, "GET", "/sealed/parts", vec![], first.headers(), b"").await;
+    assert!(
+        assembled.bytes == bytes,
+        "a copied part opens under the upload's key"
     );
 }

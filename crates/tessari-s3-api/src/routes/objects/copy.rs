@@ -9,13 +9,15 @@ use axum::http::{HeaderMap, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests};
 use tessari_s3_core::objects::copy::Directive;
-use tessari_s3_storage::encryption::{Sealing, WrappedKey};
+use tessari_s3_storage::encryption::{CustomerKey, Sealing, WrappedKey};
 use tessari_s3_storage::objects::{Content, NewObject, ObjectService, StoredObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
+use super::customer::{admit, admit_read, answer_customer, read_source_customer};
+use super::data::Seal;
 use super::headers::read_put_headers;
 use super::put::not_written;
-use super::sse::{answer_sse, etag_for};
+use super::sse::{answer_sse, etag_for, opaque_etag};
 use super::{data, source};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{with_version, xml_response};
@@ -27,17 +29,18 @@ fn invalid(code: ErrorCode, message: &str) -> Error {
     Error::new(code, message)
 }
 
-/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008) — sealed under a data key of its own,
-/// wrapped by the key `sealing` names, when it names one, whatever the source was — and the wrapped key it is sealed
-/// under.
+/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008) — read with `source_key` when a
+/// customer's key sealed the source, and sealed as `seal` says under a data key of its own whatever the source was —
+/// and the wrapped key it is sealed under.
 async fn copy_bytes(
     objects: &ObjectService,
     object: &StoredObject,
-    sealing: Option<&Sealing>,
+    source_key: Option<&CustomerKey>,
+    seal: Seal<'_>,
 ) -> Result<(Content, Digests, Option<WrappedKey>)> {
     let last = object.size.saturating_sub(1);
-    let stream = source::bytes(objects, object, 0, last).await?;
-    let uploaded = source::into_file(objects, stream, object.size, sealing).await?;
+    let stream = source::bytes(objects, object, source_key, 0, last).await?;
+    let uploaded = source::into_file(objects, stream, object.size, seal).await?;
     Ok((
         Content::Data(uploaded.id),
         uploaded.digests,
@@ -68,14 +71,12 @@ fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumA
 
 /// `PUT /{bucket}/{key}` with `x-amz-copy-source`.
 pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
-    source::refuse_encrypted_source(call.headers)?;
+    let source_customer = read_source_customer(call.headers)?;
     let headers = read_put_headers(call.headers)?;
-    if headers.customer.is_some() {
-        return Err(invalid(
-            ErrorCode::NotImplemented,
-            "a copy sealed under a customer-provided key is not implemented",
-        ));
-    }
+    let customer_seal = match &headers.customer {
+        Some(customer) => Some(admit(call, customer).await?),
+        None => None,
+    };
     if headers.integrity.content_md5.is_some() || headers.integrity.checksum.is_some() {
         return Err(invalid(
             ErrorCode::InvalidRequest,
@@ -98,7 +99,12 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     let metadata = directive("x-amz-metadata-directive")?;
     let tagging = directive("x-amz-tagging-directive")?;
     let bucket = call.bucket()?;
-    if source_bucket == *bucket && source_key == *key && metadata == Directive::Copy {
+    // A copy onto itself that brings a customer's key changes the key it is sealed under.
+    if source_bucket == *bucket
+        && source_key == *key
+        && metadata == Directive::Copy
+        && headers.customer.is_none()
+    {
         return Err(invalid(
             ErrorCode::InvalidRequest,
             "This copy request is illegal because it is trying to copy an object to itself without changing the \
@@ -107,6 +113,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     }
     let objects = call.state.storage().objects();
     let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
+    admit_read(call, &object, source_customer.as_ref())?;
     if object.size > SINGLE_PUT_MAX {
         return Err(invalid(
             ErrorCode::InvalidRequest,
@@ -115,8 +122,18 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     }
     quota::admit(call, bucket, Some(key), object.size).await?;
     let algorithm = algorithm_for(call.headers, &object)?;
-    let sealing = super::sse::requested_or_default(call, headers.encryption.clone()).await?;
-    let (content, digests, encryption) = copy_bytes(objects, &object, sealing.as_ref()).await?;
+    // A customer's key replaces the bucket's default: the copy is sealed under it alone.
+    let sealing = match &headers.customer {
+        Some(_) => None,
+        None => super::sse::requested_or_default(call, headers.encryption.clone()).await?,
+    };
+    let seal = match (&headers.customer, &customer_seal) {
+        (Some(customer), Some(seal)) => Seal::Customer(&customer.key, seal),
+        _ => Seal::from(sealing.as_ref()),
+    };
+    let source_key_held = source_customer.as_ref().map(|customer| &customer.key);
+    let (content, digests, encryption) =
+        copy_bytes(objects, &object, source_key_held, seal).await?;
     let value = digests.value(algorithm).to_owned();
     // A whole-object value of the same algorithm must survive the copy; a composite one (`…-N`) covers part
     // digests and cannot be compared.
@@ -135,7 +152,11 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     let copied = NewObject {
         copied: true,
         size: object.size,
-        etag: etag_for(&digests.md5_hex, sealing.as_ref())?,
+        etag: if headers.customer.is_some() {
+            opaque_etag()?
+        } else {
+            etag_for(&digests.md5_hex, sealing.as_ref())?
+        },
         headers: system,
         metadata: user,
         tags,
@@ -179,6 +200,9 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             );
             if let Some(sealing) = copied.encryption.as_ref().and_then(Sealing::of) {
                 answer_sse(response.headers_mut(), &sealing);
+            }
+            if let Some(customer) = &headers.customer {
+                answer_customer(response.headers_mut(), customer);
             }
             Ok(response)
         }

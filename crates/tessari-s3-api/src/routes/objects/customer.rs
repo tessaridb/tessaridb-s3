@@ -25,41 +25,64 @@ pub(crate) struct Customer {
     pub(crate) md5: String,
 }
 
-fn invalid(message: &'static str) -> Error {
+const SOURCE_ALGORITHM: &str = "x-amz-copy-source-server-side-encryption-customer-algorithm";
+const SOURCE_KEY: &str = "x-amz-copy-source-server-side-encryption-customer-key";
+const SOURCE_KEY_MD5: &str = "x-amz-copy-source-server-side-encryption-customer-key-md5";
+
+fn invalid(message: String) -> Error {
     Error::new(ErrorCode::InvalidArgument, message)
 }
 
-/// The customer's key `headers` bring, if any: all three headers, the algorithm AES256, the key 256 bits in
-/// base64, and the MD5 the key's.
+/// The customer's key `headers` bring for the data a request writes or reads, if any.
+///
+/// # Errors
+/// As [`read_trio`].
+pub(crate) fn read_customer(headers: &HeaderMap) -> Result<Option<Customer>> {
+    read_trio(headers, [ALGORITHM, KEY, KEY_MD5])
+}
+
+/// The customer's key `headers` bring for a copy's source, if any.
+///
+/// # Errors
+/// `NotImplemented` for another copy-source encryption header; as [`read_trio`].
+pub(crate) fn read_source_customer(headers: &HeaderMap) -> Result<Option<Customer>> {
+    let names = [SOURCE_ALGORITHM, SOURCE_KEY, SOURCE_KEY_MD5];
+    if let Some(other) = headers.keys().map(|name| name.as_str()).find(|name| {
+        name.starts_with("x-amz-copy-source-server-side-encryption") && !names.contains(name)
+    }) {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            format!("{other} is not implemented"),
+        ));
+    }
+    read_trio(headers, names)
+}
+
+/// The key the three headers `names` (algorithm, key, key MD5) bring, if any: all three, the algorithm AES256, the
+/// key 256 bits in base64, and the MD5 the key's.
 ///
 /// # Errors
 /// `InvalidEncryptionAlgorithmError` for another algorithm; `InvalidArgument` for a missing header, a key that is
 /// not 256 bits, or an MD5 that is not the key's.
-pub(crate) fn read_customer(headers: &HeaderMap) -> Result<Option<Customer>> {
+fn read_trio(headers: &HeaderMap, names: [&str; 3]) -> Result<Option<Customer>> {
     let text = |name: &str| {
         headers
             .get(name)
             .and_then(|value| value.to_str().ok())
             .map(str::trim)
     };
-    let (algorithm, key, md5) = match (text(ALGORITHM), text(KEY), text(KEY_MD5)) {
+    let [algorithm_name, key_name, md5_name] = names;
+    let (algorithm, key, md5) = match (text(algorithm_name), text(key_name), text(md5_name)) {
         (None, None, None) => return Ok(None),
-        (None, _, _) => {
-            return Err(invalid(
-                "a customer-provided key needs x-amz-server-side-encryption-customer-algorithm",
-            ));
-        }
-        (_, None, _) => {
-            return Err(invalid(
-                "a customer-provided key needs x-amz-server-side-encryption-customer-key",
-            ));
-        }
-        (_, _, None) => {
-            return Err(invalid(
-                "a customer-provided key needs x-amz-server-side-encryption-customer-key-MD5",
-            ));
-        }
         (Some(algorithm), Some(key), Some(md5)) => (algorithm, key, md5),
+        (algorithm, key, _) => {
+            let missing = match (algorithm, key) {
+                (None, _) => algorithm_name,
+                (_, None) => key_name,
+                _ => md5_name,
+            };
+            return Err(invalid(format!("a customer-provided key needs {missing}")));
+        }
     };
     if algorithm != "AES256" {
         return Err(Error::new(
@@ -68,17 +91,15 @@ pub(crate) fn read_customer(headers: &HeaderMap) -> Result<Option<Customer>> {
         ));
     }
     let decoded = Zeroizing::new(STANDARD.decode(key).unwrap_or_default());
-    let bytes: Zeroizing<[u8; 32]> = Zeroizing::new(
-        decoded
-            .as_slice()
-            .try_into()
-            .map_err(|_| invalid("the customer-provided key is not a 256-bit key in base64"))?,
-    );
+    let bytes: Zeroizing<[u8; 32]> =
+        Zeroizing::new(decoded.as_slice().try_into().map_err(|_| {
+            invalid("the customer-provided key is not a 256-bit key in base64".to_owned())
+        })?);
     let digest = Md5::digest(bytes.as_slice());
     let declared = STANDARD.decode(md5).unwrap_or_default();
     if !bool::from(digest.as_slice().ct_eq(&declared)) {
         return Err(invalid(
-            "the MD5 of the customer-provided key does not match the one supplied",
+            "the MD5 of the customer-provided key does not match the one supplied".to_owned(),
         ));
     }
     Ok(Some(Customer {
