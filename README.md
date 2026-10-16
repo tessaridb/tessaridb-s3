@@ -286,7 +286,7 @@ The `Dockerfile` builds an image holding only the `tessaridb-s3` server — no d
 TessariDB node beside it, and `compose.yaml` runs the two together:
 
 ```sh
-cp .env.example .env        # set every value: the TessariDB owner, the server's own account password, the S3 root key and secret, the IAM key
+cp .env.example .env        # set every value: the TessariDB owner, the server's own account password, the S3 root key and secret, the IAM key, the keys passphrase
 docker compose up -d --wait
 aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
 ```
