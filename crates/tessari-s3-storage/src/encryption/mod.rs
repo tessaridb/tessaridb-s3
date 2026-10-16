@@ -15,6 +15,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::{Error, Result};
 
+pub(crate) mod stream;
+
 /// The algorithm every wrapped data key names; anything else does not open.
 pub const WRAP_ALGORITHM: &str = "xchacha20poly1305";
 /// Bytes a sealed block adds to the block it seals: the Poly1305 tag.

@@ -1,6 +1,7 @@
 use super::{
-    FORMAT, HASH_BYTES, HASH_LEN, HEADER_BYTES, HEADER_LEN, HeaderFault, MAGIC, Piece, block_count,
-    block_hash, block_span, decode_header, encode_header, file_len,
+    FORMAT, HASH_BYTES, HASH_LEN, HEADER_BYTES, HEADER_LEN, HeaderFault, MAGIC, Piece,
+    SEALED_FORMAT, SEALED_SHARD_FORMAT, block_count, block_hash, block_span, decode_header,
+    encode_header, file_len,
 };
 
 const ID: [u8; 16] = [7; 16];
@@ -8,65 +9,70 @@ const MIB: u32 = 1 << 20;
 
 #[test]
 fn a_header_round_trips_and_carries_magic_and_format() {
-    let header = encode_header(MIB, ID, Piece::Whole);
+    let header = encode_header(MIB, ID, Piece::Whole, false);
     assert_eq!(header[0..4], MAGIC);
     assert_eq!(u16::from_le_bytes([header[4], header[5]]), FORMAT);
     assert_eq!(header[12..28], ID);
-    assert_eq!(decode_header(&header, ID, Piece::Whole), Ok(MIB));
+    assert_eq!(decode_header(&header, ID, Piece::Whole, false), Ok(MIB));
 }
 
 #[test]
 fn a_header_is_refused_for_each_fault_by_name() {
-    let good = encode_header(MIB, ID, Piece::Whole);
+    let good = encode_header(MIB, ID, Piece::Whole, false);
     let mut magic = good;
     magic[0] = b'X';
     assert_eq!(
-        decode_header(&magic, ID, Piece::Whole),
+        decode_header(&magic, ID, Piece::Whole, false),
         Err(HeaderFault::Magic)
     );
     let mut newer = good;
     newer[4] = 2;
     assert_eq!(
-        decode_header(&newer, ID, Piece::Whole),
+        decode_header(&newer, ID, Piece::Whole, false),
         Err(HeaderFault::Format(2))
     );
     let mut flipped = good;
     flipped[9] ^= 1;
     assert_eq!(
-        decode_header(&flipped, ID, Piece::Whole),
+        decode_header(&flipped, ID, Piece::Whole, false),
         Err(HeaderFault::Check)
     );
     assert_eq!(
-        decode_header(&good, [8; 16], Piece::Whole),
+        decode_header(&good, [8; 16], Piece::Whole, false),
         Err(HeaderFault::Id)
     );
     assert_eq!(
-        decode_header(&encode_header(0, ID, Piece::Whole), ID, Piece::Whole),
+        decode_header(
+            &encode_header(0, ID, Piece::Whole, false),
+            ID,
+            Piece::Whole,
+            false
+        ),
         Err(HeaderFault::BlockSize)
     );
 }
 
 #[test]
 fn a_shard_header_names_its_index_and_is_never_read_as_a_whole_object() {
-    let shard = encode_header(MIB, ID, Piece::Shard(3));
+    let shard = encode_header(MIB, ID, Piece::Shard(3), false);
     assert_eq!(
         u16::from_le_bytes([shard[4], shard[5]]),
         2,
         "format 2 is a shard"
     );
-    assert_eq!(decode_header(&shard, ID, Piece::Shard(3)), Ok(MIB));
+    assert_eq!(decode_header(&shard, ID, Piece::Shard(3), false), Ok(MIB));
     assert_eq!(
-        decode_header(&shard, ID, Piece::Shard(4)),
+        decode_header(&shard, ID, Piece::Shard(4), false),
         Err(HeaderFault::Piece),
         "a shard moved to another index's name"
     );
     assert_eq!(
-        decode_header(&shard, ID, Piece::Whole),
+        decode_header(&shard, ID, Piece::Whole, false),
         Err(HeaderFault::Format(2))
     );
-    let whole = encode_header(MIB, ID, Piece::Whole);
+    let whole = encode_header(MIB, ID, Piece::Whole, false);
     assert_eq!(
-        decode_header(&whole, ID, Piece::Shard(0)),
+        decode_header(&whole, ID, Piece::Shard(0), false),
         Err(HeaderFault::Format(1))
     );
 }
@@ -108,4 +114,32 @@ fn the_layout_arithmetic_follows_the_size_and_block_size() {
 fn the_offset_constants_agree_with_the_lengths() {
     assert_eq!(u64::try_from(HEADER_LEN).ok(), Some(HEADER_BYTES));
     assert_eq!(u64::try_from(HASH_LEN).ok(), Some(HASH_BYTES));
+}
+
+#[test]
+fn a_sealed_file_has_its_own_format_and_is_never_read_as_plain_bytes() {
+    let sealed = encode_header(MIB, ID, Piece::Whole, true);
+    assert_eq!(u16::from_le_bytes([sealed[4], sealed[5]]), SEALED_FORMAT);
+    assert_eq!(decode_header(&sealed, ID, Piece::Whole, true), Ok(MIB));
+    assert_eq!(
+        decode_header(&sealed, ID, Piece::Whole, false),
+        Err(HeaderFault::Format(SEALED_FORMAT)),
+        "a reader expecting plain bytes refuses a sealed file by its format"
+    );
+    let plain = encode_header(MIB, ID, Piece::Whole, false);
+    assert_eq!(
+        decode_header(&plain, ID, Piece::Whole, true),
+        Err(HeaderFault::Format(FORMAT)),
+        "a reader expecting sealed bytes refuses a plain file"
+    );
+    let shard = encode_header(MIB, ID, Piece::Shard(3), true);
+    assert_eq!(
+        u16::from_le_bytes([shard[4], shard[5]]),
+        SEALED_SHARD_FORMAT
+    );
+    assert_eq!(decode_header(&shard, ID, Piece::Shard(3), true), Ok(MIB));
+    assert_eq!(
+        decode_header(&shard, ID, Piece::Shard(3), false),
+        Err(HeaderFault::Format(SEALED_SHARD_FORMAT))
+    );
 }

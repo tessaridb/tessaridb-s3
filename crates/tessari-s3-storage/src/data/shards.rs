@@ -23,7 +23,8 @@ impl DataFiles {
         index: u16,
         block_size: u32,
     ) -> Result<DataWriter> {
-        self.create_piece(id, Piece::Shard(index), block_size).await
+        self.create_piece(id, Piece::Shard(index), block_size, false)
+            .await
     }
 
     /// Opens shard `index` of data `id`, which must hold `size` bytes.
@@ -33,7 +34,7 @@ impl DataFiles {
         index: u16,
         size: u64,
     ) -> Result<DataReader> {
-        self.open_piece(id, Piece::Shard(index), size).await
+        self.open_piece(id, Piece::Shard(index), size, false).await
     }
 
     /// Removes shard `index` of data `id`; a missing shard is not an error.
