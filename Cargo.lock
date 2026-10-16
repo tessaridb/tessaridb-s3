@@ -3036,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-api"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3073,7 +3073,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-bench"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3095,11 +3095,11 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-constants"
-version = "0.1.0-beta"
+version = "0.1.0"
 
 [[package]]
 name = "tessari-s3-core"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3119,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-daemons"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3139,7 +3139,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-infrastructure"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-node"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3198,7 +3198,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-observability"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "tessari-s3-constants",
  "tessari-s3-types",
@@ -3209,7 +3209,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-storage"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3235,7 +3235,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-types"
-version = "0.1.0-beta"
+version = "0.1.0"
 dependencies = [
  "tessari-s3-constants",
  "thiserror 2.0.21",
