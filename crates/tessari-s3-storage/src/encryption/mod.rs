@@ -15,9 +15,11 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::{Error, Result};
 
+mod customer;
 mod sealing;
 pub(crate) mod stream;
 
+pub use customer::{CUSTOMER_KEK_ID, CustomerKey, CustomerSeal};
 pub(crate) use sealing::NAMED_KEY_PREFIX;
 pub use sealing::{KeyName, Sealing};
 
