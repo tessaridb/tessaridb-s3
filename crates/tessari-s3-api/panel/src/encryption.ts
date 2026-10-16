@@ -79,7 +79,7 @@ function createForm(screen: Screen): HTMLElement {
   const said = el("div", { "aria-live": "polite" });
   const form = el(
     "form",
-    { class: "confirm", novalidate: "", "aria-labelledby": "keys-create-title" },
+    { class: "confirm card-part", novalidate: "", "aria-labelledby": "keys-create-title" },
     el("p", { id: "keys-create-title" }, el("strong", {}, "Create a named key")),
     name.row,
     passphrase.row,

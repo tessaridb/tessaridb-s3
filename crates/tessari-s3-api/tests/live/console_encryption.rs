@@ -126,3 +126,128 @@ async fn root_unseals_and_seals_the_keys_and_every_act_is_recorded_without_the_p
         );
     }
 }
+
+const DEFAULT: &str = "/api/v1/buckets/sealed-by-default/encryption";
+
+/// The default encryption the bucket list shows for `bucket`.
+fn default_of(listing: &Value, bucket: &str) -> Value {
+    listing["buckets"]
+        .as_array()
+        .expect("buckets")
+        .iter()
+        .find(|row| row["name"] == bucket)
+        .map(|row| row["encryption"].clone())
+        .expect("listed")
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_bucket_default_is_set_only_by_who_configures_it_and_only_under_a_key_held() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    assert_eq!(
+        crate::call(&state, "PUT", "/sealed-by-default", vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let root = sign_in(&console).await;
+    let server = r#"{"algorithm":"AES256","reason":"tenant asked"}"#;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    let as_ann = sign_in_as(&console, &ann).await.expect("signed in");
+    let probe = send(&console, "PUT", DEFAULT, Some(&as_ann), Some(server)).await;
+    assert_eq!(probe.status, 403, "a member who may not configure it");
+
+    let sealed = send(&console, "PUT", DEFAULT, Some(&root), Some(server)).await;
+    assert_eq!(
+        (sealed.status, sealed.code().as_deref()),
+        (409, Some("keys_sealed"))
+    );
+    crate::sse::unseal(&state).await;
+    for (body, status, code) in [
+        (
+            r#"{"algorithm":"aws:kms","key":"nobody","reason":"x"}"#,
+            400,
+            "unknown_key",
+        ),
+        (
+            r#"{"algorithm":"aws:kms","key":"Not A Name","reason":"x"}"#,
+            400,
+            "invalid_key_name",
+        ),
+        (
+            r#"{"algorithm":"DES","reason":"x"}"#,
+            400,
+            "invalid_encryption",
+        ),
+        (r#"{"algorithm":"AES256"}"#, 400, "reason_required"),
+    ] {
+        let refused = send(&console, "PUT", DEFAULT, Some(&root), Some(body)).await;
+        assert_eq!(
+            (refused.status, refused.code().as_deref()),
+            (status, Some(code)),
+            "{body}"
+        );
+    }
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "sealed-by-default"),
+        Value::Null,
+        "nothing was set by a refusal"
+    );
+
+    let set = send(&console, "PUT", DEFAULT, Some(&root), Some(server)).await;
+    assert_eq!(set.status, 204);
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "sealed-by-default")["algorithm"],
+        "AES256"
+    );
+    let put = crate::call(&state, "PUT", "/sealed-by-default/k", vec![], b"bytes").await;
+    assert_eq!(
+        crate::sse::sse_header(&put),
+        Some(&b"AES256"[..]),
+        "the default seals a write set from the console"
+    );
+
+    let cleared = send(
+        &console,
+        "PUT",
+        DEFAULT,
+        Some(&root),
+        Some(r#"{"algorithm":"none","reason":"tenant left"}"#),
+    )
+    .await;
+    assert_eq!(cleared.status, 204);
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(default_of(&listed.json(), "sealed-by-default"), Value::Null);
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let recorded: Vec<(String, String)> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| {
+            action["operation"]
+                .as_str()
+                .is_some_and(|operation| operation.starts_with("set_encryption"))
+        })
+        .map(|action| {
+            let text = |field: &str| action[field].as_str().unwrap_or_default().to_owned();
+            (text("operation"), text("outcome"))
+        })
+        .collect();
+    for expected in [
+        ("set_encryption AES256", "sealed"),
+        ("set_encryption aws:kms nobody", "unknown_key"),
+        ("set_encryption AES256", "done"),
+        ("set_encryption none", "done"),
+    ] {
+        assert!(
+            recorded
+                .iter()
+                .any(|(operation, outcome)| (operation.as_str(), outcome.as_str()) == expected),
+            "{expected:?} in {recorded:?}"
+        );
+    }
+}

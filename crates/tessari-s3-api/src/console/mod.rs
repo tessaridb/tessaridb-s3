@@ -7,6 +7,7 @@ mod access;
 mod acknowledgement;
 mod actions;
 mod break_glass;
+mod bucket_encryption;
 mod buckets;
 mod cluster;
 mod content;
@@ -276,6 +277,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route(
             "/api/v1/buckets/{bucket}/acknowledgement",
             put(acknowledgement::set),
+        )
+        .route(
+            "/api/v1/buckets/{bucket}/encryption",
+            put(bucket_encryption::set),
         )
         .route(
             "/api/v1/buckets/{bucket}/media",

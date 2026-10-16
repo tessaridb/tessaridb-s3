@@ -74,14 +74,33 @@
     return buckets2 === null ? null : { taken: v["taken"], stale: v["stale"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
   }
   var acknowledgement = (v) => v === "majority" || v === "region";
-  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) && acknowledgement(v["acknowledgement"]) ? {
-    name: v["name"],
-    created: v["created"],
-    region: v["region"],
-    maxBytes: v["max_bytes"],
-    maxObjects: v["max_objects"],
-    acknowledgement: v["acknowledgement"]
-  } : null;
+  function bucketEncryption(v) {
+    if (v === null) {
+      return null;
+    }
+    if (!record(v)) {
+      return void 0;
+    }
+    if (v["algorithm"] === "AES256" && v["key"] === null) {
+      return { algorithm: "AES256" };
+    }
+    return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"] } : void 0;
+  }
+  function bucket(v) {
+    if (!record(v)) {
+      return null;
+    }
+    const encryption = bucketEncryption(v["encryption"]);
+    return text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) && acknowledgement(v["acknowledgement"]) && encryption !== void 0 ? {
+      name: v["name"],
+      created: v["created"],
+      region: v["region"],
+      maxBytes: v["max_bytes"],
+      maxObjects: v["max_objects"],
+      acknowledgement: v["acknowledgement"],
+      encryption
+    } : null;
+  }
   function readBuckets(v) {
     return record(v) ? list(v["buckets"], bucket) : null;
   }
@@ -632,6 +651,7 @@
     ban: [ring(12, 12, 9), "M5.6 5.6l12.8 12.8"],
     check: [ring(12, 12, 9), "M8 12.5l2.5 2.5L16 9.5"],
     shield: ["M12 3l8 3v6c0 4.4-3.4 8.2-8 9-4.6-.8-8-4.6-8-9V6z", "M9 12l2 2 4-4"],
+    sliders: ["M4 6h9", "M17 6h3", ring(15, 6, 2), "M4 12h3", "M11 12h9", ring(9, 12, 2), "M4 18h11", "M19 18h1", ring(17, 18, 2)],
     gauge: ["M4 18a8 8 0 1 1 16 0", "M12 18l4-6", "M12 18h.01"],
     upload: ["M12 20V9", "M7.5 13.5L12 9l4.5 4.5", "M5 4h14"]
   };
@@ -779,6 +799,83 @@
       });
       if (answer.ok) {
         announce(`Set the write acknowledgement of ${bucket2.name}.`);
+        screen.redraw();
+        return;
+      }
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(answer));
+    });
+    return form;
+  }
+
+  // src/bucket-encryption.ts
+  //! A bucket's default encryption: how a write that asks for no encryption is
+  //! sealed — under the server's key, under a key an operator created by name, or
+  //! not at all. The server sets it only while this node holds its keys and, for a
+  //! named key, that key; its refusal is shown as it came. Who may configure the
+  //! bucket sets it; the reason goes into the action record.
+  var KEY_NAME = /^[a-z0-9-]{1,64}$/;
+  function encryptionChip(bucket2) {
+    const sealing = bucket2.encryption;
+    if (sealing === null) {
+      return null;
+    }
+    return el("span", { class: "chip ok", title: "Default encryption" }, sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`);
+  }
+  function encryptionForm(screen, bucket2, close) {
+    const id = `sse-${bucket2.name}`;
+    const current2 = bucket2.encryption?.algorithm ?? "none";
+    const choice = (value, label, note) => {
+      const input = el("input", { type: "radio", name: `${id}-algorithm`, id: `${id}-${value}`, value });
+      if (current2 === value) {
+        input.setAttribute("checked", "");
+      }
+      return el("div", { class: "choice" }, input, el("label", { for: `${id}-${value}` }, el("strong", {}, label), " — ", note));
+    };
+    const named = bucket2.encryption?.algorithm === "aws:kms" ? bucket2.encryption.key : "";
+    const key = field(`${id}-key`, "Key name", { maxlength: "64", value: named, autocomplete: "off" }, "For aws:kms: a key created on the Encryption page.");
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const save = el("button", { type: "submit", class: "primary" }, "Set");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Default encryption: "), mono(bucket2.name)),
+      choice("none", "None", "a write is sealed only when it asks to be."),
+      choice("AES256", "Server key", "every write that asks for nothing is sealed under the server's key (SSE-S3)."),
+      choice("aws:kms", "Named key", "every write that asks for nothing is sealed under the key named below (SSE-KMS)."),
+      key.row,
+      reason.row,
+      el("div", { class: "actions" }, save, cancel),
+      said
+    );
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const picked = form.querySelector(`input[name="${id}-algorithm"]:checked`);
+      if (picked === null) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Choose one."));
+        return;
+      }
+      const name = key.input.value.trim();
+      if (picked.value === "aws:kms" && !KEY_NAME.test(name)) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "A key name is 1-64 lowercase letters, digits and hyphens."));
+        key.input.focus();
+        return;
+      }
+      const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, reason: reason.input.value.trim() } : { algorithm: picked.value, reason: reason.input.value.trim() };
+      const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket2.name)}/encryption`, ignored, body);
+      if (answer.ok) {
+        announce(`Set the default encryption of ${bucket2.name}.`);
         screen.redraw();
         return;
       }
@@ -1520,40 +1617,41 @@
   var numeric = (text2) => el("span", { class: "numeric" }, text2);
   function bucketRow(screen, bucket2, usage) {
     const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket2.name}`, "danger");
-    const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket2.name}`) : null;
-    const acknowledge = screen.may?.operate === true ? iconAction("shield", "Acknowledgement…", `Write acknowledgement of ${bucket2.name}`) : null;
     const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
     const media = iconAction("image", "Media…", `Media rules of ${bucket2.name}`);
+    const settings = iconAction("sliders", "Settings…", `Settings of ${bucket2.name}`);
     const held = figures(usage, bucket2);
     const line = row(
-      el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket2.name)),
+      el(
+        "span",
+        {},
+        el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket2.name)),
+        encryptionChip(bucket2)
+      ),
       numeric(held === null ? "—" : amount(held.objects)),
       numeric(held === null ? "—" : size(held.bytes)),
       numeric(held === null ? "—" : size(held.raw_bytes)),
       numeric(limits(bucket2)),
       moment(bucket2.created),
       bucket2.acknowledgement === "region" ? el("span", {}, mono(bucket2.region), " · region majority") : mono(bucket2.region),
-      el("div", { class: "actions" }, upload, media, quota, acknowledge, remove)
+      el("div", { class: "actions" }, upload, media, settings, remove)
     );
-    acknowledge?.addEventListener("click", () => {
+    settings.addEventListener("click", () => {
       const cell = el("td", { colspan: "8" });
       const region = el("tr", { class: "asking" }, cell);
+      const close = () => {
+        region.remove();
+        settings.focus();
+      };
+      const operate = screen.may?.operate === true;
       cell.append(
-        acknowledgementForm(screen, bucket2, () => {
-          region.remove();
-          acknowledge.focus();
-        })
-      );
-      line.after(region);
-    });
-    quota?.addEventListener("click", () => {
-      const cell = el("td", { colspan: "8" });
-      const region = el("tr", { class: "asking" }, cell);
-      cell.append(
-        quotaForm(screen, bucket2, () => {
-          region.remove();
-          quota.focus();
-        })
+        el(
+          "div",
+          { class: "settings" },
+          encryptionForm(screen, bucket2, close),
+          operate ? quotaForm(screen, bucket2, close) : null,
+          operate ? acknowledgementForm(screen, bucket2, close) : null
+        )
       );
       line.after(region);
     });
@@ -2287,7 +2385,7 @@
     const said = el("div", { "aria-live": "polite" });
     const form = el(
       "form",
-      { class: "confirm", novalidate: "", "aria-labelledby": "keys-create-title" },
+      { class: "confirm card-part", novalidate: "", "aria-labelledby": "keys-create-title" },
       el("p", { id: "keys-create-title" }, el("strong", {}, "Create a named key")),
       name.row,
       passphrase.row,

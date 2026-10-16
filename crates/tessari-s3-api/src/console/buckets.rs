@@ -11,6 +11,7 @@ use tessari_s3_core::authz::{Action, Principal, SpaceName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
 use tessari_s3_storage::buckets::{Acknowledgement, Created, Deleted};
+use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_types::BucketName;
 
 use super::ConsoleState;
@@ -28,6 +29,16 @@ struct BucketView {
     max_objects: Option<u64>,
     /// `region` when its writes are acknowledged by its region's majority alone, `majority` otherwise.
     acknowledgement: &'static str,
+    /// The default encryption of writes that ask for none; null while there is none.
+    encryption: Option<EncryptionView>,
+}
+
+#[derive(Serialize)]
+struct EncryptionView {
+    /// `AES256` or `aws:kms`.
+    algorithm: &'static str,
+    /// The named key under `aws:kms`.
+    key: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -63,6 +74,18 @@ pub(super) async fn list(
                     Acknowledgement::Majority => "majority",
                     Acknowledgement::RegionMajority => "region",
                 },
+                encryption: bucket
+                    .encryption
+                    .map(|encryption| match encryption.sealing {
+                        Sealing::Server => EncryptionView {
+                            algorithm: "AES256",
+                            key: None,
+                        },
+                        Sealing::Named(name) => EncryptionView {
+                            algorithm: "aws:kms",
+                            key: Some(name.as_str().to_owned()),
+                        },
+                    }),
             })
             .collect(),
     }))

@@ -45,7 +45,10 @@ export type Bucket = {
   readonly maxObjects: number | null;
   /** Who acknowledges its writes: the majority keeping its metadata, or its region's majority alone. */
   readonly acknowledgement: "majority" | "region";
+  /** How a write that asks for no encryption is sealed: the server's key, a named key, or not at all (null). */
+  readonly encryption: BucketEncryption;
 };
+export type BucketEncryption = { readonly algorithm: "AES256" } | { readonly algorithm: "aws:kms"; readonly key: string } | null;
 export type ObjectRow = {
   readonly key: string;
   readonly size: number;
@@ -217,14 +220,32 @@ export function readUsage(v: unknown): Usage | null {
 
 const acknowledgement = (v: unknown): v is Bucket["acknowledgement"] => v === "majority" || v === "region";
 
-const bucket = (v: unknown): Bucket | null =>
-  record(v) &&
-  text(v["name"]) &&
-  text(v["created"]) &&
-  text(v["region"]) &&
-  countOrNull(v["max_bytes"]) &&
-  countOrNull(v["max_objects"]) &&
-  acknowledgement(v["acknowledgement"])
+/** The default encryption a bucket row sends, or undefined for one it cannot send. */
+function bucketEncryption(v: unknown): BucketEncryption | undefined {
+  if (v === null) {
+    return null;
+  }
+  if (!record(v)) {
+    return undefined;
+  }
+  if (v["algorithm"] === "AES256" && v["key"] === null) {
+    return { algorithm: "AES256" };
+  }
+  return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"] } : undefined;
+}
+
+function bucket(v: unknown): Bucket | null {
+  if (!record(v)) {
+    return null;
+  }
+  const encryption = bucketEncryption(v["encryption"]);
+  return text(v["name"]) &&
+    text(v["created"]) &&
+    text(v["region"]) &&
+    countOrNull(v["max_bytes"]) &&
+    countOrNull(v["max_objects"]) &&
+    acknowledgement(v["acknowledgement"]) &&
+    encryption !== undefined
     ? {
         name: v["name"],
         created: v["created"],
@@ -232,8 +253,10 @@ const bucket = (v: unknown): Bucket | null =>
         maxBytes: v["max_bytes"],
         maxObjects: v["max_objects"],
         acknowledgement: v["acknowledgement"],
+        encryption,
       }
     : null;
+}
 
 export function readBuckets(v: unknown): readonly Bucket[] | null {
   return record(v) ? list(v["buckets"], bucket) : null;

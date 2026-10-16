@@ -760,10 +760,20 @@ table {
 th,
 td {
   text-align: start;
-  padding: 0 var(--card-inset);
+  padding: 0 var(--s-4);
   block-size: var(--row-height);
   border-block-end: 1px solid var(--border);
   vertical-align: middle;
+}
+
+/* The card's inset at the table's two edges only; between columns a narrower gap, so a row of eight columns and its
+   actions fits a card at a laptop width instead of scrolling them out of view. */
+:where(th, td):first-child {
+  padding-inline-start: var(--card-inset);
+}
+
+:where(th, td):last-child {
+  padding-inline-end: var(--card-inset);
 }
 
 tbody tr:last-child td {
@@ -805,6 +815,24 @@ a.name .icon {
 
 a.name:hover .icon {
   color: var(--accent-text);
+}
+
+/* A bucket's settings opened together under its row: one form after another, each set apart. */
+.settings > form + form {
+  margin-block-start: var(--s-6);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--border);
+}
+
+/* A second task inside a card, set apart from what comes before it. */
+.card-part {
+  margin-block-start: var(--s-6);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--border);
+}
+
+a.name + .chip {
+  margin-inline-start: var(--s-2);
 }
 
 tr.asking td,
@@ -1107,6 +1135,27 @@ button.icon-action.danger {
 .check input {
   min-block-size: auto;
   accent-color: var(--accent);
+}
+
+/* One option of a radio group: the control beside its explanation, on the explanation's first line. */
+.choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: var(--s-2);
+  margin-block-end: var(--s-3);
+  max-inline-size: 48rem;
+}
+
+.choice input {
+  margin: 0;
+  padding: 0;
+  min-block-size: auto;
+  accent-color: var(--accent);
+}
+
+.choice label {
+  font-weight: 450;
 }
 
 /* A secret shown once: set apart so it is not mistaken for ordinary output. */
