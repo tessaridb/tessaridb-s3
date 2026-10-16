@@ -102,6 +102,7 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_ROOT_ACCESS_KEY` | — (required) | the root credential's access key |
 | `TESSARIDB_S3_ROOT_SECRET_KEY` | — (required, ≥ 16 bytes) | the root credential's secret |
 | `TESSARIDB_S3_LISTEN` | `127.0.0.1:9100` | the address the S3 API listens on |
+| `TESSARIDB_S3_TLS_CERT` / `_KEY` | unset (plain) | the S3 API over TLS: its certificate chain and private key (PEM), both or neither; TLS 1.2 and 1.3 only |
 | `TESSARIDB_S3_REGION` | `us-east-1` | the region requests must be signed for; its buckets' objects are kept in the database `<database>_<region>`, and a request for another region's bucket is answered `301 PermanentRedirect` |
 | `TESSARIDB_S3_DOMAINS` | empty | comma-separated endpoint domains for `<bucket>.<domain>` addressing; path-style always works |
 | `TESSARIDB_S3_MAX_INFLIGHT` | `1024` | requests served at once before new ones get `503 SlowDown` |
@@ -294,8 +295,8 @@ aws --endpoint-url http://127.0.0.1:9100 s3 mb s3://first
 The database (`tessaridb/tessaridb:0.34.2-beta`; a store an earlier image created opens unchanged and keeps its on-disk format until `ALTER STORE FINALIZE FORMAT` — run that only once no older image will open the store again) declares its owner from `.env` on first start and is reachable only
 from the S3 server over the compose network. A one-shot `s3-account` step (`docker/s3-account.sh`) signs in as that
 owner once to declare the namespace, the database and the server's own account; the server then signs in as `s3`,
-an editor of the `s3` namespace that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; put
-a TLS-terminating proxy in front before exposing either. Both keep their data in named volumes, and the server runs
+an editor of the `s3` namespace that is refused anything outside it. S3 (`9100`) and the console (`9101`) are published on `127.0.0.1`; give
+each its certificate, or put a TLS-terminating proxy in front, before exposing either. Both keep their data in named volumes, and the server runs
 as a non-root user. The image carries no credential: every required value comes from the environment, and the
 server refuses to start without them. The published image is `tessaridb/s3` (linux/amd64 and linux/arm64), distroless
 and non-root; `tessaridb-s3 health` is its health check.

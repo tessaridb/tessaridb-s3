@@ -22,6 +22,19 @@ use tokio_rustls::TlsAcceptor;
 
 use crate::PeerCertificate;
 
+/// Serves the S3 API on `listener` until `shutdown` completes, over TLS when `tls` is given.
+///
+/// # Errors
+/// The listener's failure.
+pub async fn serve_s3(
+    listener: TcpListener,
+    state: crate::ApiState,
+    tls: Option<Arc<ServerConfig>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    serve(listener, crate::router(state), tls, shutdown, "s3").await
+}
+
 /// Serves `router` on `listener` until `shutdown` completes, over TLS when `tls` is given; `surface` names it in the
 /// log.
 ///

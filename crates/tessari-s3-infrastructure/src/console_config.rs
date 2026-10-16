@@ -8,7 +8,7 @@ use tessari_s3_constants::{
 };
 
 use crate::config::parse_positive;
-use crate::tls::ConsoleTls;
+use crate::tls::ServerTls;
 use crate::{Error, Result};
 
 /// Where and how the operator console is served. Absent means no console.
@@ -17,7 +17,7 @@ pub struct ConsoleSettings {
     /// `TESSARIDB_S3_CONSOLE_LISTEN` — the address the console listens on.
     pub listen: SocketAddr,
     /// `TESSARIDB_S3_CONSOLE_TLS_CERT` and `_KEY` — both or neither; `None` serves in the clear.
-    pub tls: Option<ConsoleTls>,
+    pub tls: Option<ServerTls>,
     /// `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` — sign-in attempts per client address per minute.
     pub sign_ins_per_minute: usize,
     /// `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` — console requests per signed-in key per minute.
@@ -82,12 +82,7 @@ pub(crate) fn console_settings(
         key: LISTEN,
         reason: "not an IP address and port",
     })?;
-    let tls = match (get(CERT), get(KEY)) {
-        (None, None) => None,
-        (Some(_), None) => return Err(Error::MissingConfig { key: KEY }),
-        (None, Some(_)) => return Err(Error::MissingConfig { key: CERT }),
-        (Some(cert), Some(key)) => Some(ConsoleTls::new(read(CERT, &cert)?, read(KEY, &key)?)),
-    };
+    let tls = tls_pair(get, CERT, KEY)?;
     Ok(Some(ConsoleSettings {
         listen,
         tls,
@@ -97,6 +92,24 @@ pub(crate) fn console_settings(
             .unwrap_or(DEFAULT_CONSOLE_REQUESTS_PER_MINUTE),
         oidc: crate::oidc_config::oidc_settings(get)?,
     }))
+}
+
+/// A listener's certificate and key, read from the files `cert` and `key` name: both or neither, and a half pair is
+/// refused naming the missing one, since an operator who set one file believes the listener speaks TLS.
+pub(crate) fn tls_pair(
+    get: &impl Fn(&str) -> Option<String>,
+    cert: &'static str,
+    key: &'static str,
+) -> Result<Option<ServerTls>> {
+    match (get(cert), get(key)) {
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(Error::MissingConfig { key }),
+        (None, Some(_)) => Err(Error::MissingConfig { key: cert }),
+        (Some(cert_path), Some(key_path)) => Ok(Some(ServerTls::new(
+            read(cert, &cert_path)?,
+            read(key, &key_path)?,
+        ))),
+    }
 }
 
 fn read(key: &'static str, path: &str) -> Result<Vec<u8>> {

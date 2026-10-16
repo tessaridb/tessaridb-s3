@@ -404,3 +404,52 @@ fn the_advertised_endpoint_is_an_http_url_naming_a_host() {
         );
     }
 }
+
+#[test]
+fn the_s3_listener_speaks_tls_only_with_both_files_and_says_which_one_is_missing() {
+    assert!(load(&CREDENTIALS).expect("loads").tls.is_none());
+    let dir = std::env::temp_dir().join(format!("s3-tls-config-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let (cert, key) = (dir.join("cert.pem"), dir.join("key.pem"));
+    std::fs::write(&cert, b"certificate bytes").expect("cert");
+    std::fs::write(&key, b"key bytes").expect("key");
+    let (cert, key) = (cert.to_str().expect("utf-8"), key.to_str().expect("utf-8"));
+    let with = |extra: &[(&'static str, &str)]| {
+        let mut vars: Vec<(&str, &str)> = CREDENTIALS.to_vec();
+        vars.extend_from_slice(extra);
+        load(&vars)
+    };
+    let both = with(&[
+        ("TESSARIDB_S3_TLS_CERT", cert),
+        ("TESSARIDB_S3_TLS_KEY", key),
+    ])
+    .expect("loads");
+    assert_eq!(
+        both.tls.expect("tls").certificate_pem,
+        b"certificate bytes".to_vec()
+    );
+    assert!(matches!(
+        with(&[("TESSARIDB_S3_TLS_CERT", cert)]).map(|_| ()),
+        Err(Error::MissingConfig {
+            key: "TESSARIDB_S3_TLS_KEY"
+        })
+    ));
+    assert!(matches!(
+        with(&[("TESSARIDB_S3_TLS_KEY", key)]).map(|_| ()),
+        Err(Error::MissingConfig {
+            key: "TESSARIDB_S3_TLS_CERT"
+        })
+    ));
+    assert!(matches!(
+        with(&[
+            ("TESSARIDB_S3_TLS_CERT", "/nonexistent/cert.pem"),
+            ("TESSARIDB_S3_TLS_KEY", key)
+        ])
+        .map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_TLS_CERT",
+            reason: "not a readable file"
+        })
+    ));
+    std::fs::remove_dir_all(dir).expect("cleanup");
+}

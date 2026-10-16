@@ -14,6 +14,7 @@ mod oidc_provider;
 mod operations;
 mod peers;
 mod refusals;
+mod s3_tls;
 mod signer;
 
 use axum::body::{Body, to_bytes};

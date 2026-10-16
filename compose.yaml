@@ -5,8 +5,9 @@
 #
 # The database is not published: only the S3 server reaches it, over the
 # compose network. S3 (9100) and the console (9101) are published on
-# 127.0.0.1; put a TLS-terminating proxy in front before exposing either,
-# because without TLS a signed-in console key crosses the network in the clear.
+# 127.0.0.1; give each its certificate (TESSARIDB_S3_TLS_CERT / _KEY,
+# TESSARIDB_S3_CONSOLE_TLS_CERT / _KEY) or put a TLS-terminating proxy in front
+# before exposing either: without TLS a console key crosses the network in the clear.
 name: tessaridb-s3
 
 services:

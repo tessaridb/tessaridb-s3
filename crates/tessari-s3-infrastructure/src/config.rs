@@ -58,6 +58,8 @@ pub struct S3Config {
     pub advertise: Option<String>,
     /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
     pub cluster: Option<ClusterSettings>,
+    /// `TESSARIDB_S3_TLS_CERT` and `_KEY` — both or neither; `None` serves the S3 API in the clear.
+    pub tls: Option<crate::tls::ServerTls>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
     pub console: Option<crate::console_config::ConsoleSettings>,
     /// `TESSARIDB_S3_IAM_KEY` — the root key user access-key secrets are sealed under; unset, the root credential is
@@ -166,6 +168,8 @@ impl S3Config {
             });
         }
         let cluster = cluster_settings(&get)?;
+        let tls =
+            crate::console_config::tls_pair(&get, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY")?;
         let console = crate::console_config::console_settings(&get)?;
         let iam_key = crate::iam_config::iam_key(&get)?;
         let keys_passphrase = crate::keys_config::keys_passphrase(&get);
@@ -173,6 +177,7 @@ impl S3Config {
         Ok(Self {
             meta,
             cluster,
+            tls,
             console,
             iam_key,
             keys_passphrase,

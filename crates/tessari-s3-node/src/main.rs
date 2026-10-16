@@ -15,8 +15,9 @@ mod membership;
 use std::time::Duration;
 
 use std::sync::Arc;
-use tessari_s3_api::{ApiState, router};
+use tessari_s3_api::{ApiState, serve_s3};
 use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_infrastructure::tls::listener_config;
 use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
@@ -208,10 +209,16 @@ async fn main() -> anyhow::Result<()> {
     daemons.spawn(run(Arc::new(scanner), stop_rx.clone()));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
-    let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
+    let state = ApiState::new(&config, ApiState::system_clock(), storage);
+    let tls = config
+        .tls
+        .as_ref()
+        .map(|tls| listener_config(tls, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY"))
+        .transpose()?;
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
+    tracing::info!(listen = %config.listen, tls = tls.is_some(), "S3 API listening");
     let mut server_stop = stop_rx;
-    let s3 = axum::serve(listener, app).with_graceful_shutdown(async move {
+    let s3 = serve_s3(listener, state, tls, async move {
         // A closed sender also means stop: the select below has returned.
         let _closed = server_stop.changed().await;
     });
@@ -229,7 +236,7 @@ async fn main() -> anyhow::Result<()> {
                 None => Ok(()),
             }
         };
-        tokio::try_join!(s3.into_future(), internal, console).map(|_| ())
+        tokio::try_join!(s3, internal, console).map(|_| ())
     };
     let mut server = std::pin::pin!(server);
     tokio::select! {
