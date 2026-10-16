@@ -99,7 +99,32 @@ async fn a_policy_denial_is_counted_and_the_replication_backlog_is_read() {
     ] {
         assert!(text.contains(line), "missing {line}in\n{text}");
     }
-    // A node outside an erasure-coded cluster heals nothing, so it reports no heal backlog at all.
+    // A node outside an erasure-coded cluster heals nothing and has no members, so it reports neither.
     assert!(!text.contains("s3_heal_backlog"), "{text}");
+    assert!(!text.contains("s3_cluster_members{"), "{text}");
+    assert!(
+        text.contains("s3_collect_up{source=\"cluster\"} 1\n"),
+        "{text}"
+    );
     assert!(!text.contains("s3_auth_refusals_total{"), "{text}");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_cluster_members_and_those_answering_are_counted() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    // Registered at addresses nothing listens on: members that do not answer.
+    for name in ["n1", "n2"] {
+        let node = tessari_s3_types::NodeId::new(name).expect("a node id");
+        crate::joined(state.storage(), &node, "127.0.0.1:1", None).await;
+    }
+    let text = scrape(state).await;
+    for line in [
+        "s3_cluster_members{} 2\n",
+        "s3_cluster_members_answering{} 0\n",
+        "s3_collect_up{source=\"cluster\"} 1\n",
+    ] {
+        assert!(text.contains(line), "missing {line}in\n{text}");
+    }
 }

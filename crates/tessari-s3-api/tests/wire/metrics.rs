@@ -167,6 +167,10 @@ async fn a_backlog_the_metadata_store_cannot_answer_is_reported_down() {
         text.contains("s3_collect_up{source=\"replication\"} 0\n"),
         "{text}"
     );
+    assert!(
+        text.contains("s3_collect_up{source=\"cluster\"} 0\n"),
+        "{text}"
+    );
     assert!(!text.contains("s3_replication_backlog{"), "{text}");
 }
 

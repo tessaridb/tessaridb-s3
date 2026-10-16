@@ -36,6 +36,8 @@ pub struct Metrics {
     replication_backlog: Family<Unlabelled, Gauge>,
     replication_in_flight: Family<Unlabelled, Gauge>,
     replication_failed: Family<Unlabelled, Gauge>,
+    members: Family<Unlabelled, Gauge>,
+    members_answering: Family<Unlabelled, Gauge>,
     collect_up: Family<SourceLabels, Gauge>,
     audit_written: Counter,
     audit_dropped: Counter,
@@ -104,6 +106,14 @@ impl Metrics {
                 "replication_failed",
                 "Replication tasks given up, their versions FAILED",
             ),
+            (
+                "cluster_members",
+                "Nodes the cluster's metadata names as members",
+            ),
+            (
+                "cluster_members_answering",
+                "Of those members, the ones that answered a probe at this scrape",
+            ),
         ]
         .map(|(name, help)| {
             let gauge = Family::<Unlabelled, Gauge>::default();
@@ -116,6 +126,8 @@ impl Metrics {
             replication_backlog,
             replication_in_flight,
             replication_failed,
+            members,
+            members_answering,
         ] = gauges;
         let collect_up = Family::<SourceLabels, Gauge>::default();
         registry.register(
@@ -151,6 +163,8 @@ impl Metrics {
             replication_backlog,
             replication_in_flight,
             replication_failed,
+            members,
+            members_answering,
             collect_up,
             audit_written,
             audit_dropped,
@@ -219,7 +233,17 @@ impl Metrics {
             .set(gauge_value(failed));
     }
 
-    /// Records whether `source` (`heal`, `replication`) could be read at this scrape.
+    /// Sets the cluster's member count and how many of them answered.
+    pub fn cluster(&self, members: u64, answering: u64) {
+        self.members
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(members));
+        self.members_answering
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(answering));
+    }
+
+    /// Records whether `source` (`heal`, `replication`, `cluster`) could be read at this scrape.
     pub fn collected(&self, source: &'static str, read: bool) {
         self.collect_up
             .get_or_create(&SourceLabels { source })
