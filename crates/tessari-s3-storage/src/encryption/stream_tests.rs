@@ -5,8 +5,8 @@ use tessari_s3_core::objects::checksum::Hashes;
 
 use super::{Sealer, plain_block, sealed_size};
 use crate::Error;
-use crate::data::{DataFiles, Piece, block_hash, block_span, encode_header};
-use crate::encryption::{BLOCK_TAG_LEN, DataKey};
+use crate::data::{DataFiles, block_hash, block_span};
+use crate::encryption::{BLOCK_TAG_LEN, DataKey, WrappedKey};
 use crate::objects::{ObjectReader, Upload, Uploaded};
 
 /// Stored block size; a sealed block carries [`PLAIN`] bytes of the object.
@@ -18,6 +18,16 @@ fn scratch() -> PathBuf {
         "tessari-s3-sealed-{}",
         uuid::Uuid::new_v4().simple()
     ))
+}
+
+/// A wrapped key the upload carries along; nothing here unwraps it.
+fn wrapped() -> WrappedKey {
+    WrappedKey {
+        algorithm: "xchacha20poly1305".to_owned(),
+        kek_id: "server_1".to_owned(),
+        nonce: vec![0; 24],
+        ciphertext: vec![0; 48],
+    }
 }
 
 fn key(byte: u8) -> DataKey {
@@ -49,7 +59,7 @@ async fn seal(
 ) -> Uploaded {
     let writer = files.create_sealed(data_id).await.expect("create");
     let sealer = Sealer::new(key, data_id, size_of(bytes), files.block_size()).expect("sealer");
-    let mut upload = Upload::new(data_id, writer).sealing(sealer);
+    let mut upload = Upload::new(data_id, writer).sealing(sealer, wrapped());
     for chunk in bytes.chunks(piece.max(1)) {
         upload.append(chunk).await.expect("append");
     }
@@ -204,151 +214,5 @@ async fn the_drive_holds_no_plaintext() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
-#[tokio::test]
-async fn a_changed_byte_another_key_or_a_moved_block_does_not_open() {
-    let root = scratch();
-    let files = DataFiles::new(root.clone(), BLOCK);
-    let bytes = body(3 * PLAIN);
-    let size = size_of(&bytes);
-    let stored = sealed_size(size, BLOCK).expect("stored");
-    seal(&files, id(1), key(9), &bytes, 48).await;
-
-    let wrong = open(&files, id(1), key(8), size).await;
-    assert!(
-        matches!(wrong.read_block(0).await, Err(Error::Unsealable)),
-        "another key"
-    );
-
-    let original = stored_block(&files, id(1), stored, 1);
-    let mut flipped = original.clone();
-    flipped[5] ^= 1;
-    rewrite(&files, id(1), stored, 1, &flipped);
-    let reader = open(&files, id(1), key(9), size).await;
-    assert!(
-        matches!(reader.read_block(1).await, Err(Error::Unsealable)),
-        "a changed byte"
-    );
-    assert_eq!(
-        reader.read_block(0).await.expect("block 0"),
-        bytes[..PLAIN],
-        "the others still open"
-    );
-    rewrite(&files, id(1), stored, 1, &original);
-    assert_eq!(
-        reader.read_block(1).await.expect("restored"),
-        bytes[PLAIN..2 * PLAIN]
-    );
-
-    let first = stored_block(&files, id(1), stored, 0);
-    rewrite(&files, id(1), stored, 0, &original);
-    rewrite(&files, id(1), stored, 1, &first);
-    assert!(
-        matches!(reader.read_block(0).await, Err(Error::Unsealable)),
-        "block 1 at 0"
-    );
-    assert!(
-        matches!(reader.read_block(1).await, Err(Error::Unsealable)),
-        "block 0 at 1"
-    );
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[tokio::test]
-async fn a_file_cut_at_a_block_boundary_does_not_open_as_a_shorter_object() {
-    let root = scratch();
-    let files = DataFiles::new(root.clone(), BLOCK);
-    let bytes = body(2 * PLAIN);
-    seal(&files, id(1), key(9), &bytes, 48).await;
-    // The first stored block alone, laid out as a one-block object: the drive's checks pass, the seal does not.
-    let one = sealed_size(size_of(&bytes[..PLAIN]), BLOCK).expect("stored");
-    let path = files.path(id(1));
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .expect("open")
-        .set_len(32 + one + 32)
-        .expect("truncate");
-    let reader = open(&files, id(1), key(9), size_of(&bytes[..PLAIN])).await;
-    assert!(
-        matches!(reader.read_block(0).await, Err(Error::Unsealable)),
-        "a non-last block read as the last"
-    );
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[tokio::test]
-async fn sealed_bytes_moved_to_another_data_id_do_not_open() {
-    let root = scratch();
-    let files = DataFiles::new(root.clone(), BLOCK);
-    let bytes = body(PLAIN + 3);
-    seal(&files, id(1), key(9), &bytes, 48).await;
-    let moved = files.path(id(2));
-    std::fs::create_dir_all(moved.parent().expect("dir")).expect("dir");
-    std::fs::copy(files.path(id(1)), &moved).expect("copy");
-    // Its header rewritten for the new id, so only the seal's associated data can tell.
-    let header = encode_header(BLOCK, id(2), Piece::Whole, true);
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(&moved)
-        .expect("open")
-        .write_all_at(&header, 0)
-        .expect("header");
-    let reader = open(&files, id(2), key(9), size_of(&bytes)).await;
-    assert!(matches!(reader.read_block(0).await, Err(Error::Unsealable)));
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[tokio::test]
-async fn a_sealed_upload_holds_to_its_declared_length() {
-    let root = scratch();
-    let files = DataFiles::new(root.clone(), BLOCK);
-    let long = {
-        let writer = files.create_sealed(id(1)).await.expect("create");
-        let mut upload = Upload::new(id(1), writer)
-            .sealing(Sealer::new(key(9), id(1), 10, BLOCK).expect("sealer"));
-        upload.append(&body(11)).await
-    };
-    assert!(
-        matches!(
-            long,
-            Err(Error::SealedLength {
-                declared: 10,
-                received: 11
-            })
-        ),
-        "{long:?}"
-    );
-    let writer = files.create_sealed(id(2)).await.expect("create");
-    let mut upload =
-        Upload::new(id(2), writer).sealing(Sealer::new(key(9), id(2), 100, BLOCK).expect("sealer"));
-    upload.append(&body(60)).await.expect("append");
-    let short = upload.finish().await;
-    assert!(
-        matches!(
-            short,
-            Err(Error::SealedLength {
-                declared: 100,
-                received: 60
-            })
-        ),
-        "{short:?}"
-    );
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[tokio::test]
-async fn a_plain_reader_refuses_a_sealed_file() {
-    let root = scratch();
-    let files = DataFiles::new(root.clone(), BLOCK);
-    let bytes = body(PLAIN);
-    seal(&files, id(1), key(9), &bytes, 48).await;
-    let stored = sealed_size(size_of(&bytes), BLOCK).expect("stored");
-    assert!(matches!(
-        files.open(id(1), stored).await,
-        Err(Error::Corrupt {
-            reason: "header",
-            ..
-        })
-    ));
-    std::fs::remove_dir_all(root).expect("cleanup");
-}
+#[path = "stream_refusal_tests.rs"]
+mod refusals;

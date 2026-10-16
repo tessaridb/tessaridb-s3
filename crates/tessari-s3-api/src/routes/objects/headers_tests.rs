@@ -56,7 +56,18 @@ fn system_headers_and_metadata_are_kept_and_aws_chunked_is_removed() {
 #[test]
 fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
     assert_eq!(
-        refused(&[("x-amz-server-side-encryption", "AES256")]),
+        refused(&[("x-amz-server-side-encryption", "aws:kms")]),
+        ErrorCode::NotImplemented
+    );
+    assert_eq!(
+        refused(&[
+            ("x-amz-server-side-encryption", "AES256"),
+            ("x-amz-server-side-encryption-aws-kms-key-id", "k")
+        ]),
+        ErrorCode::NotImplemented
+    );
+    assert_eq!(
+        refused(&[("x-amz-server-side-encryption-customer-algorithm", "AES256")]),
         ErrorCode::NotImplemented
     );
     assert_eq!(
@@ -251,4 +262,17 @@ fn the_tagging_header_is_read_as_tags_or_refused_as_an_invalid_tag() {
             "{header}"
         );
     }
+}
+
+#[test]
+fn server_side_encryption_with_the_servers_keys_is_asked_for_by_name() {
+    let asked =
+        read_put_headers(&headers(&[("x-amz-server-side-encryption", "AES256")])).expect("reads");
+    assert!(asked.encrypted, "AES256 asks for the server's own keys");
+    let plain = read_put_headers(&headers(&[])).expect("reads");
+    assert!(!plain.encrypted);
+    assert_eq!(
+        refused(&[("x-amz-server-side-encryption", "rot13")]),
+        ErrorCode::InvalidArgument
+    );
 }

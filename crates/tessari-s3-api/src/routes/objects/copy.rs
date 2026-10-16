@@ -58,6 +58,11 @@ fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumA
 pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     source::refuse_encrypted_source(call.headers)?;
     let headers = read_put_headers(call.headers)?;
+    if headers.encrypted {
+        return Err(super::headers::not_implemented(
+            "server-side encryption of a copy",
+        ));
+    }
     if headers.integrity.content_md5.is_some() || headers.integrity.checksum.is_some() {
         return Err(invalid(
             ErrorCode::InvalidRequest,
@@ -123,6 +128,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         checksums: [(algorithm.name().to_owned(), value.clone())].into(),
         content,
         lock: headers.lock.lock(),
+        encryption: None,
     };
     if damaged {
         if let Content::Data(id) = copied.content {

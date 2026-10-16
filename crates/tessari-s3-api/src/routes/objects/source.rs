@@ -104,7 +104,17 @@ pub(crate) async fn bytes(
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
     Ok(match &object.content {
         _ if object.size == 0 => futures_util::stream::empty().boxed(),
-        Content::Data(id) => body::blocks(objects, *id, object.size, start, end).await?,
+        Content::Data(id) => {
+            body::blocks(
+                objects,
+                *id,
+                object.size,
+                object.encryption.as_ref(),
+                start,
+                end,
+            )
+            .await?
+        }
         Content::Parts(multipart) => {
             let parts: Vec<([u8; 16], u64)> = multipart
                 .parts

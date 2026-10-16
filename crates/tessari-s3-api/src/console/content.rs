@@ -82,9 +82,16 @@ pub(super) async fn download(
     let content = match &object.content {
         // An empty object has no byte to read back.
         _ if object.size == 0 => Body::empty(),
-        Content::Data(id) => body::send(objects, *id, object.size, 0, last)
-            .await
-            .map_err(|error| failed(&error))?,
+        Content::Data(id) => body::send(
+            objects,
+            *id,
+            object.size,
+            object.encryption.as_ref(),
+            0,
+            last,
+        )
+        .await
+        .map_err(|error| failed(&error))?,
         Content::Parts(multipart) => {
             let parts: Vec<([u8; 16], u64)> = multipart
                 .parts

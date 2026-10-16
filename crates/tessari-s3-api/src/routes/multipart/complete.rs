@@ -203,6 +203,12 @@ pub(crate) async fn complete(
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let headers = read_put_headers(call.headers)?;
+    if headers.encrypted {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "server-side encryption of a multipart upload is not implemented",
+        ));
+    }
     // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
     // carried yet, and are refused rather than dropped.
     if headers.lock.asked {

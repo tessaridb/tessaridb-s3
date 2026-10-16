@@ -238,6 +238,7 @@ impl MultipartService {
                 parts,
             }),
             lock: Lock::default(),
+            encryption: None,
         };
         match self
             .objects

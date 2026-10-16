@@ -165,6 +165,14 @@ DEFINE FIELD IF NOT EXISTS retain_until ON versions TYPE datetime;
 DEFINE FIELD IF NOT EXISTS legal_hold ON versions TYPE bool;
 DEFINE FIELD IF NOT EXISTS lock_bypass ON versions TYPE bool;
 DEFINE FIELD IF NOT EXISTS tags ON versions TYPE object;
+DEFINE FIELD IF NOT EXISTS sse_alg ON objects TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kek ON objects TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_nonce ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_key ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_alg ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kek ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_nonce ON versions TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_key ON versions TYPE bytes;
 DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
 DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \

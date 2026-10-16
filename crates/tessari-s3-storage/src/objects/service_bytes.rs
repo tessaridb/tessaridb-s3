@@ -146,6 +146,7 @@ impl ObjectService {
             content: Content::Data(uploaded.id),
             copied: false,
             lock: Lock::default(),
+            encryption: None,
         };
         self.put(bucket, key, &object, &WriteCondition::None).await
     }

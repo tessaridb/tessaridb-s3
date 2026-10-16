@@ -9,6 +9,7 @@ use tessari_s3_core::objects::checksum::Digests;
 
 use crate::Result;
 use crate::data::DataWriter;
+use crate::encryption::WrappedKey;
 use crate::encryption::stream::Sealer;
 use crate::erasure::{ErasureUpload, ErasureWrites};
 
@@ -25,7 +26,7 @@ enum Sink {
 pub struct Upload {
     id: [u8; 16],
     sink: Sink,
-    sealer: Option<Sealer>,
+    sealer: Option<(Sealer, WrappedKey)>,
 }
 
 /// Durable data, not yet referenced by any object.
@@ -37,6 +38,8 @@ pub struct Uploaded {
     pub size: u64,
     /// The object's MD5 and checksums, computed as the bytes were written.
     pub digests: Digests,
+    /// The wrapped data key the bytes are sealed under; none when they were written plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 impl Sink {
@@ -69,9 +72,10 @@ impl Upload {
         }
     }
 
-    /// The same upload with every byte sealed by `sealer` before it reaches the sink.
-    pub(crate) fn sealing(mut self, sealer: Sealer) -> Self {
-        self.sealer = Some(sealer);
+    /// The same upload with every byte sealed by `sealer` before it reaches the sink, under the data key `wrapped`
+    /// holds.
+    pub(crate) fn sealing(mut self, sealer: Sealer, wrapped: WrappedKey) -> Self {
+        self.sealer = Some((sealer, wrapped));
         self
     }
 
@@ -86,7 +90,7 @@ impl Upload {
     /// # Errors
     /// The drive's failure, or on a cluster member too few shards left for the write quorum; the upload is then over.
     pub async fn append(&mut self, mut bytes: &[u8]) -> Result<()> {
-        let Some(sealer) = &mut self.sealer else {
+        let Some((sealer, _)) = &mut self.sealer else {
             return self.sink.append(bytes).await;
         };
         while !bytes.is_empty() {
@@ -105,7 +109,7 @@ impl Upload {
     /// # Errors
     /// The drive's failure, a failed sync included (never retried), too few durable shards, or the store's.
     pub async fn finish(mut self) -> Result<Uploaded> {
-        let Some(sealer) = self.sealer.take() else {
+        let Some((sealer, wrapped)) = self.sealer.take() else {
             return self.finish_sink().await;
         };
         let size = sealer.declared();
@@ -118,6 +122,7 @@ impl Upload {
             id: stored.id,
             size,
             digests,
+            encryption: Some(wrapped),
         })
     }
 
@@ -130,6 +135,7 @@ impl Upload {
                     id: self.id,
                     size: finished.size,
                     digests: finished.digests,
+                    encryption: None,
                 })
             }
             Sink::Erasure { upload, writes } => {
@@ -141,6 +147,7 @@ impl Upload {
                     id: self.id,
                     size: written.size,
                     digests: written.digests,
+                    encryption: None,
                 })
             }
         }

@@ -95,6 +95,12 @@ fn key_text(key: &ObjectKey) -> Result<String> {
 /// `POST /{bucket}/{key}?uploads`.
 pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
+    if headers.encrypted {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "server-side encryption of a multipart upload is not implemented",
+        ));
+    }
     // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
     // carried yet, and are refused rather than dropped.
     if headers.lock.asked {
@@ -168,7 +174,7 @@ pub(crate) async fn upload_part(
         return Err(no_such_upload());
     }
     quota::admit(call, bucket, None, length).await?;
-    let (uploaded, trailer) = data::receive(call, body, length).await?;
+    let (uploaded, trailer) = data::receive(call, body, length, false).await?;
     let algorithm = match check(&integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {

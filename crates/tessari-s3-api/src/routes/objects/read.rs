@@ -127,7 +127,15 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             _ if object.size == 0 => Body::empty(),
             Content::Data(id) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
-                body::send(call.state.storage().objects(), *id, object.size, start, end).await?
+                body::send(
+                    call.state.storage().objects(),
+                    *id,
+                    object.size,
+                    object.encryption.as_ref(),
+                    start,
+                    end,
+                )
+                .await?
             }
             Content::Parts(multipart) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
@@ -238,6 +246,9 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     }
     if let Some(status) = &object.replication {
         set(headers, "x-amz-replication-status", status);
+    }
+    if object.encryption.is_some() {
+        set(headers, "x-amz-server-side-encryption", "AES256");
     }
     if !object.tags.is_empty() {
         set(

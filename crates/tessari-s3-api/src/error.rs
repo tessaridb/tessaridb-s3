@@ -85,6 +85,10 @@ impl From<tessari_s3_storage::Error> for Error {
                     "the metadata store is busy; reduce your request rate",
                 )
             }
+            Storage::KeysSealed => Self::new(
+                ErrorCode::ServiceUnavailable,
+                "the encryption keys are sealed on this node; an operator must unseal them",
+            ),
             Storage::OtherRegion { region } => Self::new(
                 ErrorCode::PermanentRedirect,
                 "the bucket you are attempting to access must be addressed using the specified endpoint",

@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use tessari_s3_types::Timestamp;
 
 use super::model_lock::Lock;
+use crate::encryption::WrappedKey;
 
 /// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,8 @@ pub struct NewObject {
     pub copied: bool,
     /// What Object Lock keeps the new version under (ADR-0016); nothing for a bucket without Object Lock.
     pub lock: Lock,
+    /// The wrapped data key its bytes are sealed under; none for an object stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// A stored object.
@@ -82,6 +85,8 @@ pub struct StoredObject {
     pub version: Option<String>,
     /// Its replication status (`PENDING`, `COMPLETED`, `FAILED` or `REPLICA`); none when it is not replicated.
     pub replication: Option<String>,
+    /// The wrapped data key its bytes are sealed under; none for an object stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.

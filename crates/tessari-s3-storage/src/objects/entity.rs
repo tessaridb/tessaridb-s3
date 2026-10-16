@@ -6,6 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
 use super::model::{Content, Multipart, NewObject, ObjectSummary, StoredObject};
 use super::repository::ListRow;
+use crate::encryption::WrappedKey;
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -68,12 +69,53 @@ pub(crate) fn record(
     .chain(content)
     // Only a tagged object carries the field, so an untagged record is what it always was.
     .chain((!object.tags.is_empty()).then(|| ("tags", strings(&object.tags))))
+    // Likewise only a sealed object carries its wrapped data key.
+    .chain(object.encryption.iter().flat_map(sealed_fields))
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
     Ok(Value::Object(fields))
 }
 
 type Fields = BTreeMap<String, Value>;
+
+/// The fields holding a sealed object's wrapped data key.
+fn sealed_fields(key: &WrappedKey) -> [(&'static str, Value); 4] {
+    [
+        ("sse_alg", Value::String(key.algorithm.clone())),
+        ("sse_kek", Value::String(key.kek_id.clone())),
+        ("sse_nonce", Value::Bytes(key.nonce.clone())),
+        ("sse_key", Value::Bytes(key.ciphertext.clone())),
+    ]
+}
+
+/// A record's wrapped data key: none when it carries no part of one, refused when it carries only some.
+fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
+    let field = |name| {
+        fields
+            .get(name)
+            .filter(|value| !matches!(value, Value::None))
+    };
+    match (
+        field("sse_alg"),
+        field("sse_kek"),
+        field("sse_nonce"),
+        field("sse_key"),
+    ) {
+        (None, None, None, None) => Ok(None),
+        (
+            Some(Value::String(algorithm)),
+            Some(Value::String(kek_id)),
+            Some(Value::Bytes(nonce)),
+            Some(Value::Bytes(ciphertext)),
+        ) => Ok(Some(WrappedKey {
+            algorithm: algorithm.clone(),
+            kek_id: kek_id.clone(),
+            nonce: nonce.clone(),
+            ciphertext: ciphertext.clone(),
+        })),
+        _ => Err(malformed("a wrapped data key")),
+    }
+}
 
 fn incarnation(fields: &Fields) -> Result<[u8; 16]> {
     match fields.get("incarnation") {
@@ -156,6 +198,7 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
             Some(Value::String(status)) => Some(status.clone()),
             Some(_) => return Err(malformed("replication_status")),
         },
+        encryption: sealed(fields)?,
     };
     Ok((incarnation(fields)?, object))
 }
@@ -184,3 +227,7 @@ pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
         },
     })
 }
+
+#[cfg(test)]
+#[path = "entity_tests.rs"]
+mod tests;

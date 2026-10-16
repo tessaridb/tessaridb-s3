@@ -7,8 +7,8 @@ use tessari_s3_constants::DATA_BLOCK_SIZE;
 
 use super::ObjectService;
 use crate::data::hex;
-use crate::encryption::DataKey;
 use crate::encryption::stream::{Sealer, sealed_size};
+use crate::encryption::{DataKey, WrappedKey, unwrap, wrap};
 use crate::objects::ObjectReader;
 use crate::objects::model::{HealBacklog, Healed, MoveBacklog, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
@@ -26,20 +26,25 @@ impl ObjectService {
             .await
     }
 
-    /// As [`Self::upload`], every byte sealed under `key`, a data key drawn for this data id alone. Shards still carry
-    /// format 2 on a cluster member (the sealed shard format reaches the peers with W3c of the plan).
+    /// As [`Self::upload`], every byte sealed under a data key drawn for this data id alone and wrapped under the
+    /// active encryption key; the finished upload carries the wrapped key. Shards still carry format 2 on a cluster
+    /// member (the sealed shard format reaches the peers with W3c of the plan).
     ///
     /// # Errors
-    /// As [`Self::upload`]; [`Error::SealedLength`] when `size` cannot be laid out in sealed blocks.
-    pub async fn upload_sealed(&self, size: u64, key: DataKey) -> Result<Upload> {
+    /// [`Error::KeysSealed`] when this node holds no encryption keys; as [`Self::upload`]; [`Error::SealedLength`]
+    /// when `size` cannot be laid out in sealed blocks.
+    pub async fn upload_sealed(&self, size: u64) -> Result<Upload> {
+        let ring = self.keys.ring()?;
         let id = *uuid::Uuid::new_v4().as_bytes();
         let stored_block = self.stored_block();
         let stored = sealed_size(size, stored_block).ok_or(Error::SealedLength {
             declared: size,
             received: 0,
         })?;
+        let key = DataKey::generate()?;
+        let wrapped = wrap(ring.active(), &key, id)?;
         let sealer = Sealer::new(key, id, size, stored_block)?;
-        Ok(self.start(id, stored, true).await?.sealing(sealer))
+        Ok(self.start(id, stored, true).await?.sealing(sealer, wrapped))
     }
 
     /// Bytes per stored block: an erasure stripe on a cluster member, else a data file block.
@@ -228,12 +233,23 @@ impl ObjectService {
         self.open_stored(id, size, false).await
     }
 
-    /// As [`Self::open`], for data sealed under `key` holding an object of `size` bytes.
+    /// As [`Self::open`], for data sealed under the data key `wrapped` holds, which an encryption key of this node's
+    /// unwraps.
     ///
     /// # Errors
-    /// As [`Self::open`]; [`Error::Unsealable`] when the stored bytes do not lay out `size`, or per block when one
-    /// does not open.
-    pub async fn open_sealed(&self, id: [u8; 16], size: u64, key: DataKey) -> Result<ObjectReader> {
+    /// [`Error::KeysSealed`] when this node holds no encryption keys; as [`Self::open`]; [`Error::Unsealable`] when
+    /// no key held unwraps it, when the stored bytes do not lay out `size`, or per block when one does not open.
+    pub async fn open_sealed(
+        &self,
+        id: [u8; 16],
+        size: u64,
+        wrapped: &WrappedKey,
+    ) -> Result<ObjectReader> {
+        let key = {
+            let ring = self.keys.ring()?;
+            let kek = ring.get(&wrapped.kek_id).ok_or(Error::Unsealable)?;
+            unwrap(kek, wrapped, id)?
+        };
         let stored = sealed_size(size, self.stored_block()).ok_or(Error::Unsealable)?;
         let reader = self.open_stored(id, stored, true).await?;
         ObjectReader::sealed(reader, key, id, size)

@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::auth::PayloadHash;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Digests};
+use tessari_s3_storage::encryption::WrappedKey;
 use tessari_s3_storage::objects::{Content, NewObject, WriteCondition, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
@@ -121,7 +122,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
     }
     quota::admit(call, call.bucket()?, Some(key), length).await?;
     let objects = call.state.storage().objects();
-    let (uploaded, trailer) = data::receive(call, body, length).await?;
+    let (uploaded, trailer) = data::receive(call, body, length, headers.encrypted).await?;
     let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {
@@ -137,7 +138,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
         &uploaded.digests,
         uploaded.size,
         algorithm,
-        content,
+        (content, uploaded.encryption),
     )
     .await
 }
@@ -151,8 +152,9 @@ async fn commit(
     digests: &Digests,
     size: u64,
     algorithm: ChecksumAlgorithm,
-    content: Content,
+    (content, encryption): (Content, Option<WrappedKey>),
 ) -> Result<Response<Body>> {
+    let sealed = encryption.is_some();
     let etag = format!("\"{}\"", digests.md5_hex);
     let declared_checksum = headers.integrity.checksum.is_some();
     let object = NewObject {
@@ -169,6 +171,7 @@ async fn commit(
         .into(),
         content,
         lock: headers.lock.lock(),
+        encryption,
     };
     let bucket = call.bucket()?;
     let objects = call.state.storage().objects();
@@ -197,6 +200,12 @@ async fn commit(
             let response_headers = response.headers_mut();
             if let Ok(value) = HeaderValue::from_str(&etag) {
                 response_headers.insert("etag", value);
+            }
+            if sealed {
+                response_headers.insert(
+                    "x-amz-server-side-encryption",
+                    HeaderValue::from_static("AES256"),
+                );
             }
             if let Some(value) = declared_checksum
                 .then(|| HeaderValue::from_str(digests.value(algorithm)).ok())

@@ -28,15 +28,21 @@ fn incomplete() -> Error {
     )
 }
 
-/// Streams the body (decoded when aws-chunked) into a new data file of exactly `length` bytes and checks the signed
-/// payload hash. Every failure here releases the file and its queue entry before it is returned.
+/// Streams the body (decoded when aws-chunked) into a new data file of exactly `length` bytes — sealed under the
+/// server's keys when `sealed` — and checks the signed payload hash. Every failure here releases the file and its
+/// queue entry before it is returned.
 pub(crate) async fn receive(
     call: &Call<'_>,
     body: Body,
     length: u64,
+    sealed: bool,
 ) -> Result<(Uploaded, Option<String>)> {
     let objects = call.state.storage().objects();
-    let mut upload = objects.upload(length).await?;
+    let mut upload = if sealed {
+        objects.upload_sealed(length).await?
+    } else {
+        objects.upload(length).await?
+    };
     let id = upload.id();
     let outcome = match fill(call, body, length, &mut upload).await {
         Ok(trailer) => match upload.finish().await {

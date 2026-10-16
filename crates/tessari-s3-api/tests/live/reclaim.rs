@@ -84,6 +84,7 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
         checksums: BTreeMap::new(),
         content: Content::Data(uploaded.id),
         lock: Lock::default(),
+        encryption: None,
     };
     let bucket = BucketName::new("race").expect("name");
     let key = ObjectKey::new("k").expect("key");

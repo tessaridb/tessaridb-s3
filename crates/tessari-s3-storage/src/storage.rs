@@ -63,7 +63,12 @@ impl Storage {
         let regional = pool.regional(region)?;
         let data = DataFiles::new(data_dir, DATA_BLOCK_SIZE);
         let shards = ShardService::new(data.clone());
-        let objects = ObjectService::new(TessariObjects::new(regional.clone()), data);
+        let keys = Arc::new(KeyService::new(TessariKeys::new(pool.clone())));
+        let objects = ObjectService::new(
+            TessariObjects::new(regional.clone()),
+            data,
+            Arc::clone(&keys),
+        );
         let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
         Ok(Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone(), regional.clone())),
@@ -77,7 +82,7 @@ impl Storage {
             usage: UsageService::new(TessariUsage::new(regional.clone())),
             users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
             identities: IdentityService::new(TessariIdentities::new(pool.clone())),
-            keys: Arc::new(KeyService::new(TessariKeys::new(pool.clone()))),
+            keys,
             spaces,
             objects,
             shards,
