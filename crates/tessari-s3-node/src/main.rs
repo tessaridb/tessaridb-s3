@@ -11,6 +11,7 @@ mod health;
 mod internal;
 mod keys;
 mod membership;
+mod metrics;
 
 use std::time::Duration;
 
@@ -213,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
     let state = ApiState::new(&config, ApiState::system_clock(), storage);
+    let metrics = metrics::surface(&config, &state, stop_rx.clone()).await?;
     let tls = config
         .tls
         .as_ref()
@@ -239,7 +241,13 @@ async fn main() -> anyhow::Result<()> {
                 None => Ok(()),
             }
         };
-        tokio::try_join!(s3, internal, console).map(|_| ())
+        let metrics = async move {
+            match metrics {
+                Some(metrics) => metrics.await,
+                None => Ok(()),
+            }
+        };
+        tokio::try_join!(s3, internal, console, metrics).map(|_| ())
     };
     let mut server = std::pin::pin!(server);
     tokio::select! {

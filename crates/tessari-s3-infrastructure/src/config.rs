@@ -62,6 +62,8 @@ pub struct S3Config {
     pub tls: Option<crate::tls::ServerTls>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
     pub console: Option<crate::console_config::ConsoleSettings>,
+    /// `TESSARIDB_S3_METRICS_LISTEN` — where this node serves its metrics as Prometheus text; unset, it serves none.
+    pub metrics_listen: Option<SocketAddr>,
     /// `TESSARIDB_S3_IAM_KEY` — the root key user access-key secrets are sealed under; unset, the root credential is
     /// the only one.
     pub iam_key: Option<tessari_s3_types::IamKey>,
@@ -171,6 +173,14 @@ impl S3Config {
         let tls =
             crate::console_config::tls_pair(&get, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY")?;
         let console = crate::console_config::console_settings(&get)?;
+        let metrics_listen = get("TESSARIDB_S3_METRICS_LISTEN")
+            .map(|text| {
+                text.trim().parse().map_err(|_| Error::InvalidConfig {
+                    key: "TESSARIDB_S3_METRICS_LISTEN",
+                    reason: "not an IP address and port",
+                })
+            })
+            .transpose()?;
         let iam_key = crate::iam_config::iam_key(&get)?;
         let keys_passphrase = crate::keys_config::keys_passphrase(&get);
         let notify_targets = crate::notify_config::notify_targets(&get)?;
@@ -179,6 +189,7 @@ impl S3Config {
             cluster,
             tls,
             console,
+            metrics_listen,
             iam_key,
             keys_passphrase,
             notify_targets,

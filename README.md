@@ -146,6 +146,7 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` | `mfa` | comma-separated `amr` values that prove a second factor; a sign-in whose ID token carries none of them is refused |
 | `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK` | unset (no alert) | where a root sign-in to the console is announced as it happens: one JSON POST (`event`, `key_id`, `reason`, `client`, `expires`), over https or http to this machine. Needs `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` |
 | `TESSARIDB_S3_CONSOLE_KEY_SIGN_IN` | `all` | which access keys open a console session beside an identity provider: `all` — any live key; `root` — people sign in through the provider only, a user's key is refused with `key_sign_in_disabled` (a session it opened earlier ends at its next request) and the root key stays as the emergency path. The S3 API is not affected. Needs `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` |
+| `TESSARIDB_S3_METRICS_LISTEN` | unset (no metrics) | where the node serves `GET /metrics` in Prometheus text: requests by operation, status and error code, their duration by size class, and requests shed under load |
 
 The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the

@@ -50,6 +50,7 @@ mod media;
 mod members;
 mod meta_pool;
 mod metadata;
+mod metrics;
 mod multipart;
 mod namespaces;
 mod namespaces_dropped;

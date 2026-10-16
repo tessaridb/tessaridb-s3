@@ -1,11 +1,12 @@
 //! What every request handler shares: the signing region, the endpoint domains, the root credential, the cache of
-//! resolved user keys and the clock.
+//! resolved user keys, the clock and the node's metrics.
 
 use std::sync::Arc;
 
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_observability::Metrics;
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
@@ -41,6 +42,7 @@ struct Inner {
     storage: Storage,
     principals: Principals,
     notify_targets: Vec<String>,
+    metrics: Arc<Metrics>,
 }
 
 impl ApiState {
@@ -75,6 +77,7 @@ impl ApiState {
                     .iter()
                     .map(|target| target.id.clone())
                     .collect(),
+                metrics: Arc::new(Metrics::new()),
             }),
         }
     }
@@ -136,6 +139,12 @@ impl ApiState {
     #[must_use]
     pub fn list_tokens(&self) -> &TokenKey {
         &self.inner.list_tokens
+    }
+
+    /// What this node served, refused and shed.
+    #[must_use]
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.inner.metrics
     }
 
     /// The storage services.

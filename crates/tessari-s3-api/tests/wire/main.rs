@@ -8,6 +8,7 @@ mod console;
 mod console_page;
 mod erasure;
 mod internal;
+mod metrics;
 mod oidc;
 mod oidc_logout;
 mod oidc_provider;

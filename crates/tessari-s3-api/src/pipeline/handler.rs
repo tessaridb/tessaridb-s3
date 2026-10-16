@@ -1,11 +1,14 @@
 //! The request pipeline: address, dispatch, authenticate, authorize, then the operation — or the refusal for an
 //! operation with no handler.
 
-use axum::body::Body;
+use std::time::Instant;
+
+use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::http::Response;
 use tessari_s3_core::auth::SignedRequest;
 use tessari_s3_core::dispatch::{DispatchRequest, Method, dispatch, is_implemented};
+use tessari_s3_observability::Served;
 use tessari_s3_types::ErrorCode;
 
 use super::address::resolve;
@@ -19,15 +22,19 @@ use crate::state::ApiState;
 use crate::{Error, Result, routes};
 
 /// Serves one S3 request. The body is not read before authentication, so no `100 Continue` is sent to a client
-/// that has not proved who it is.
+/// that has not proved who it is. Each request is counted in the node's metrics by the operation it was dispatched
+/// to (`Unknown` when it was refused before dispatch named one), its status and its error code.
 pub async fn handle(State(state): State<ApiState>, request: Request) -> Response<Body> {
+    let arrived = Instant::now();
     let request_id = new_request_id();
     let resource = request.uri().path().to_owned();
     let method = request.method().clone();
-    match serve(state, request).await {
+    let sent = content_length(request.headers());
+    let mut operation = "Unknown";
+    let (response, code) = match serve(state.clone(), request, &mut operation).await {
         Ok(response) => {
             tracing::info!(request_id = %request_id, method = %method, status = response.status().as_u16(), "served");
-            with_request_id(response, &request_id)
+            (with_request_id(response, &request_id), "None")
         }
         Err(error) => {
             tracing::info!(
@@ -37,13 +44,41 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
                 status = error.code.http_status(),
                 "refused"
             );
-            error_response(&error, &resource, &request_id)
+            (
+                error_response(&error, &resource, &request_id),
+                error.code.as_str(),
+            )
         }
-    }
+    };
+    // A streamed body has no exact size; its length is the header it was answered with.
+    let answered =
+        content_length(response.headers()).max(response.body().size_hint().exact().unwrap_or(0));
+    state.metrics().served(&Served {
+        operation,
+        status: response.status().as_u16(),
+        code,
+        bytes: sent.max(answered),
+        seconds: arrived.elapsed().as_secs_f64(),
+    });
+    response
 }
 
-/// The pipeline up to and including the operation.
-async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
+/// The declared body length in `headers`; `0` when they declare none.
+fn content_length(headers: &axum::http::HeaderMap) -> u64 {
+    headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+}
+
+/// The pipeline up to and including the operation; `operation` is set to the operation's name once dispatch has
+/// named it.
+async fn serve(
+    state: ApiState,
+    request: Request,
+    operation: &mut &'static str,
+) -> Result<Response<Body>> {
     let (parts, body) = request.into_parts();
     let method = Method::parse(parts.method.as_str()).ok_or_else(|| {
         Error::new(
@@ -82,6 +117,7 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         query: &query_refs,
         header_names: &header_names,
     })?;
+    *operation = spec.name;
     let signed = SignedRequest {
         method: parts.method.as_str(),
         raw_path,
