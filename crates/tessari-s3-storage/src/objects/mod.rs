@@ -22,3 +22,4 @@ pub use reader::ObjectReader;
 pub use service::ObjectService;
 pub use tessaridb::TessariObjects;
 pub use upload::{Upload, Uploaded};
+pub use version_id::NULL as NULL_VERSION_ID;

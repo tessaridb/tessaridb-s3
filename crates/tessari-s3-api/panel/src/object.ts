@@ -81,6 +81,7 @@ export async function object(screen: Screen, bucket: string, key: string): Promi
     el("section", { class: "card" }, el("h2", {}, "Actions"), reason.row, el("div", { class: "actions" }, download, remove), asking),
     el("section", { class: "card flush" }, el("h2", {}, "Headers"), pairs("Stored headers", detail.headers)),
     el("section", { class: "card flush" }, el("h2", {}, "User metadata"), pairs("User metadata", detail.metadata)),
+    el("section", { class: "card flush" }, el("h2", {}, "Tags"), pairs("Tags", detail.tags)),
     el("section", { class: "card flush" }, el("h2", {}, "Checksums"), pairs("Stored checksums", detail.checksums)),
   );
 }

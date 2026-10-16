@@ -16,7 +16,9 @@ use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_core::objects::listing::{Entry, ListSpec, Resume};
 use tessari_s3_storage::actions::NewAction;
-use tessari_s3_storage::objects::{Content, Listed, RemovedIf};
+use tessari_s3_storage::objects::{
+    Content, Listed, LockOutcome, NULL_VERSION_ID, RemovedIf, VersionLock,
+};
 use tessari_s3_types::ObjectKey;
 
 use super::ConsoleState;
@@ -145,6 +147,16 @@ pub(super) struct Detail {
     checksums: BTreeMap<String, String>,
     /// How many parts a multipart object was completed from; absent otherwise.
     parts: Option<usize>,
+    tags: BTreeMap<String, String>,
+    /// Its Object Lock retention; absent when none keeps it.
+    retention: Option<Retention>,
+    legal_hold: bool,
+}
+
+#[derive(Serialize)]
+struct Retention {
+    mode: &'static str,
+    until: String,
 }
 
 pub(super) async fn detail(
@@ -166,6 +178,34 @@ pub(super) async fn detail(
         Content::Parts(multipart) => Some(multipart.parts.len()),
         Content::Data(_) => None,
     };
+    let lock = match state
+        .storage()
+        .objects()
+        .version_lock(&bucket, &key, None)
+        .await?
+    {
+        // The lock is shown only beside the version it belongs to; a write between the two reads is named, not mixed.
+        LockOutcome::Version { version_id, lock }
+            if version_id == object.version.as_deref().unwrap_or(NULL_VERSION_ID) =>
+        {
+            lock
+        }
+        LockOutcome::Version { .. } => {
+            return Err(ConsoleError::conflict(
+                "object_changed",
+                "the object was rewritten while it was read; reload it",
+            ));
+        }
+        LockOutcome::NoSuchBucket => return Err(no_such_bucket()),
+        LockOutcome::NoSuchKey | LockOutcome::Marker => return Err(no_such_key()),
+        LockOutcome::NoSuchVersion | LockOutcome::Malformed | LockOutcome::Locked => {
+            return Err(ConsoleError::internal());
+        }
+    };
+    let VersionLock {
+        retention,
+        legal_hold,
+    } = lock;
     Ok(Json(Detail {
         key: key.as_str().to_owned(),
         size: object.size,
@@ -175,6 +215,12 @@ pub(super) async fn detail(
         metadata: object.metadata,
         checksums: object.checksums,
         parts,
+        tags: object.tags,
+        retention: retention.map(|(mode, until)| Retention {
+            mode: mode.as_str(),
+            until: until.iso8601_millis(),
+        }),
+        legal_hold,
     }))
 }
 

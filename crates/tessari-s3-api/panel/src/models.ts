@@ -63,7 +63,12 @@ export type Detail = {
   readonly metadata: Readonly<Record<string, string>>;
   readonly checksums: Readonly<Record<string, string>>;
   readonly parts: number | null;
+  readonly tags: Readonly<Record<string, string>>;
+  readonly retention: Retention | null;
+  readonly legalHold: boolean;
 };
+/** An Object Lock retention: the version is kept until the instant, under the mode. */
+export type Retention = { readonly mode: "GOVERNANCE" | "COMPLIANCE"; readonly until: string };
 export type Action = {
   readonly position: number;
   readonly at: string;
@@ -255,11 +260,32 @@ export function readDetail(v: unknown): Detail | null {
   const headers = strings(v["headers"]);
   const metadata = strings(v["metadata"]);
   const checksums = strings(v["checksums"]);
-  if (headers === null || metadata === null || checksums === null) {
+  const tags = strings(v["tags"]);
+  const kept = v["retention"];
+  const retention = kept === null ? null : readRetention(kept);
+  if (headers === null || metadata === null || checksums === null || tags === null || retention === undefined || !flag(v["legal_hold"])) {
     return null;
   }
-  return { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], headers, metadata, checksums, parts: v["parts"] };
+  return {
+    key: v["key"],
+    size: v["size"],
+    etag: v["etag"],
+    modified: v["modified"],
+    headers,
+    metadata,
+    checksums,
+    parts: v["parts"],
+    tags,
+    retention,
+    legalHold: v["legal_hold"],
+  };
 }
+
+const lockMode = (value: unknown): value is Retention["mode"] => value === "GOVERNANCE" || value === "COMPLIANCE";
+
+/** A retention as sent, or `undefined` when it is not one. */
+const readRetention = (v: unknown): Retention | undefined =>
+  record(v) && lockMode(v["mode"]) && text(v["until"]) ? { mode: v["mode"], until: v["until"] } : undefined;
 
 const action = (v: unknown): Action | null =>
   record(v) && count(v["position"]) && text(v["at"]) && text(v["operator"]) && text(v["operation"]) &&

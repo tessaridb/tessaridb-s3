@@ -101,11 +101,28 @@
     const headers = strings(v["headers"]);
     const metadata = strings(v["metadata"]);
     const checksums = strings(v["checksums"]);
-    if (headers === null || metadata === null || checksums === null) {
+    const tags = strings(v["tags"]);
+    const kept = v["retention"];
+    const retention = kept === null ? null : readRetention(kept);
+    if (headers === null || metadata === null || checksums === null || tags === null || retention === void 0 || !flag(v["legal_hold"])) {
       return null;
     }
-    return { key: v["key"], size: v["size"], etag: v["etag"], modified: v["modified"], headers, metadata, checksums, parts: v["parts"] };
+    return {
+      key: v["key"],
+      size: v["size"],
+      etag: v["etag"],
+      modified: v["modified"],
+      headers,
+      metadata,
+      checksums,
+      parts: v["parts"],
+      tags,
+      retention,
+      legalHold: v["legal_hold"]
+    };
   }
+  var lockMode = (value) => value === "GOVERNANCE" || value === "COMPLIANCE";
+  var readRetention = (v) => record(v) && lockMode(v["mode"]) && text(v["until"]) ? { mode: v["mode"], until: v["until"] } : void 0;
   var action = (v) => record(v) && count(v["position"]) && text(v["at"]) && text(v["operator"]) && text(v["operation"]) && text(v["target"]) && textOrNull(v["reason"]) && text(v["outcome"]) ? {
     position: v["position"],
     at: v["at"],
@@ -2437,6 +2454,7 @@
     const entries = Object.entries(values);
     return entries.length === 0 ? el("div", { class: "empty" }, el("p", {}, "None.")) : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
   }
+  var retained = (detail) => detail.retention === null ? "None" : `${detail.retention.mode === "COMPLIANCE" ? "Compliance" : "Governance"} until ${moment(detail.retention.until)}`;
   function facts(detail) {
     const type = detail.headers["content-type"] ?? null;
     return el(
@@ -2451,7 +2469,11 @@
       el("dt", {}, "Last modified"),
       el("dd", {}, moment(detail.modified)),
       el("dt", {}, "Upload"),
-      el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`)
+      el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`),
+      el("dt", {}, "Retention"),
+      el("dd", {}, retained(detail)),
+      el("dt", {}, "Legal hold"),
+      el("dd", {}, detail.legalHold ? "On" : "Off")
     );
   }
 
@@ -2522,6 +2544,7 @@
       el("section", { class: "card" }, el("h2", {}, "Actions"), reason.row, el("div", { class: "actions" }, download, remove), asking),
       el("section", { class: "card flush" }, el("h2", {}, "Headers"), pairs("Stored headers", detail.headers)),
       el("section", { class: "card flush" }, el("h2", {}, "User metadata"), pairs("User metadata", detail.metadata)),
+      el("section", { class: "card flush" }, el("h2", {}, "Tags"), pairs("Tags", detail.tags)),
       el("section", { class: "card flush" }, el("h2", {}, "Checksums"), pairs("Stored checksums", detail.checksums))
     );
   }
@@ -2687,6 +2710,8 @@
       pairs("Stored headers", detail.headers),
       el("h3", {}, "User metadata"),
       pairs("User metadata", detail.metadata),
+      el("h3", {}, "Tags"),
+      pairs("Tags", detail.tags),
       el("h3", {}, "Checksums"),
       pairs("Stored checksums", detail.checksums)
     );
