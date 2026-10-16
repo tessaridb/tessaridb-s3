@@ -5,6 +5,7 @@
 mod decide;
 mod model;
 mod operations;
+pub mod policy;
 
 pub use decide::{Decision, Denied, authorize};
 pub use model::{

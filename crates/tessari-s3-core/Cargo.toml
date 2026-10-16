@@ -22,6 +22,7 @@ zeroize.workspace = true
 reed-solomon-simd.workspace = true
 blake3.workspace = true
 siphasher.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

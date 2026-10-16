@@ -69,6 +69,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         encryption: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s policy text, or removes it when `policy` is `None`.
+    fn set_policy(
+        &self,
+        name: &BucketName,
+        policy: Option<String>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Replaces `name`'s tags, or removes them when `tags` is `None`.
     fn set_tags(
         &self,

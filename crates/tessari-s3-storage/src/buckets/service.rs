@@ -194,6 +194,20 @@ impl BucketService {
         }
     }
 
+    /// Sets `name`'s policy text (already validated), or removes it with `None`; `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_policy(&self, name: &BucketName, policy: Option<&str>) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_policy(name, policy.map(str::to_owned))
+            .await?;
+        Ok(true)
+    }
+
     /// Replaces `name`'s tags (already validated); an empty set removes them. `false` when there is no such bucket.
     ///
     /// # Errors

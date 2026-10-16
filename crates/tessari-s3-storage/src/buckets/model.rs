@@ -48,6 +48,8 @@ pub struct Bucket {
     pub acknowledgement: Acknowledgement,
     /// How a write that asks for no encryption is sealed; `None` while the bucket has no default.
     pub encryption: Option<BucketEncryption>,
+    /// Its policy's JSON text as written (validated then); `None` while none is set.
+    pub policy: Option<String>,
 }
 
 /// A bucket's default encryption: the key a write that names none is sealed under.
@@ -184,6 +186,7 @@ impl TryFrom<BucketEntity> for Bucket {
                 .as_ref()
                 .map(super::encryption::from_value)
                 .transpose()?,
+            policy: entity.policy,
             acknowledgement: match entity.acknowledge.as_deref() {
                 None => Acknowledgement::Majority,
                 Some(LOCAL) => Acknowledgement::RegionMajority,

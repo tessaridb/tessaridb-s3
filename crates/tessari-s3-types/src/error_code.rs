@@ -58,6 +58,10 @@ pub enum ErrorCode {
     MaxMessageLengthExceeded,
     /// 400: the XML body is not well formed or not the expected shape.
     MalformedXml,
+    /// 400: a bucket policy is not valid or names what cannot be evaluated.
+    MalformedPolicy,
+    /// 404: the bucket has no policy.
+    NoSuchBucketPolicy,
     /// 400: the bucket would be created in another region than this server's.
     IllegalLocationConstraintException,
     /// 409: the bucket still holds objects.
@@ -151,6 +155,8 @@ impl ErrorCode {
             Self::OperationAborted => "OperationAborted",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
             Self::MalformedXml => "MalformedXML",
+            Self::MalformedPolicy => "MalformedPolicy",
+            Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
             Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
@@ -199,6 +205,7 @@ impl ErrorCode {
             | Self::OperationAborted => 409,
             Self::IllegalLocationConstraintException
             | Self::MalformedXml
+            | Self::MalformedPolicy
             | Self::MaxMessageLengthExceeded
             | Self::InvalidTag => 400,
             Self::NoSuchBucket => 404,
@@ -210,7 +217,8 @@ impl ErrorCode {
             | Self::NoSuchLifecycleConfiguration
             | Self::ReplicationConfigurationNotFoundError
             | Self::ObjectLockConfigurationNotFoundError
-            | Self::NoSuchTagSet => 404,
+            | Self::NoSuchTagSet
+            | Self::NoSuchBucketPolicy => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -297,6 +305,8 @@ mod tests {
                 400,
             ),
             (ErrorCode::MalformedXml, "MalformedXML", 400),
+            (ErrorCode::MalformedPolicy, "MalformedPolicy", 400),
+            (ErrorCode::NoSuchBucketPolicy, "NoSuchBucketPolicy", 404),
             (
                 ErrorCode::IllegalLocationConstraintException,
                 "IllegalLocationConstraintException",

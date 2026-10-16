@@ -67,6 +67,7 @@ mod objects;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod oidc_provider;
+mod policy;
 mod quota;
 mod quota_window;
 mod reclaim;
