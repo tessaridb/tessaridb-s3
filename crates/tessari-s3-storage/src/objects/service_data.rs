@@ -7,8 +7,6 @@ use tessari_s3_constants::DATA_BLOCK_SIZE;
 
 use super::ObjectService;
 use crate::data::hex;
-use crate::encryption::stream::{Sealer, sealed_size};
-use crate::encryption::{DataKey, Sealing, WrappedKey, unwrap, wrap};
 use crate::objects::ObjectReader;
 use crate::objects::model::{HealBacklog, Healed, MoveBacklog, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
@@ -26,38 +24,8 @@ impl ObjectService {
             .await
     }
 
-    /// As [`Self::upload`], every byte sealed under a data key drawn for this data id alone and wrapped under the
-    /// key `sealing` names — the server's active key, or a named one; the finished upload carries the wrapped key. On
-    /// a cluster member the shards are sealed shards (format 4).
-    ///
-    /// # Errors
-    /// [`Error::KeysSealed`] when this node holds no encryption keys, [`Error::UnknownKey`] for a name it does not
-    /// hold; as [`Self::upload`]; [`Error::SealedLength`] when `size` cannot be laid out in sealed blocks.
-    pub async fn upload_sealed(&self, size: u64, sealing: &Sealing) -> Result<Upload> {
-        let ring = self.keys.ring()?;
-        let kek = match sealing {
-            Sealing::Server => ring.active(),
-            Sealing::Named(name) => {
-                ring.get(&name.record_id())
-                    .ok_or_else(|| Error::UnknownKey {
-                        name: name.to_string(),
-                    })?
-            }
-        };
-        let id = *uuid::Uuid::new_v4().as_bytes();
-        let stored_block = self.stored_block();
-        let stored = sealed_size(size, stored_block).ok_or(Error::SealedLength {
-            declared: size,
-            received: 0,
-        })?;
-        let key = DataKey::generate()?;
-        let wrapped = wrap(kek, &key, id)?;
-        let sealer = Sealer::new(key, id, size, stored_block)?;
-        Ok(self.start(id, stored, true).await?.sealing(sealer, wrapped))
-    }
-
     /// Bytes per stored block: an erasure stripe on a cluster member, else a data file block.
-    fn stored_block(&self) -> u32 {
+    pub(super) fn stored_block(&self) -> u32 {
         if self.erasure.is_some() {
             DATA_BLOCK_SIZE
         } else {
@@ -66,7 +34,7 @@ impl ObjectService {
     }
 
     /// Starts writing `size` stored bytes under data id `id`, a sealed file's header when `sealed`.
-    async fn start(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<Upload> {
+    pub(super) async fn start(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<Upload> {
         if let Some(writes) = &self.erasure {
             return match writes.start(id, size, sealed).await {
                 Ok(upload) => Ok(Upload::erasure(id, upload, Arc::clone(writes))),
@@ -242,30 +210,13 @@ impl ObjectService {
         self.open_stored(id, size, false).await
     }
 
-    /// As [`Self::open`], for data sealed under the data key `wrapped` holds, which an encryption key of this node's
-    /// unwraps.
-    ///
-    /// # Errors
-    /// [`Error::KeysSealed`] when this node holds no encryption keys; as [`Self::open`]; [`Error::Unsealable`] when
-    /// no key held unwraps it, when the stored bytes do not lay out `size`, or per block when one does not open.
-    pub async fn open_sealed(
+    /// Opens data `id` holding `size` stored bytes, a sealed file's header expected when `sealed`.
+    pub(super) async fn open_stored(
         &self,
         id: [u8; 16],
         size: u64,
-        wrapped: &WrappedKey,
+        sealed: bool,
     ) -> Result<ObjectReader> {
-        let key = {
-            let ring = self.keys.ring()?;
-            let kek = ring.get(&wrapped.kek_id).ok_or(Error::Unsealable)?;
-            unwrap(kek, wrapped, id)?
-        };
-        let stored = sealed_size(size, self.stored_block()).ok_or(Error::Unsealable)?;
-        let reader = self.open_stored(id, stored, true).await?;
-        ObjectReader::sealed(reader, key, id, size)
-    }
-
-    /// Opens data `id` holding `size` stored bytes, a sealed file's header expected when `sealed`.
-    async fn open_stored(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<ObjectReader> {
         if let Some(writes) = &self.erasure
             && let Some(reader) = writes.open(id, size, sealed).await?
         {

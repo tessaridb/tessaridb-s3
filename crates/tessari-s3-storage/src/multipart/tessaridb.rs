@@ -296,7 +296,7 @@ impl MultipartRepository for TessariMultipart {
                 crate::params::count(usize::from(MULTIPART_MAX_PARTS)),
             ),
         ];
-        let script = "SELECT number, data, size, etag, checksums, sse_alg, sse_kek, sse_nonce, sse_key FROM parts \
+        let script = "SELECT number, data, size, etag, checksums, sse_alg, sse_kek, sse_nonce, sse_key, sse_c_salt, sse_c_verifier FROM parts \
              WHERE upload = $upload \
              LIMIT $limit USING INDEX by_upload;";
         let answers = self.pool.run(script, parameters).await?;

@@ -89,6 +89,10 @@ impl From<tessari_s3_storage::Error> for Error {
                 ErrorCode::ServiceUnavailable,
                 "the encryption keys are sealed on this node; an operator must unseal them",
             ),
+            Storage::CustomerKeyMismatch => Self::new(
+                ErrorCode::AccessDenied,
+                "the customer key does not match the one the object was encrypted with",
+            ),
             Storage::UnknownKey { name } => Self::new(
                 ErrorCode::KmsNotFound,
                 format!("no KMS key named {name} exists on this server"),

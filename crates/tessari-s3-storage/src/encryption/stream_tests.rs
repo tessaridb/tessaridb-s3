@@ -27,6 +27,7 @@ fn wrapped() -> WrappedKey {
         kek_id: "server_1".to_owned(),
         nonce: vec![0; 24],
         ciphertext: vec![0; 48],
+        customer: None,
     }
 }
 

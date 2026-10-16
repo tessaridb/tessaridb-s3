@@ -95,6 +95,8 @@ pub struct WrappedKey {
     pub nonce: Vec<u8>,
     /// The wrapped key followed by its tag.
     pub ciphertext: Vec<u8>,
+    /// Under a customer's key (SSE-C): the salt its wrapping key was derived with and the verifier of that key.
+    pub customer: Option<CustomerSeal>,
 }
 
 /// `msg` sealed under `key` and `nonce` with `aad`.
@@ -200,6 +202,7 @@ pub fn wrap(kek: &KeyEncryptionKey, key: &DataKey, data: [u8; 16]) -> Result<Wra
         kek_id: kek.id.clone(),
         nonce: nonce.to_vec(),
         ciphertext,
+        customer: None,
     })
 }
 

@@ -52,7 +52,7 @@ pub(super) async fn parts_of(
     // the upload, and an upload id never comes back — so the object still naming it afterwards proves the parts were
     // whole when they were read. A table is grammar, and this one is the server's own.
     let script = format!(
-        "SELECT number, data, size, sse_alg, sse_kek, sse_nonce, sse_key FROM parts WHERE upload = $upload LIMIT $limit \
+        "SELECT number, data, size, sse_alg, sse_kek, sse_nonce, sse_key, sse_c_salt, sse_c_verifier FROM parts WHERE upload = $upload LIMIT $limit \
          USING INDEX by_upload; SELECT upload FROM ONLY {table}:$id;"
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();

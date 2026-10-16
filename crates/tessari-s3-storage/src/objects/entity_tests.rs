@@ -4,7 +4,7 @@ use tessari_s3_infrastructure::tessaridb::Value;
 
 use super::{read, record};
 use crate::Error;
-use crate::encryption::WrappedKey;
+use crate::encryption::{CUSTOMER_KEK_ID, CustomerSeal, WrappedKey};
 use crate::objects::Lock;
 use crate::objects::model::{Content, NewObject};
 
@@ -29,6 +29,18 @@ fn wrapped() -> WrappedKey {
         kek_id: "server_2".to_owned(),
         nonce: vec![4; 24],
         ciphertext: vec![5; 48],
+        customer: None,
+    }
+}
+
+fn customer_wrapped() -> WrappedKey {
+    WrappedKey {
+        kek_id: CUSTOMER_KEK_ID.to_owned(),
+        customer: Some(CustomerSeal {
+            salt: [6; 32],
+            verifier: [7; 32],
+        }),
+        ..wrapped()
     }
 }
 
@@ -84,4 +96,55 @@ fn a_wrapped_key_missing_a_part_is_refused_rather_than_read_as_plain() {
             ..
         })
     ));
+}
+
+#[test]
+fn a_customer_sealed_object_keeps_its_salt_and_verifier_and_never_a_key() {
+    let sealed = stored(&object(Some(customer_wrapped())));
+    let Value::Object(fields) = &sealed else {
+        panic!("object")
+    };
+    assert_eq!(fields.get("sse_c_salt"), Some(&Value::Bytes(vec![6; 32])));
+    assert_eq!(
+        fields.get("sse_c_verifier"),
+        Some(&Value::Bytes(vec![7; 32]))
+    );
+    assert_eq!(
+        read(&sealed).expect("read").1.encryption,
+        Some(customer_wrapped())
+    );
+}
+
+#[test]
+fn a_customer_seal_missing_a_part_or_its_key_is_refused() {
+    let without = |field: &str| {
+        let Value::Object(mut fields) = stored(&object(Some(customer_wrapped()))) else {
+            panic!("object")
+        };
+        fields.remove(field);
+        read(&Value::Object(fields))
+    };
+    for field in ["sse_c_salt", "sse_c_verifier"] {
+        assert!(
+            matches!(
+                without(field),
+                Err(Error::Malformed {
+                    record: "object",
+                    ..
+                })
+            ),
+            "{field}"
+        );
+    }
+    let Value::Object(mut fields) = stored(&object(Some(wrapped()))) else {
+        panic!("object")
+    };
+    fields.insert(
+        "sse_kek".to_owned(),
+        Value::String(CUSTOMER_KEK_ID.to_owned()),
+    );
+    assert!(
+        read(&Value::Object(fields)).is_err(),
+        "a customer key with no seal could never be opened"
+    );
 }

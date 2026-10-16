@@ -117,6 +117,9 @@ pub enum Error {
     /// Another node holds the claim on this data id (it is healing or reclaiming it); try on a later pass.
     #[error("another node is working on this data id")]
     Held,
+    /// A request brought a customer key (SSE-C) other than the one the object or upload was sealed under.
+    #[error("the customer key is not the one the data was sealed under")]
+    CustomerKeyMismatch,
     /// This node holds no encryption keys: an operator has not unsealed them since it started.
     #[error("the encryption keys are sealed on this node")]
     KeysSealed,
@@ -183,6 +186,7 @@ impl Error {
             Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
             Self::WeakPassphrase { .. } | Self::UnknownKey { .. } => ErrorCategory::Validation,
             Self::WrongPassphrase => ErrorCategory::Unauthorized,
+            Self::CustomerKeyMismatch => ErrorCategory::Forbidden,
         }
     }
 }

@@ -6,7 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
 use super::model::{Content, Multipart, NewObject, ObjectSummary, StoredObject};
 use super::repository::ListRow;
-use crate::encryption::WrappedKey;
+use crate::encryption::{CUSTOMER_KEK_ID, CustomerSeal, WrappedKey};
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -78,14 +78,27 @@ pub(crate) fn record(
 
 pub(crate) type Fields = BTreeMap<String, Value>;
 
-/// The fields holding a sealed object's (or part's) wrapped data key.
-pub(crate) fn sealed_fields(key: &WrappedKey) -> [(&'static str, Value); 4] {
-    [
+/// The fields holding a sealed object's (or part's) wrapped data key, and under a customer's key its seal.
+pub(crate) fn sealed_fields(key: &WrappedKey) -> Vec<(&'static str, Value)> {
+    let mut fields = vec![
         ("sse_alg", Value::String(key.algorithm.clone())),
         ("sse_kek", Value::String(key.kek_id.clone())),
         ("sse_nonce", Value::Bytes(key.nonce.clone())),
         ("sse_key", Value::Bytes(key.ciphertext.clone())),
-    ]
+    ];
+    if let Some(seal) = &key.customer {
+        fields.push(("sse_c_salt", Value::Bytes(seal.salt.to_vec())));
+        fields.push(("sse_c_verifier", Value::Bytes(seal.verifier.to_vec())));
+    }
+    fields
+}
+
+/// A customer seal's 32-byte field.
+fn seal_part(value: &Value) -> Option<[u8; 32]> {
+    match value {
+        Value::Bytes(bytes) => bytes.as_slice().try_into().ok(),
+        _ => None,
+    }
 }
 
 /// A record's wrapped data key: none when it carries no part of one, refused when it carries only some.
@@ -107,12 +120,28 @@ pub(crate) fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
             Some(Value::String(kek_id)),
             Some(Value::Bytes(nonce)),
             Some(Value::Bytes(ciphertext)),
-        ) => Ok(Some(WrappedKey {
-            algorithm: algorithm.clone(),
-            kek_id: kek_id.clone(),
-            nonce: nonce.clone(),
-            ciphertext: ciphertext.clone(),
-        })),
+        ) => {
+            let customer = match (field("sse_c_salt"), field("sse_c_verifier")) {
+                (None, None) => None,
+                (Some(salt), Some(verifier)) => Some(CustomerSeal {
+                    salt: seal_part(salt).ok_or_else(|| malformed("a customer key's salt"))?,
+                    verifier: seal_part(verifier)
+                        .ok_or_else(|| malformed("a customer key's verifier"))?,
+                }),
+                _ => return Err(malformed("a customer key's seal")),
+            };
+            // A key wrapped under a customer's key carries the seal it opens with, and only such a key does.
+            if customer.is_some() != (kek_id == CUSTOMER_KEK_ID) {
+                return Err(malformed("a customer key's seal"));
+            }
+            Ok(Some(WrappedKey {
+                algorithm: algorithm.clone(),
+                kek_id: kek_id.clone(),
+                nonce: nonce.clone(),
+                ciphertext: ciphertext.clone(),
+                customer,
+            }))
+        }
         _ => Err(malformed("a wrapped data key")),
     }
 }

@@ -7,6 +7,7 @@ fn wrapped_by(kek: &str) -> WrappedKey {
         kek_id: kek.to_owned(),
         nonce: vec![0; 24],
         ciphertext: vec![0; 48],
+        customer: None,
     }
 }
 
