@@ -20,6 +20,7 @@ mod confined_account;
 mod console;
 mod console_admin;
 mod console_break_glass;
+mod console_encryption;
 mod console_explorer;
 mod console_fresh_auth;
 mod console_keys;
