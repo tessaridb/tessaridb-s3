@@ -57,6 +57,8 @@ pub struct BucketEncryption {
     pub sealing: crate::encryption::Sealing,
     /// Whether the configuration asked for an S3 Bucket Key; recorded and answered back.
     pub bucket_key: bool,
+    /// Whether writes may bring their own key (SSE-C): blocked unless the configuration said `NONE`.
+    pub allow_customer_keys: bool,
 }
 
 /// What turning a bucket's Object Lock on (or changing its default) ended in.

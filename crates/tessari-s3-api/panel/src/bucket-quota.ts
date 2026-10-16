@@ -4,7 +4,7 @@
 //! required and goes into the action record.
 
 import { call } from "./api.ts";
-import { announce, el, field, fill, mono } from "./dom.ts";
+import { announce, el, field, fill, mono, segmented } from "./dom.ts";
 import { amount, bytesOf, QUOTA_UNITS, size } from "./format.ts";
 import { ignored, type Bucket } from "./models.ts";
 import { refusal, type Screen } from "./screen.ts";
@@ -40,18 +40,18 @@ function unitOf(bytes: number): Unit {
 /** The quota form for `bucket`, as a region `open` places under its row; `close` removes it. */
 export function quotaForm(screen: Screen, bucket: Bucket, close: () => void): HTMLElement {
   const id = `quota-${bucket.name}`;
-  const unit = el("select", { id: `${id}-unit`, "aria-label": "Unit" }, ...Object.keys(QUOTA_UNITS).map((name) => el("option", { value: name }, name)));
+  const unit = segmented(`${id}-unit`, "Unit", Object.keys(QUOTA_UNITS));
   const bytes = field(`${id}-bytes`, "Size limit", { inputmode: "decimal", autocomplete: "off" }, "Empty: no size limit. Checked against the last measurement.");
   const objects = field(`${id}-objects`, "Object limit", { inputmode: "numeric", autocomplete: "off" }, "Empty: no object limit.");
   const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
   if (bucket.maxBytes !== null) {
-    unit.value = unitOf(bucket.maxBytes);
+    unit.choose(unitOf(bucket.maxBytes));
     bytes.input.value = String(bucket.maxBytes / QUOTA_UNITS[unitOf(bucket.maxBytes)]);
   }
   if (bucket.maxObjects !== null) {
     objects.input.value = String(bucket.maxObjects);
   }
-  bytes.input.after(unit);
+  bytes.input.after(unit.group);
   const save = el("button", { type: "submit", class: "primary" }, "Set quota");
   const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
   const said = el("div", { "aria-live": "polite" });
@@ -74,7 +74,8 @@ export function quotaForm(screen: Screen, bucket: Bucket, close: () => void): HT
   });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const maxBytes = isUnit(unit.value) ? bytesOf(bytes.input.value, unit.value) : undefined;
+    const picked = unit.chosen();
+    const maxBytes = isUnit(picked) ? bytesOf(bytes.input.value, picked) : undefined;
     const written = objects.input.value.trim();
     const maxObjects = written === "" ? null : /^\d+$/.test(written) ? Number(written) : undefined;
     const objectsWrong = maxObjects === undefined || (maxObjects !== null && !Number.isSafeInteger(maxObjects));

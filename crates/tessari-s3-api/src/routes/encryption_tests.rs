@@ -33,7 +33,8 @@ fn a_configuration_names_the_servers_key_or_a_named_one() {
         server,
         BucketEncryption {
             sealing: Sealing::Server,
-            bucket_key: false
+            bucket_key: false,
+            allow_customer_keys: false
         }
     );
     let kms = |id: &str| {
@@ -47,7 +48,8 @@ fn a_configuration_names_the_servers_key_or_a_named_one() {
         kms(""),
         BucketEncryption {
             sealing: named("aws-s3"),
-            bucket_key: true
+            bucket_key: true,
+            allow_customer_keys: false
         },
         "no key id names S3's own managed key"
     );
@@ -84,14 +86,6 @@ fn a_configuration_this_server_cannot_enforce_is_refused_by_name() {
     assert_eq!(
         refused(&by_default(
             "<SSEAlgorithm>AES256</SSEAlgorithm>",
-            "<BlockedEncryptionTypes><EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes>"
-        )),
-        ErrorCode::NotImplemented,
-        "customer keys cannot be allowed here"
-    );
-    assert_eq!(
-        refused(&by_default(
-            "<SSEAlgorithm>AES256</SSEAlgorithm>",
             "<BucketKeyEnabled>yes</BucketKeyEnabled>"
         )),
         ErrorCode::MalformedXml
@@ -120,13 +114,31 @@ fn a_configuration_of_another_shape_is_malformed() {
 }
 
 #[test]
-fn blocking_customer_keys_is_accepted_because_they_are_always_refused_here() {
-    let blocked = parse(&by_default(
-        "<SSEAlgorithm>AES256</SSEAlgorithm>",
-        "<BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes>",
-    ))
-    .expect("reads");
-    assert_eq!(blocked.sealing, Sealing::Server);
+fn customer_keys_stay_blocked_unless_the_configuration_names_none() {
+    let with = |types: &str| {
+        parse(&by_default(
+            "<SSEAlgorithm>AES256</SSEAlgorithm>",
+            &format!("<BlockedEncryptionTypes>{types}</BlockedEncryptionTypes>"),
+        ))
+    };
+    let unsaid = parse(&by_default("<SSEAlgorithm>AES256</SSEAlgorithm>", "")).expect("reads");
+    assert!(!unsaid.allow_customer_keys);
+    let blocked = with("<EncryptionType>SSE-C</EncryptionType>").expect("reads");
+    assert!(!blocked.allow_customer_keys);
+    let allowed = with("<EncryptionType>NONE</EncryptionType>").expect("reads");
+    assert!(allowed.allow_customer_keys);
+    assert_eq!(allowed.sealing, Sealing::Server);
+    for contradictory in [
+        "<EncryptionType>NONE</EncryptionType><EncryptionType>SSE-C</EncryptionType>",
+        "<EncryptionType>SSE-KMS</EncryptionType>",
+        "",
+    ] {
+        assert_eq!(
+            with(contradictory).expect_err("refused").code,
+            ErrorCode::MalformedXml,
+            "{contradictory}"
+        );
+    }
 }
 
 #[test]
@@ -135,10 +147,12 @@ fn a_configuration_reads_back_as_it_was_answered() {
         BucketEncryption {
             sealing: Sealing::Server,
             bucket_key: false,
+            allow_customer_keys: false,
         },
         BucketEncryption {
             sealing: named("logs-key"),
             bucket_key: true,
+            allow_customer_keys: true,
         },
     ] {
         let answered = document(&encryption);
@@ -149,7 +163,21 @@ fn a_configuration_reads_back_as_it_was_answered() {
         document(&BucketEncryption {
             sealing: named("logs-key"),
             bucket_key: false,
+            allow_customer_keys: false,
         })
         .contains("<SSEAlgorithm>aws:kms</SSEAlgorithm><KMSMasterKeyID>logs-key</KMSMasterKeyID>")
     );
+    for (allow, answered) in [(false, "SSE-C"), (true, "NONE")] {
+        assert!(
+            document(&BucketEncryption {
+                sealing: Sealing::Server,
+                bucket_key: false,
+                allow_customer_keys: allow,
+            })
+            .contains(&format!(
+                "<BlockedEncryptionTypes><EncryptionType>{answered}</EncryptionType></BlockedEncryptionTypes>"
+            )),
+            "{answered}"
+        );
+    }
 }

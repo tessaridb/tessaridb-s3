@@ -39,6 +39,8 @@ struct EncryptionView {
     algorithm: &'static str,
     /// The named key under `aws:kms`.
     key: Option<String>,
+    /// Whether writes may bring their own key (SSE-C).
+    customer_keys: bool,
 }
 
 #[derive(Serialize)]
@@ -80,10 +82,12 @@ pub(super) async fn list(
                         Sealing::Server => EncryptionView {
                             algorithm: "AES256",
                             key: None,
+                            customer_keys: encryption.allow_customer_keys,
                         },
                         Sealing::Named(name) => EncryptionView {
                             algorithm: "aws:kms",
                             key: Some(name.as_str().to_owned()),
+                            customer_keys: encryption.allow_customer_keys,
                         },
                     }),
             })

@@ -78,13 +78,14 @@
     if (v === null) {
       return null;
     }
-    if (!record(v)) {
+    if (!record(v) || typeof v["customer_keys"] !== "boolean") {
       return void 0;
     }
+    const customerKeys = v["customer_keys"];
     if (v["algorithm"] === "AES256" && v["key"] === null) {
-      return { algorithm: "AES256" };
+      return { algorithm: "AES256", customerKeys };
     }
-    return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"] } : void 0;
+    return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"], customerKeys } : void 0;
   }
   function bucket(v) {
     if (!record(v)) {
@@ -333,6 +334,27 @@
       input.setAttribute("aria-describedby", described.id);
     }
     return { row: el("div", { class: "field" }, el("label", { for: id }, label), input, described), input };
+  }
+  function segmented(id, label, options) {
+    const inputs = options.map((option, at2) => {
+      const input = el("input", { type: "radio", name: id, id: `${id}-${at2}`, value: option });
+      if (at2 === 0) {
+        input.checked = true;
+      }
+      return input;
+    });
+    const group = el(
+      "div",
+      { class: "segmented", role: "radiogroup", "aria-label": label },
+      ...inputs.flatMap((input) => [input, el("label", { for: input.id }, input.value)])
+    );
+    const chosen = () => inputs.find((input) => input.checked)?.value ?? "";
+    const choose = (value) => {
+      for (const input of inputs) {
+        input.checked = input.value === value;
+      }
+    };
+    return { group, chosen, choose };
   }
   function table(caption, head2, rows) {
     return el(
@@ -814,16 +836,18 @@
   // src/bucket-encryption.ts
   //! A bucket's default encryption: how a write that asks for no encryption is
   //! sealed — under the server's key, under a key an operator created by name, or
-  //! not at all. The server sets it only while this node holds its keys and, for a
-  //! named key, that key; its refusal is shown as it came. Who may configure the
-  //! bucket sets it; the reason goes into the action record.
+  //! not at all — and, beside a default, whether a write may bring its own key
+  //! (SSE-C, blocked otherwise). The server sets it only while this node holds its
+  //! keys and, for a named key, that key; its refusal is shown as it came. Who may
+  //! configure the bucket sets it; the reason goes into the action record.
   var KEY_NAME = /^[a-z0-9-]{1,64}$/;
   function encryptionChip(bucket2) {
     const sealing = bucket2.encryption;
     if (sealing === null) {
       return null;
     }
-    return el("span", { class: "chip ok", title: "Default encryption" }, sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`);
+    const named = sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`;
+    return el("span", { class: "chip ok", title: "Default encryption" }, sealing.customerKeys ? `${named} · SSE-C allowed` : named);
   }
   function encryptionForm(screen, bucket2, close) {
     const id = `sse-${bucket2.name}`;
@@ -836,6 +860,16 @@
       return el("div", { class: "choice" }, input, el("label", { for: `${id}-${value}` }, el("strong", {}, label), " — ", note));
     };
     const named = bucket2.encryption?.algorithm === "aws:kms" ? bucket2.encryption.key : "";
+    const allow = el("input", { type: "checkbox", id: `${id}-customer-keys` });
+    if (bucket2.encryption?.customerKeys === true) {
+      allow.setAttribute("checked", "");
+    }
+    const customerKeys = el(
+      "div",
+      { class: "choice" },
+      allow,
+      el("label", { for: `${id}-customer-keys` }, el("strong", {}, "Allow customer keys"), " — a write may bring its own key (SSE-C) over TLS; blocked otherwise.")
+    );
     const key = field(`${id}-key`, "Key name", { maxlength: "64", value: named, autocomplete: "off" }, "For aws:kms: a key created on the Encryption page.");
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     const save = el("button", { type: "submit", class: "primary" }, "Set");
@@ -849,6 +883,7 @@
       choice("AES256", "Server key", "every write that asks for nothing is sealed under the server's key (SSE-S3)."),
       choice("aws:kms", "Named key", "every write that asks for nothing is sealed under the key named below (SSE-KMS)."),
       key.row,
+      customerKeys,
       reason.row,
       el("div", { class: "actions" }, save, cancel),
       said
@@ -872,7 +907,13 @@
         key.input.focus();
         return;
       }
-      const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, reason: reason.input.value.trim() } : { algorithm: picked.value, reason: reason.input.value.trim() };
+      const customer = allow.checked;
+      if (customer && picked.value === "none") {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Customer keys are allowed only beside a default."));
+        return;
+      }
+      const why = reason.input.value.trim();
+      const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, customer_keys: customer, reason: why } : { algorithm: picked.value, customer_keys: customer, reason: why };
       const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket2.name)}/encryption`, ignored, body);
       if (answer.ok) {
         announce(`Set the default encryption of ${bucket2.name}.`);
@@ -914,18 +955,18 @@
   }
   function quotaForm(screen, bucket2, close) {
     const id = `quota-${bucket2.name}`;
-    const unit = el("select", { id: `${id}-unit`, "aria-label": "Unit" }, ...Object.keys(QUOTA_UNITS).map((name) => el("option", { value: name }, name)));
+    const unit = segmented(`${id}-unit`, "Unit", Object.keys(QUOTA_UNITS));
     const bytes = field(`${id}-bytes`, "Size limit", { inputmode: "decimal", autocomplete: "off" }, "Empty: no size limit. Checked against the last measurement.");
     const objects2 = field(`${id}-objects`, "Object limit", { inputmode: "numeric", autocomplete: "off" }, "Empty: no object limit.");
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     if (bucket2.maxBytes !== null) {
-      unit.value = unitOf(bucket2.maxBytes);
+      unit.choose(unitOf(bucket2.maxBytes));
       bytes.input.value = String(bucket2.maxBytes / QUOTA_UNITS[unitOf(bucket2.maxBytes)]);
     }
     if (bucket2.maxObjects !== null) {
       objects2.input.value = String(bucket2.maxObjects);
     }
-    bytes.input.after(unit);
+    bytes.input.after(unit.group);
     const save = el("button", { type: "submit", class: "primary" }, "Set quota");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -948,7 +989,8 @@
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const maxBytes = isUnit(unit.value) ? bytesOf(bytes.input.value, unit.value) : void 0;
+      const picked = unit.chosen();
+      const maxBytes = isUnit(picked) ? bytesOf(bytes.input.value, picked) : void 0;
       const written = objects2.input.value.trim();
       const maxObjects = written === "" ? null : /^\d+$/.test(written) ? Number(written) : void 0;
       const objectsWrong = maxObjects === void 0 || maxObjects !== null && !Number.isSafeInteger(maxObjects);
@@ -1294,9 +1336,9 @@
   function uploadKeyForm(screen, bucket2, close) {
     const id = `upload-${bucket2.name}`;
     const key = field(`${id}-key`, "Object key", { autocomplete: "off", required: "" }, "The one key it may upload, exactly as written.");
-    const lasts = el("select", { id: `${id}-lasts`, "aria-label": "Lasts" }, ...Object.keys(LIFETIMES).map((name) => el("option", { value: name }, name)));
+    const lasts = segmented(`${id}-lasts`, "Lasts", Object.keys(LIFETIMES));
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-    key.input.after(lasts);
+    key.input.after(lasts.group);
     const issue = el("button", { type: "submit", class: "primary" }, "Issue upload key");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -1321,7 +1363,8 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const wanted = key.input.value;
-      if (wanted === "" || !isLifetime(lasts.value)) {
+      const lifetime = lasts.chosen();
+      if (wanted === "" || !isLifetime(lifetime)) {
         key.input.setAttribute("aria-invalid", "true");
         fill(said, el("p", { class: "message bad", role: "alert" }, "Name the key it may upload."));
         return;
@@ -1329,7 +1372,7 @@
       key.input.removeAttribute("aria-invalid");
       const answer = await call("POST", `/buckets/${encodeURIComponent(bucket2.name)}/upload-keys`, readUploadKey, {
         key: wanted,
-        expires_in: LIFETIMES[lasts.value],
+        expires_in: LIFETIMES[lifetime],
         reason: reason.input.value.trim()
       });
       if (answer.ok) {

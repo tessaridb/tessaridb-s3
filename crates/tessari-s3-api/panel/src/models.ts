@@ -45,10 +45,13 @@ export type Bucket = {
   readonly maxObjects: number | null;
   /** Who acknowledges its writes: the majority keeping its metadata, or its region's majority alone. */
   readonly acknowledgement: "majority" | "region";
-  /** How a write that asks for no encryption is sealed: the server's key, a named key, or not at all (null). */
+  /** How a write that asks for no encryption is sealed — the server's key, a named key, or not at all (null) — and whether writes may bring their own key. */
   readonly encryption: BucketEncryption;
 };
-export type BucketEncryption = { readonly algorithm: "AES256" } | { readonly algorithm: "aws:kms"; readonly key: string } | null;
+export type BucketEncryption =
+  | { readonly algorithm: "AES256"; readonly customerKeys: boolean }
+  | { readonly algorithm: "aws:kms"; readonly key: string; readonly customerKeys: boolean }
+  | null;
 export type ObjectRow = {
   readonly key: string;
   readonly size: number;
@@ -225,13 +228,14 @@ function bucketEncryption(v: unknown): BucketEncryption | undefined {
   if (v === null) {
     return null;
   }
-  if (!record(v)) {
+  if (!record(v) || typeof v["customer_keys"] !== "boolean") {
     return undefined;
   }
+  const customerKeys = v["customer_keys"];
   if (v["algorithm"] === "AES256" && v["key"] === null) {
-    return { algorithm: "AES256" };
+    return { algorithm: "AES256", customerKeys };
   }
-  return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"] } : undefined;
+  return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"], customerKeys } : undefined;
 }
 
 function bucket(v: unknown): Bucket | null {

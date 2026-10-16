@@ -1,8 +1,9 @@
 //! A bucket's default encryption: how a write that asks for no encryption is
 //! sealed — under the server's key, under a key an operator created by name, or
-//! not at all. The server sets it only while this node holds its keys and, for a
-//! named key, that key; its refusal is shown as it came. Who may configure the
-//! bucket sets it; the reason goes into the action record.
+//! not at all — and, beside a default, whether a write may bring its own key
+//! (SSE-C, blocked otherwise). The server sets it only while this node holds its
+//! keys and, for a named key, that key; its refusal is shown as it came. Who may
+//! configure the bucket sets it; the reason goes into the action record.
 
 import { call } from "./api.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
@@ -17,7 +18,8 @@ export function encryptionChip(bucket: Bucket): HTMLElement | null {
   if (sealing === null) {
     return null;
   }
-  return el("span", { class: "chip ok", title: "Default encryption" }, sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`);
+  const named = sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`;
+  return el("span", { class: "chip ok", title: "Default encryption" }, sealing.customerKeys ? `${named} · SSE-C allowed` : named);
 }
 
 /** The default-encryption form for `bucket`, as a region `open` places under its row; `close` removes it. */
@@ -32,6 +34,16 @@ export function encryptionForm(screen: Screen, bucket: Bucket, close: () => void
     return el("div", { class: "choice" }, input, el("label", { for: `${id}-${value}` }, el("strong", {}, label), " — ", note));
   };
   const named = bucket.encryption?.algorithm === "aws:kms" ? bucket.encryption.key : "";
+  const allow = el("input", { type: "checkbox", id: `${id}-customer-keys` });
+  if (bucket.encryption?.customerKeys === true) {
+    allow.setAttribute("checked", "");
+  }
+  const customerKeys = el(
+    "div",
+    { class: "choice" },
+    allow,
+    el("label", { for: `${id}-customer-keys` }, el("strong", {}, "Allow customer keys"), " — a write may bring its own key (SSE-C) over TLS; blocked otherwise."),
+  );
   const key = field(`${id}-key`, "Key name", { maxlength: "64", value: named, autocomplete: "off" }, "For aws:kms: a key created on the Encryption page.");
   const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
   const save = el("button", { type: "submit", class: "primary" }, "Set");
@@ -45,6 +57,7 @@ export function encryptionForm(screen: Screen, bucket: Bucket, close: () => void
     choice("AES256", "Server key", "every write that asks for nothing is sealed under the server's key (SSE-S3)."),
     choice("aws:kms", "Named key", "every write that asks for nothing is sealed under the key named below (SSE-KMS)."),
     key.row,
+    customerKeys,
     reason.row,
     el("div", { class: "actions" }, save, cancel),
     said,
@@ -68,7 +81,13 @@ export function encryptionForm(screen: Screen, bucket: Bucket, close: () => void
       key.input.focus();
       return;
     }
-    const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, reason: reason.input.value.trim() } : { algorithm: picked.value, reason: reason.input.value.trim() };
+    const customer = allow.checked;
+    if (customer && picked.value === "none") {
+      fill(said, el("p", { class: "message bad", role: "alert" }, "Customer keys are allowed only beside a default."));
+      return;
+    }
+    const why = reason.input.value.trim();
+    const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, customer_keys: customer, reason: why } : { algorithm: picked.value, customer_keys: customer, reason: why };
     const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket.name)}/encryption`, ignored, body);
     if (answer.ok) {
       announce(`Set the default encryption of ${bucket.name}.`);

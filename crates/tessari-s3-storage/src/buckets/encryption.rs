@@ -1,6 +1,7 @@
 //! A bucket's default encryption as its record holds it: `encryption` is present while the bucket has one and carries
 //! the `algorithm` (`AES256` or `aws:kms`), the named `key` under `aws:kms`, and whether the request asked for a
-//! `bucket_key` — recorded and answered back, since each object's own data key is what seals it here.
+//! `bucket_key` — recorded and answered back, since each object's own data key is what seals it here — and whether
+//! writes may bring their own key, `allow_customer_keys`; a default stored before that existed keeps them blocked.
 
 use std::collections::BTreeMap;
 
@@ -22,8 +23,13 @@ const fn malformed(reason: &'static str) -> Error {
 
 /// The stored form of `encryption`.
 pub(crate) fn to_value(encryption: &BucketEncryption) -> Value {
-    let mut fields =
-        BTreeMap::from([("bucket_key".to_owned(), Value::Bool(encryption.bucket_key))]);
+    let mut fields = BTreeMap::from([
+        ("bucket_key".to_owned(), Value::Bool(encryption.bucket_key)),
+        (
+            "allow_customer_keys".to_owned(),
+            Value::Bool(encryption.allow_customer_keys),
+        ),
+    ]);
     match &encryption.sealing {
         Sealing::Server => {
             fields.insert("algorithm".to_owned(), Value::String(SERVER.to_owned()));
@@ -52,9 +58,15 @@ pub(crate) fn from_value(value: &Value) -> Result<BucketEncryption> {
         Some(Value::Bool(enabled)) => *enabled,
         _ => return Err(malformed("an encryption bucket_key")),
     };
+    let allow_customer_keys = match fields.get("allow_customer_keys") {
+        None => false,
+        Some(Value::Bool(allowed)) => *allowed,
+        Some(_) => return Err(malformed("an encryption allow_customer_keys")),
+    };
     Ok(BucketEncryption {
         sealing,
         bucket_key,
+        allow_customer_keys,
     })
 }
 
@@ -69,10 +81,13 @@ mod tests {
     #[test]
     fn a_default_encryption_round_trips_through_its_stored_form() {
         let named = Sealing::Named(KeyName::new("logs-key").expect("usable"));
-        for (sealing, bucket_key) in [(Sealing::Server, false), (named, true)] {
+        for (sealing, bucket_key, allow_customer_keys) in
+            [(Sealing::Server, false, false), (named, true, true)]
+        {
             let encryption = BucketEncryption {
                 sealing,
                 bucket_key,
+                allow_customer_keys,
             };
             assert_eq!(
                 from_value(&to_value(&encryption)).expect("reads"),
@@ -86,6 +101,7 @@ mod tests {
         let Value::Object(mut fields) = to_value(&BucketEncryption {
             sealing: Sealing::Server,
             bucket_key: false,
+            allow_customer_keys: false,
         }) else {
             panic!("an object");
         };
@@ -94,5 +110,23 @@ mod tests {
             Value::String("aws:kms:dsse".to_owned()),
         );
         assert!(from_value(&Value::Object(fields)).is_err());
+    }
+
+    #[test]
+    fn a_default_stored_before_customer_keys_existed_keeps_them_blocked() {
+        let Value::Object(mut fields) = to_value(&BucketEncryption {
+            sealing: Sealing::Server,
+            bucket_key: false,
+            allow_customer_keys: true,
+        }) else {
+            panic!("an object");
+        };
+        assert_eq!(fields.get("allow_customer_keys"), Some(&Value::Bool(true)));
+        fields.remove("allow_customer_keys");
+        assert!(
+            !from_value(&Value::Object(fields))
+                .expect("reads")
+                .allow_customer_keys
+        );
     }
 }

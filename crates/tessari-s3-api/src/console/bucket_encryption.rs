@@ -1,5 +1,5 @@
 //! A bucket's default encryption, through the console: who may configure the bucket sets it to the server's key, a
-//! named key or none, with a reason that is recorded. As over S3, a default is set only when this node can seal under
+//! named key or none — and, beside a default, whether writes may bring their own key — with a reason that is recorded. As over S3, a default is set only when this node can seal under
 //! it now — its keys unsealed and a named key held — so an operator learns at once that a write would be refused.
 
 use axum::body::Bytes;
@@ -26,6 +26,7 @@ use super::input::{json, reason};
 pub(super) struct SetEncryption {
     algorithm: Option<String>,
     key: Option<String>,
+    customer_keys: Option<bool>,
     reason: Option<String>,
 }
 
@@ -59,10 +60,22 @@ pub(super) async fn set(
     let SetEncryption {
         algorithm,
         key,
+        customer_keys,
         reason: given,
-    } = json(&headers, &body, "expected algorithm, key and reason")?;
+    } = json(
+        &headers,
+        &body,
+        "expected algorithm, key, customer_keys and reason",
+    )?;
     let why = reason(given, true)?;
     let sealing = asked(algorithm.as_deref(), key.as_deref())?;
+    let allow_customer_keys = customer_keys.unwrap_or(false);
+    if allow_customer_keys && sealing.is_none() {
+        return Err(ConsoleError::invalid(
+            "invalid_encryption",
+            "customer keys are allowed only beside a default",
+        ));
+    }
     let name = bucket_name(&bucket)?;
     on_bucket(&state, &principal, &name, Action::ConfigureBucket).await?;
     let checked = match &sealing {
@@ -88,6 +101,7 @@ pub(super) async fn set(
             let encryption = sealing.map(|sealing| BucketEncryption {
                 sealing,
                 bucket_key: false,
+                allow_customer_keys,
             });
             if state
                 .storage()
@@ -108,11 +122,14 @@ pub(super) async fn set(
         }
         Err((outcome, refused)) => (outcome, Err(refused)),
     };
-    let asked_for = match (algorithm.as_deref(), key.as_deref()) {
+    let mut asked_for = match (algorithm.as_deref(), key.as_deref()) {
         (Some(algorithm), Some(key)) => format!("{algorithm} {key}"),
         (Some(algorithm), None) => algorithm.to_owned(),
         _ => String::new(),
     };
+    if allow_customer_keys {
+        asked_for.push_str(" customer-keys");
+    }
     record(
         &state,
         NewAction {

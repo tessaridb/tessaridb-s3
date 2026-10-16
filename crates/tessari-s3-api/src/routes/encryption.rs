@@ -1,8 +1,8 @@
 //! GetBucketEncryption, PutBucketEncryption and DeleteBucketEncryption (S3 ref 11 M3). A bucket's default encryption
 //! seals every write that asks for none — PutObject, CreateMultipartUpload, CopyObject — under the server's key or a
 //! named one; a write that asks for its own encryption keeps it. A default is accepted only when this node can seal
-//! under it now: its keys unsealed and, under `aws:kms`, the named key held. Customer keys are always refused here, so
-//! blocking them is accepted and allowing them is not.
+//! under it now: its keys unsealed and, under `aws:kms`, the named key held. Writes bringing their own key (SSE-C) stay
+//! blocked unless `BlockedEncryptionTypes` names `NONE`, as on AWS since April 2026.
 
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
@@ -32,9 +32,15 @@ pub(super) fn document(encryption: &BucketEncryption) -> String {
             name.as_str()
         ),
     };
+    let blocked = if encryption.allow_customer_keys {
+        "NONE"
+    } else {
+        "SSE-C"
+    };
     format!(
         "<{ROOT} xmlns=\"{S3_NAMESPACE}\"><Rule><ApplyServerSideEncryptionByDefault>{by_default}\
-         </ApplyServerSideEncryptionByDefault><BucketKeyEnabled>{}</BucketKeyEnabled></Rule></{ROOT}>",
+         </ApplyServerSideEncryptionByDefault><BucketKeyEnabled>{}</BucketKeyEnabled><BlockedEncryptionTypes>\
+         <EncryptionType>{blocked}</EncryptionType></BlockedEncryptionTypes></Rule></{ROOT}>",
         encryption.bucket_key
     )
 }
@@ -65,28 +71,28 @@ fn sealing(node: &Node) -> Result<Sealing> {
     }
 }
 
-/// Accepts a `BlockedEncryptionTypes` that blocks customer keys, which this server always refuses.
-fn blocked(node: &Node) -> Result<()> {
+/// Whether a `BlockedEncryptionTypes` allows customer keys: one `EncryptionType`, `NONE` allowing them and `SSE-C`
+/// blocking them.
+fn allows_customer_keys(node: &Node) -> Result<bool> {
+    let mut named = None;
     for child in &node.children {
-        match (child.name.as_str(), child.text.trim()) {
-            ("EncryptionType", "SSE-C") => {}
-            ("EncryptionType", "NONE") => {
-                return Err(Error::new(
-                    ErrorCode::NotImplemented,
-                    "server-side encryption with a customer key is not supported",
-                ));
-            }
+        match child.name.as_str() {
+            "EncryptionType" => single(&mut named, child)?,
             _ => return Err(malformed()),
         }
     }
-    Ok(())
+    match named.map(|node| node.text.trim()) {
+        Some("NONE") => Ok(true),
+        Some("SSE-C") => Ok(false),
+        _ => Err(malformed()),
+    }
 }
 
 /// The default encryption `document` states.
 ///
 /// # Errors
 /// `MalformedXML` for a document that is not the shape, or not exactly one rule; `InvalidArgument` for a key id
-/// without `aws:kms`; `NotImplemented` for dual-layer KMS and for allowing customer keys.
+/// without `aws:kms`; `NotImplemented` for dual-layer KMS.
 pub(super) fn parse(document: &[u8]) -> Result<BucketEncryption> {
     let root = tree(document, MAX_DEPTH)?;
     let mut rule = None;
@@ -107,9 +113,10 @@ pub(super) fn parse(document: &[u8]) -> Result<BucketEncryption> {
         }
     }
     let sealing = sealing(by_default.ok_or_else(malformed)?)?;
-    if let Some(types) = types {
-        blocked(types)?;
-    }
+    let allow_customer_keys = types
+        .map(allows_customer_keys)
+        .transpose()?
+        .unwrap_or(false);
     let bucket_key = match bucket_key.map(|node| node.text.trim()) {
         None | Some("false") => false,
         Some("true") => true,
@@ -118,6 +125,7 @@ pub(super) fn parse(document: &[u8]) -> Result<BucketEncryption> {
     Ok(BucketEncryption {
         sealing,
         bucket_key,
+        allow_customer_keys,
     })
 }
 

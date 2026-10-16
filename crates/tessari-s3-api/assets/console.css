@@ -929,6 +929,58 @@ tr.asking:hover td {
   max-inline-size: 32rem;
 }
 
+/* A value and its unit (or its lifetime) side by side: the choice follows the input on one row. */
+.field:has(> input + .segmented) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.field:has(> input + .segmented) > :not(input, .segmented) {
+  grid-column: 1 / -1;
+}
+
+/* A few choices as one control: the radios stay focusable for the arrow keys, the labels are the segments. */
+.segmented {
+  display: inline-flex;
+  min-block-size: var(--control-height);
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: 0;
+}
+
+.segmented label {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--s-3);
+  border-radius: calc(var(--control-radius) - 3px);
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented input:checked + label {
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12);
+}
+
+.segmented input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 label {
   font-weight: 600;
   font-size: var(--t-data);

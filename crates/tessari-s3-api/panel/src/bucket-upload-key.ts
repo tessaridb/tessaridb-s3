@@ -4,7 +4,7 @@
 //! may still write the bucket. Its secret is shown once, here.
 
 import { call } from "./api.ts";
-import { announce, el, field, fill, mono } from "./dom.ts";
+import { announce, el, field, fill, mono, segmented } from "./dom.ts";
 import { moment } from "./format.ts";
 import { readUploadKey, type Bucket } from "./models.ts";
 import { refusal, type Screen } from "./screen.ts";
@@ -21,9 +21,9 @@ const isLifetime = (value: string): value is Lifetime => Object.hasOwn(LIFETIMES
 export function uploadKeyForm(screen: Screen, bucket: Bucket, close: () => void): HTMLElement {
   const id = `upload-${bucket.name}`;
   const key = field(`${id}-key`, "Object key", { autocomplete: "off", required: "" }, "The one key it may upload, exactly as written.");
-  const lasts = el("select", { id: `${id}-lasts`, "aria-label": "Lasts" }, ...Object.keys(LIFETIMES).map((name) => el("option", { value: name }, name)));
+  const lasts = segmented(`${id}-lasts`, "Lasts", Object.keys(LIFETIMES));
   const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-  key.input.after(lasts);
+  key.input.after(lasts.group);
   const issue = el("button", { type: "submit", class: "primary" }, "Issue upload key");
   const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
   const said = el("div", { "aria-live": "polite" });
@@ -48,7 +48,8 @@ export function uploadKeyForm(screen: Screen, bucket: Bucket, close: () => void)
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const wanted = key.input.value;
-    if (wanted === "" || !isLifetime(lasts.value)) {
+    const lifetime = lasts.chosen();
+    if (wanted === "" || !isLifetime(lifetime)) {
       key.input.setAttribute("aria-invalid", "true");
       fill(said, el("p", { class: "message bad", role: "alert" }, "Name the key it may upload."));
       return;
@@ -56,7 +57,7 @@ export function uploadKeyForm(screen: Screen, bucket: Bucket, close: () => void)
     key.input.removeAttribute("aria-invalid");
     const answer = await call("POST", `/buckets/${encodeURIComponent(bucket.name)}/upload-keys`, readUploadKey, {
       key: wanted,
-      expires_in: LIFETIMES[lasts.value],
+      expires_in: LIFETIMES[lifetime],
       reason: reason.input.value.trim(),
     });
     if (answer.ok) {

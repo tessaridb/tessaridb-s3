@@ -107,13 +107,21 @@ test("a bucket carries its limits, null where it has none", () => {
   assert.equal(readBuckets({ buckets: [row] }), null, "the limits are always sent");
 });
 
-test("a bucket carries its default encryption: none, the server's key, or a named key", () => {
+test("a bucket carries its default encryption: none, the server's key, or a named key, and whether customer keys are allowed", () => {
   const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1", acknowledgement: "majority", max_bytes: null, max_objects: null };
   const read = (encryption) => readBuckets({ buckets: [{ ...row, encryption }] })?.[0]?.encryption;
   assert.equal(read(null), null);
-  assert.deepEqual(read({ algorithm: "AES256", key: null }), { algorithm: "AES256" });
-  assert.deepEqual(read({ algorithm: "aws:kms", key: "logs-key" }), { algorithm: "aws:kms", key: "logs-key" });
-  for (const wrong of [{ algorithm: "aws:kms", key: null }, { algorithm: "DES", key: null }, { algorithm: "AES256", key: "x" }, "AES256", undefined]) {
+  assert.deepEqual(read({ algorithm: "AES256", key: null, customer_keys: false }), { algorithm: "AES256", customerKeys: false });
+  assert.deepEqual(read({ algorithm: "aws:kms", key: "logs-key", customer_keys: true }), { algorithm: "aws:kms", key: "logs-key", customerKeys: true });
+  for (const wrong of [
+    { algorithm: "aws:kms", key: null, customer_keys: false },
+    { algorithm: "DES", key: null, customer_keys: false },
+    { algorithm: "AES256", key: "x", customer_keys: false },
+    { algorithm: "AES256", key: null },
+    { algorithm: "AES256", key: null, customer_keys: "yes" },
+    "AES256",
+    undefined,
+  ]) {
     assert.equal(readBuckets({ buckets: [{ ...row, encryption: wrong }] }), null, JSON.stringify(wrong));
   }
 });

@@ -251,3 +251,73 @@ async fn a_bucket_default_is_set_only_by_who_configures_it_and_only_under_a_key_
         );
     }
 }
+
+const OPEN: &str = "/api/v1/buckets/open-to-customers/encryption";
+
+/// The `EncryptionType` S3's GetBucketEncryption answers for `bucket`.
+async fn blocked_types(state: &tessari_s3_api::ApiState, bucket: &str) -> String {
+    let answer = crate::call(state, "GET", bucket, vec![("encryption", None)], b"").await;
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    crate::multipart::text(&answer.body, "EncryptionType").expect("an EncryptionType")
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn customer_keys_are_allowed_only_beside_a_default_and_s3_answers_what_was_set() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let bucket = "/open-to-customers";
+    assert_eq!(
+        crate::call(&state, "PUT", bucket, vec![], b"").await.status,
+        200
+    );
+    crate::sse::unseal(&state).await;
+    let root = sign_in(&console).await;
+
+    let alone = r#"{"algorithm":"none","customer_keys":true,"reason":"x"}"#;
+    let refused = send(&console, "PUT", OPEN, Some(&root), Some(alone)).await;
+    assert_eq!(refused.status, 400, "customer keys with no default");
+    assert_eq!(refused.code().as_deref(), Some("invalid_encryption"));
+
+    let allow = r#"{"algorithm":"AES256","customer_keys":true,"reason":"tenant brings keys"}"#;
+    assert_eq!(
+        send(&console, "PUT", OPEN, Some(&root), Some(allow))
+            .await
+            .status,
+        204
+    );
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "open-to-customers")["customer_keys"],
+        true
+    );
+    assert_eq!(blocked_types(&state, bucket).await, "NONE");
+
+    let block = r#"{"algorithm":"AES256","reason":"tenant stopped"}"#;
+    assert_eq!(
+        send(&console, "PUT", OPEN, Some(&root), Some(block))
+            .await
+            .status,
+        204
+    );
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "open-to-customers")["customer_keys"],
+        false
+    );
+    assert_eq!(blocked_types(&state, bucket).await, "SSE-C");
+
+    let over_s3 = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
+        <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes>\
+        <EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
+    let put = crate::call(&state, "PUT", bucket, vec![("encryption", None)], over_s3).await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    assert_eq!(blocked_types(&state, bucket).await, "NONE");
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let recorded = String::from_utf8_lossy(&actions.bytes).into_owned();
+    assert!(
+        recorded.contains("set_encryption AES256 customer-keys"),
+        "{recorded}"
+    );
+}
