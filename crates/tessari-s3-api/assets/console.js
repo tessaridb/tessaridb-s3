@@ -2494,7 +2494,7 @@
     const said = el("div", { "aria-live": "polite" });
     const form = el(
       "form",
-      { class: "confirm card-part", novalidate: "" },
+      { class: "confirm card-part", novalidate: "", "aria-label": `Destroy ${key.id}` },
       el("p", {}, "No record names ", mono(key.id), " any more. Destroying it removes it from the keys vault; backups taken before still hold it until they expire."),
       passphrase.row,
       why.row,
