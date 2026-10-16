@@ -142,7 +142,12 @@ async fn serve(
         &parts.headers,
         query.iter().any(|(name, _)| name == "versionId") || replica,
     )
-    .await?;
+    .await
+    .inspect_err(|error| {
+        if error.code == ErrorCode::AccessDenied {
+            state.metrics().denied(spec.name);
+        }
+    })?;
     writable(&state, method, replica).await?;
     let call = Call {
         state: &state,

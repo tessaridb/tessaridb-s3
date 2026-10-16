@@ -1,9 +1,12 @@
-//! Authentication: exactly one SigV4 form per request, verified against the credential its access key names.
+//! Authentication: exactly one SigV4 form per request, verified against the credential its access key names. Every
+//! refusal is counted in the node's metrics by its reason; a metadata store that cannot answer is not a refusal.
 
 use tessari_s3_core::auth::{
-    AuthorizationHeader, PresignedQuery, SignedRequest, Verified, verify_header, verify_presigned,
+    AuthError, AuthorizationHeader, PresignedQuery, SignedRequest, Verified, verify_header,
+    verify_presigned,
 };
 use tessari_s3_core::authz::Principal;
+use tessari_s3_observability::AuthRefusal;
 use tessari_s3_types::ErrorCode;
 
 use crate::state::ApiState;
@@ -19,35 +22,81 @@ pub async fn authenticate(
     state: &ApiState,
     request: &SignedRequest<'_>,
 ) -> Result<(Verified, Principal)> {
+    verify(state, request).await.map_err(|(refusal, error)| {
+        if let Some(refusal) = refusal {
+            state.metrics().auth_refused(refusal);
+        }
+        error
+    })
+}
+
+/// Why `error` refused authentication.
+const fn reason(error: &AuthError) -> AuthRefusal {
+    match error {
+        AuthError::ClockSkew => AuthRefusal::Skew,
+        AuthError::PresignExpired | AuthError::PresignExpiresOutOfRange => AuthRefusal::Expired,
+        AuthError::SignatureMismatch => AuthRefusal::Signature,
+        _ => AuthRefusal::Malformed,
+    }
+}
+
+/// A SigV4 refusal with its reason.
+fn refused(error: AuthError) -> (Option<AuthRefusal>, Error) {
+    (Some(reason(&error)), error.into())
+}
+
+/// A credential lookup's failure: an unknown key is a refusal, the store's outage is not.
+fn unresolved(error: Error) -> (Option<AuthRefusal>, Error) {
+    let refusal = (error.code == ErrorCode::InvalidAccessKeyId).then_some(AuthRefusal::UnknownKey);
+    (refusal, error)
+}
+
+async fn verify(
+    state: &ApiState,
+    request: &SignedRequest<'_>,
+) -> std::result::Result<(Verified, Principal), (Option<AuthRefusal>, Error)> {
     let header = request.header("authorization");
-    let presigned = PresignedQuery::parse(request.raw_query)?;
+    let presigned = PresignedQuery::parse(request.raw_query).map_err(refused)?;
     let now = state.now();
     match (header, presigned) {
-        (Some(_), Some(_)) => Err(Error::new(
-            ErrorCode::InvalidArgument,
-            "only one authentication method may be used",
+        (Some(_), Some(_)) => Err((
+            Some(AuthRefusal::Malformed),
+            Error::new(
+                ErrorCode::InvalidArgument,
+                "only one authentication method may be used",
+            ),
         )),
-        (None, None) => Err(Error::new(
-            ErrorCode::AccessDenied,
-            "anonymous access is not allowed",
+        (None, None) => Err((
+            Some(AuthRefusal::Anonymous),
+            Error::new(ErrorCode::AccessDenied, "anonymous access is not allowed"),
         )),
         (Some(value), None) => {
             if request.header("x-amz-security-token").is_some() {
-                return Err(Error::new(
-                    ErrorCode::InvalidArgument,
-                    "temporary credentials are not supported",
+                return Err((
+                    Some(AuthRefusal::Malformed),
+                    Error::new(
+                        ErrorCode::InvalidArgument,
+                        "temporary credentials are not supported",
+                    ),
                 ));
             }
-            let parsed = AuthorizationHeader::parse(value)?;
-            let credential = state.credential_for(parsed.access_key()).await?;
-            let verified =
-                verify_header(request, &parsed, &credential.secret, state.region(), now)?;
+            let parsed = AuthorizationHeader::parse(value).map_err(refused)?;
+            let credential = state
+                .credential_for(parsed.access_key())
+                .await
+                .map_err(unresolved)?;
+            let verified = verify_header(request, &parsed, &credential.secret, state.region(), now)
+                .map_err(refused)?;
             Ok((verified, credential.principal))
         }
         (None, Some(query)) => {
-            let credential = state.credential_for(query.access_key()).await?;
+            let credential = state
+                .credential_for(query.access_key())
+                .await
+                .map_err(unresolved)?;
             let verified =
-                verify_presigned(request, &query, &credential.secret, state.region(), now)?;
+                verify_presigned(request, &query, &credential.secret, state.region(), now)
+                    .map_err(refused)?;
             Ok((verified, credential.principal))
         }
     }

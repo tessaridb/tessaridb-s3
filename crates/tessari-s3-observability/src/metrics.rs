@@ -1,60 +1,21 @@
 //! The node's metrics in Prometheus text: every S3 request counted by operation, status and error code, its time to
-//! the response by operation and size class, and the requests shed under load. Labels come only from bounded sets —
-//! the operation catalog, HTTP statuses, the error catalog, five size classes — never from a bucket or a key.
+//! the response by operation and size class, the requests shed under load, authentication refusals by reason and
+//! policy denials by operation; and, read when scraped, the heal and replication backlogs with whether each could be
+//! read. Labels come only from bounded sets — the operation catalog, HTTP statuses, the error catalog, five size
+//! classes, fixed reasons and sources — never from a bucket, a key or an access key.
 
-use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::encoding::text::encode;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
+use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::metrics::histogram::{Histogram, exponential_buckets};
 use prometheus_client::registry::Registry;
 
+use crate::metrics_labels::{
+    AuthRefusal, DurationLabels, OperationLabels, ReasonLabels, RequestLabels, Served,
+    SourceLabels, Unlabelled, gauge_value, size_class,
+};
 use crate::{Error, Result};
-
-/// Size classes by their upper bound in bytes; a request at or over the last bound is `ge_128MiB`.
-const SIZE_CLASSES: [(u64, &str); 4] = [
-    (64 << 10, "lt_64KiB"),
-    (1 << 20, "lt_1MiB"),
-    (16 << 20, "lt_16MiB"),
-    (128 << 20, "lt_128MiB"),
-];
-
-/// The size class of a request that moved `bytes` (the larger of its body and its response's).
-#[must_use]
-pub fn size_class(bytes: u64) -> &'static str {
-    SIZE_CLASSES
-        .iter()
-        .find(|(bound, _)| bytes < *bound)
-        .map_or("ge_128MiB", |(_, name)| name)
-}
-
-/// What one served request was.
-#[derive(Debug, Clone, Copy)]
-pub struct Served {
-    /// Its operation's model name (`PutObject`), or `Unknown` before dispatch named one.
-    pub operation: &'static str,
-    /// The HTTP status answered.
-    pub status: u16,
-    /// The S3 error code, or `None` for a success.
-    pub code: &'static str,
-    /// The larger of the request body and the response body, in bytes.
-    pub bytes: u64,
-    /// Seconds from the request's arrival to its response.
-    pub seconds: f64,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
-struct RequestLabels {
-    operation: &'static str,
-    status: u16,
-    code: &'static str,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, EncodeLabelSet)]
-struct DurationLabels {
-    operation: &'static str,
-    size: &'static str,
-}
 
 /// A duration histogram from 1 ms to about 33 s.
 fn duration_histogram() -> Histogram {
@@ -68,6 +29,14 @@ pub struct Metrics {
     requests: Family<RequestLabels, Counter>,
     durations: Family<DurationLabels, Histogram, fn() -> Histogram>,
     shed: Counter,
+    auth_refusals: Family<ReasonLabels, Counter>,
+    policy_denials: Family<OperationLabels, Counter>,
+    heal_backlog: Family<Unlabelled, Gauge>,
+    heal_at_risk: Family<Unlabelled, Gauge>,
+    replication_backlog: Family<Unlabelled, Gauge>,
+    replication_in_flight: Family<Unlabelled, Gauge>,
+    replication_failed: Family<Unlabelled, Gauge>,
+    collect_up: Family<SourceLabels, Gauge>,
 }
 
 impl Default for Metrics {
@@ -102,11 +71,68 @@ impl Metrics {
             "Requests refused before the pipeline because the node was at its in-flight limit",
             shed.clone(),
         );
+        let auth_refusals = Family::<ReasonLabels, Counter>::default();
+        registry.register(
+            "auth_refusals",
+            "Requests that did not authenticate, by reason",
+            auth_refusals.clone(),
+        );
+        let policy_denials = Family::<OperationLabels, Counter>::default();
+        registry.register(
+            "policy_denials",
+            "Authenticated requests the access policy denied, by operation",
+            policy_denials.clone(),
+        );
+        let gauges = [
+            (
+                "heal_backlog",
+                "Data ids listed for healing, counted up to a bound",
+            ),
+            (
+                "heal_backlog_at_risk",
+                "Of those counted, the ids handed out for healing repeatedly",
+            ),
+            ("replication_backlog", "Replication tasks not yet settled"),
+            (
+                "replication_in_flight",
+                "Replication tasks handed out and not yet settled",
+            ),
+            (
+                "replication_failed",
+                "Replication tasks given up, their versions FAILED",
+            ),
+        ]
+        .map(|(name, help)| {
+            let gauge = Family::<Unlabelled, Gauge>::default();
+            registry.register(name, help, gauge.clone());
+            gauge
+        });
+        let [
+            heal_backlog,
+            heal_at_risk,
+            replication_backlog,
+            replication_in_flight,
+            replication_failed,
+        ] = gauges;
+        let collect_up = Family::<SourceLabels, Gauge>::default();
+        registry.register(
+            "collect_up",
+            "Whether the last scrape could read a source (1) or not (0); a source not read keeps its last values",
+            collect_up.clone(),
+        );
         Self {
             registry,
             requests,
             durations,
             shed,
+            auth_refusals,
+            policy_denials,
+            heal_backlog,
+            heal_at_risk,
+            replication_backlog,
+            replication_in_flight,
+            replication_failed,
+            collect_up,
         }
     }
 
@@ -130,6 +156,52 @@ impl Metrics {
     /// Counts one request shed for load.
     pub fn shed(&self) {
         self.shed.inc();
+    }
+
+    /// Counts one request that did not authenticate.
+    pub fn auth_refused(&self, refusal: AuthRefusal) {
+        self.auth_refusals
+            .get_or_create(&ReasonLabels {
+                reason: refusal.label(),
+            })
+            .inc();
+    }
+
+    /// Counts one authenticated request the access policy denied.
+    pub fn denied(&self, operation: &'static str) {
+        self.policy_denials
+            .get_or_create(&OperationLabels { operation })
+            .inc();
+    }
+
+    /// Sets the heal backlog as last read: ids listed and of them at risk.
+    pub fn heal(&self, listed: u64, at_risk: u64) {
+        self.heal_backlog
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(listed));
+        self.heal_at_risk
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(at_risk));
+    }
+
+    /// Sets the replication backlog as last read.
+    pub fn replication(&self, backlog: u64, in_flight: u64, failed: u64) {
+        self.replication_backlog
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(backlog));
+        self.replication_in_flight
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(in_flight));
+        self.replication_failed
+            .get_or_create(&Unlabelled)
+            .set(gauge_value(failed));
+    }
+
+    /// Records whether `source` (`heal`, `replication`) could be read at this scrape.
+    pub fn collected(&self, source: &'static str, read: bool) {
+        self.collect_up
+            .get_or_create(&SourceLabels { source })
+            .set(i64::from(read));
     }
 
     /// The metrics in Prometheus text.
