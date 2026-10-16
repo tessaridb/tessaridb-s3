@@ -92,10 +92,6 @@ fn what_this_server_cannot_do_or_s3_does_not_define_is_refused_by_name() {
             ],
             ErrorCode::NotImplemented,
         ),
-        (
-            vec![("x-amz-server-side-encryption-customer-algorithm", "AES256")],
-            ErrorCode::NotImplemented,
-        ),
     ] {
         assert_eq!(refused(&pairs), code, "{pairs:?}");
     }

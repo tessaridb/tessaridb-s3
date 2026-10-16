@@ -23,6 +23,8 @@ pub struct Call<'a> {
     pub principal: &'a Principal,
     /// The request's headers.
     pub headers: &'a HeaderMap,
+    /// Whether it arrived over a connection whose TLS handshake completed.
+    pub secure: bool,
 }
 
 impl Call<'_> {

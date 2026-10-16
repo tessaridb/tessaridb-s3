@@ -8,7 +8,7 @@ use tessari_s3_core::auth::{ChunkedDecoder, PayloadHash, verify_payload_digest};
 use tessari_s3_storage::objects::{ObjectService, Upload, Uploaded};
 use tessari_s3_types::ErrorCode;
 
-use tessari_s3_storage::encryption::Sealing;
+use tessari_s3_storage::encryption::{CustomerKey, CustomerSeal, Sealing};
 
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
@@ -30,19 +30,36 @@ fn incomplete() -> Error {
     )
 }
 
-/// Streams the body (decoded when aws-chunked) into a new data file of exactly `length` bytes — sealed under the key
-/// `sealing` names, when it names one — and checks the signed payload hash. Every failure here releases the file and its
-/// queue entry before it is returned.
+/// What a write's bytes are sealed under.
+pub(crate) enum Seal<'a> {
+    /// Nothing: they are stored as they came.
+    Plain,
+    /// The server's own key or a named one.
+    Under(&'a Sealing),
+    /// The customer's key the request brought, under the seal made for it.
+    Customer(&'a CustomerKey, &'a CustomerSeal),
+}
+
+impl<'a> From<Option<&'a Sealing>> for Seal<'a> {
+    fn from(sealing: Option<&'a Sealing>) -> Self {
+        sealing.map_or(Self::Plain, Self::Under)
+    }
+}
+
+/// Streams the body (decoded when aws-chunked) into a new data file of exactly `length` bytes — sealed as `seal`
+/// says — and checks the signed payload hash. Every failure here releases the file and its queue entry before it
+/// is returned.
 pub(crate) async fn receive(
     call: &Call<'_>,
     body: Body,
     length: u64,
-    sealing: Option<&Sealing>,
+    seal: Seal<'_>,
 ) -> Result<(Uploaded, Option<String>)> {
     let objects = call.state.storage().objects();
-    let mut upload = match sealing {
-        Some(sealing) => objects.upload_sealed(length, sealing).await?,
-        None => objects.upload(length).await?,
+    let mut upload = match seal {
+        Seal::Plain => objects.upload(length).await?,
+        Seal::Under(sealing) => objects.upload_sealed(length, sealing).await?,
+        Seal::Customer(key, customer) => objects.upload_customer(length, key, customer).await?,
     };
     let id = upload.id();
     let outcome = match fill(call, body, length, &mut upload).await {

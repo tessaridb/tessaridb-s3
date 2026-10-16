@@ -69,9 +69,30 @@ fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
         ErrorCode::InvalidArgument,
         "a key id belongs to aws:kms"
     );
+    let customer = [
+        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
+        (
+            "x-amz-server-side-encryption-customer-key",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        ),
+        (
+            "x-amz-server-side-encryption-customer-key-md5",
+            "y4HAEFCYWuvAXWFTtA1Qpg==",
+        ),
+    ];
+    assert!(
+        read_put_headers(&headers(&customer))
+            .expect("reads")
+            .customer
+            .is_some(),
+        "a customer key is read, not refused"
+    );
+    let mut beside_server = customer.to_vec();
+    beside_server.push(("x-amz-server-side-encryption", "AES256"));
     assert_eq!(
-        refused(&[("x-amz-server-side-encryption-customer-algorithm", "AES256")]),
-        ErrorCode::NotImplemented
+        refused(&beside_server),
+        ErrorCode::InvalidArgument,
+        "a customer key is not one of the server's"
     );
     assert_eq!(
         refused(&[("x-amz-object-lock-event-hold", "ON")]),

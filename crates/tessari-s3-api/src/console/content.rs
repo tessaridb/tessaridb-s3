@@ -87,6 +87,8 @@ pub(super) async fn download(
             *id,
             object.size,
             object.encryption.as_ref(),
+            // The console holds no customer's key: an object sealed under one is refused, not opened.
+            None,
             0,
             last,
         )

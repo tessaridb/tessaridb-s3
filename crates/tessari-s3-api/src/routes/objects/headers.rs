@@ -13,6 +13,7 @@ use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_storage::objects::WriteCondition;
 use tessari_s3_types::ErrorCode;
 
+use super::customer::{Customer, read_customer};
 use super::sse::read_sse;
 use crate::{Error, Result};
 
@@ -39,7 +40,7 @@ pub(crate) struct DeclaredChecksum {
 }
 
 /// A PutObject's headers, read.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct PutHeaders {
     pub(crate) system: BTreeMap<String, String>,
     pub(crate) metadata: BTreeMap<String, String>,
@@ -49,6 +50,8 @@ pub(crate) struct PutHeaders {
     pub(crate) lock: LockAsked,
     /// The key the bytes are to be sealed under, if any.
     pub(crate) encryption: Option<Sealing>,
+    /// The customer's key the bytes are to be sealed under, if the request brought one.
+    pub(crate) customer: Option<Customer>,
 }
 
 pub(super) fn not_implemented(what: &str) -> Error {
@@ -61,7 +64,7 @@ pub(super) fn not_implemented(what: &str) -> Error {
 /// Reads `headers` for a PutObject.
 ///
 /// # Errors
-/// `NotImplemented` for dual-layer KMS, an encryption context or a customer key, an Object Lock event hold, website redirects, appends and unsupported checksum
+/// `NotImplemented` for dual-layer KMS, an encryption context, an Object Lock event hold, website redirects, appends and unsupported checksum
 /// algorithms; `InvalidTag` for a tagging header S3 refuses; `AccessControlListNotSupported`, `InvalidStorageClass`, `MetadataTooLarge`, `InvalidDigest`,
 /// `InvalidRequest` and `InvalidArgument` for the rest.
 pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
@@ -127,6 +130,13 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
     }
     system.retain(|_, value| !value.is_empty());
     let encryption = read_sse(headers)?;
+    let customer = read_customer(headers)?;
+    if customer.is_some() && encryption.is_some() {
+        return Err(Error::new(
+            ErrorCode::InvalidArgument,
+            "a customer-provided key cannot be combined with x-amz-server-side-encryption",
+        ));
+    }
     let integrity = read_integrity(headers)?;
     let condition = match (text("if-none-match"), text("if-match")) {
         (None, None) => WriteCondition::None,
@@ -148,6 +158,7 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         tags: crate::routes::tagging::header_tags(headers)?,
         lock: read_lock(headers)?,
         encryption,
+        customer,
     })
 }
 

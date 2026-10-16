@@ -70,6 +70,12 @@ fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumA
 pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     source::refuse_encrypted_source(call.headers)?;
     let headers = read_put_headers(call.headers)?;
+    if headers.customer.is_some() {
+        return Err(invalid(
+            ErrorCode::NotImplemented,
+            "a copy sealed under a customer-provided key is not implemented",
+        ));
+    }
     if headers.integrity.content_md5.is_some() || headers.integrity.checksum.is_some() {
         return Err(invalid(
             ErrorCode::InvalidRequest,

@@ -204,7 +204,7 @@ pub(crate) async fn complete(
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let headers = read_put_headers(call.headers)?;
-    if headers.encryption.is_some() {
+    if headers.encryption.is_some() || headers.customer.is_some() {
         return Err(Error::new(
             ErrorCode::NotImplemented,
             "server-side encryption of a multipart upload is not implemented",

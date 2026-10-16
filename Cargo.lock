@@ -3046,6 +3046,7 @@ dependencies = [
  "hmac",
  "hyper-util",
  "image",
+ "md-5",
  "openidconnect",
  "quick-xml",
  "rcgen",

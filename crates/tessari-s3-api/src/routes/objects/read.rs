@@ -10,6 +10,7 @@ use tessari_s3_storage::objects::{Content, StoredObject, VersionRead};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
+use super::customer::{admit_read, answer_customer, read_customer};
 use super::sse::{answer_sse, object_sealing};
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
@@ -58,6 +59,8 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         Some(version) => stored_version(call, key, version).await?,
         None => stored(call, key).await?,
     };
+    let customer = read_customer(call.headers)?;
+    admit_read(call, &object, customer.as_ref())?;
     let text = |name: &str| call.headers.get(name).and_then(|v| v.to_str().ok());
     let conditions = ReadConditions {
         if_match: text("if-match"),
@@ -133,6 +136,7 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
                     *id,
                     object.size,
                     object.encryption.as_ref(),
+                    customer.as_ref().map(|customer| &customer.key),
                     start,
                     end,
                 )
@@ -149,6 +153,9 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
     *response.status_mut() = status;
     let headers = response.headers_mut();
     describe(headers, &object, call, slice.is_none());
+    if let Some(customer) = &customer {
+        answer_customer(headers, customer);
+    }
     set(
         headers,
         header::CONTENT_LENGTH.as_str(),

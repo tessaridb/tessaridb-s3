@@ -115,6 +115,7 @@ async fn serve(state: ApiState, request: Request) -> Result<Response<Body>> {
         verified: &verified,
         principal: &principal,
         headers: &parts.headers,
+        secure: parts.extensions.get::<crate::OverTls>().is_some(),
     };
     routes::route(spec.operation, &call, body).await
 }

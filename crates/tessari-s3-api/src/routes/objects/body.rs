@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use tessari_s3_core::objects::range::segments;
 use tessari_s3_storage::Error as StorageError;
-use tessari_s3_storage::encryption::WrappedKey;
+use tessari_s3_storage::encryption::{CustomerKey, WrappedKey};
 use tessari_s3_storage::objects::{ObjectReader, ObjectService, Part};
 use tessari_s3_types::ErrorCode;
 
@@ -52,7 +52,7 @@ impl Remaining {
 }
 
 /// The body for bytes `start..=end` of data `id` holding `size` bytes, sealed under the data key `sealed` holds when
-/// there is one. The first block is read and verified before
+/// there is one — opened with `customer`'s key when a customer's key wrapped it. The first block is read and verified before
 /// this returns, so damage there becomes an error response; damage in a later block ends the body early, which a
 /// client sees as a body shorter than its Content-Length.
 pub(crate) async fn send(
@@ -60,11 +60,12 @@ pub(crate) async fn send(
     id: [u8; 16],
     size: u64,
     sealed: Option<&WrappedKey>,
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<Body> {
     Ok(Body::from_stream(
-        blocks(objects, id, size, sealed, start, end).await?,
+        blocks(objects, id, size, sealed, customer, start, end).await?,
     ))
 }
 
@@ -106,6 +107,7 @@ pub(super) async fn stream_parts(
         part.data,
         part.size,
         part.encryption.as_ref(),
+        None,
         from,
         to,
     )
@@ -121,6 +123,7 @@ pub(super) async fn stream_parts(
                     part.data,
                     part.size,
                     part.encryption.as_ref(),
+                    None,
                     from,
                     to,
                 )
@@ -137,19 +140,26 @@ pub(super) async fn stream_parts(
     Ok(first.chain(later).boxed())
 }
 
-/// The verified blocks holding bytes `start..=end` of data `id` — opened, when `sealed` holds its data key — the
-/// first already read.
+/// The verified blocks holding bytes `start..=end` of data `id` — opened, when `sealed` holds its data key, under
+/// this node's key or `customer`'s — the first already read.
 pub(super) async fn blocks(
     objects: &ObjectService,
     id: [u8; 16],
     size: u64,
     sealed: Option<&WrappedKey>,
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
-    let reader = match sealed {
-        Some(wrapped) => objects.open_sealed(id, size, wrapped).await?,
-        None => objects.open(id, size).await?,
+    let reader = match (sealed, customer) {
+        (Some(wrapped), Some(key)) if wrapped.customer.is_some() => {
+            objects.open_customer(id, size, wrapped, key).await?
+        }
+        (Some(wrapped), None) if wrapped.customer.is_some() => {
+            return Err(super::customer::key_required());
+        }
+        (Some(wrapped), _) => objects.open_sealed(id, size, wrapped).await?,
+        (None, _) => objects.open(id, size).await?,
     };
     let block_size = u64::from(reader.block_size());
     let block_of = |offset: u64| {

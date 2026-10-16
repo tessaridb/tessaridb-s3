@@ -10,6 +10,8 @@ pub enum ErrorCode {
     AccessControlListNotSupported,
     /// 400: the Content-MD5 or checksum value is not well formed.
     InvalidDigest,
+    /// 400: a customer-provided key names an algorithm other than AES256.
+    InvalidEncryptionAlgorithmError,
     /// 400: the upload exceeds the maximum allowed object size.
     EntityTooLarge,
     /// 400: the storage class is not one this server offers.
@@ -118,6 +120,7 @@ impl ErrorCode {
             Self::AccessDenied => "AccessDenied",
             Self::AccessControlListNotSupported => "AccessControlListNotSupported",
             Self::InvalidDigest => "InvalidDigest",
+            Self::InvalidEncryptionAlgorithmError => "InvalidEncryptionAlgorithmError",
             Self::EntityTooLarge => "EntityTooLarge",
             Self::InvalidStorageClass => "InvalidStorageClass",
             Self::MissingContentLength => "MissingContentLength",
@@ -216,6 +219,7 @@ impl ErrorCode {
             Self::MetadataTooLarge
             | Self::InvalidStorageClass
             | Self::InvalidDigest
+            | Self::InvalidEncryptionAlgorithmError
             | Self::EntityTooLarge
             | Self::InvalidPart
             | Self::InvalidPartOrder
@@ -243,6 +247,11 @@ mod tests {
                 400,
             ),
             (ErrorCode::InvalidDigest, "InvalidDigest", 400),
+            (
+                ErrorCode::InvalidEncryptionAlgorithmError,
+                "InvalidEncryptionAlgorithmError",
+                400,
+            ),
             (ErrorCode::InvalidStorageClass, "InvalidStorageClass", 400),
             (ErrorCode::MissingContentLength, "MissingContentLength", 411),
             (ErrorCode::MetadataTooLarge, "MetadataTooLarge", 400),

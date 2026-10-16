@@ -112,6 +112,7 @@ pub(crate) async fn bytes(
                 *id,
                 object.size,
                 object.encryption.as_ref(),
+                None,
                 start,
                 end,
             )

@@ -2,6 +2,7 @@
 
 pub(crate) mod body;
 mod copy;
+pub(crate) mod customer;
 pub(crate) mod data;
 mod delete_many;
 pub(crate) mod headers;

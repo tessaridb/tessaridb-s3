@@ -45,7 +45,7 @@ pub(crate) fn key_named(id: &str) -> Result<KeyName> {
 ///
 /// # Errors
 /// `InvalidArgument` for a mode S3 does not define or a key id without `aws:kms`; `NotImplemented` for dual-layer
-/// KMS, an encryption context, and customer-provided keys.
+/// KMS and an encryption context.
 pub(crate) fn read_sse(headers: &HeaderMap) -> Result<Option<Sealing>> {
     let text = |name: &str| {
         headers
@@ -55,10 +55,9 @@ pub(crate) fn read_sse(headers: &HeaderMap) -> Result<Option<Sealing>> {
     };
     for (name, _) in headers {
         let name = name.as_str();
+        // A customer's key is read by `customer::read_customer`.
         if name.starts_with("x-amz-server-side-encryption-customer-") {
-            return Err(not_implemented(
-                "server-side encryption with a customer key",
-            ));
+            continue;
         }
         if name == "x-amz-server-side-encryption-context" {
             return Err(not_implemented("an encryption context"));
@@ -140,6 +139,14 @@ pub(crate) fn etag_for(md5_hex: &str, sealing: Option<&Sealing>) -> Result<Strin
     if !matches!(sealing, Some(Sealing::Named(_))) {
         return Ok(format!("\"{md5_hex}\""));
     }
+    opaque_etag()
+}
+
+/// A quoted ETag that says nothing about the bytes it names.
+///
+/// # Errors
+/// `InternalError` when the platform's generator fails.
+pub(crate) fn opaque_etag() -> Result<String> {
     let mut opaque = [0_u8; 16];
     getrandom::fill(&mut opaque).map_err(|_| {
         Error::new(
