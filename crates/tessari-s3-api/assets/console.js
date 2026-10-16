@@ -952,8 +952,8 @@
       opener.focus();
     };
     const route = `/users/${encodeURIComponent(user2.name)}/keys`;
-    const done4 = el("button", { type: "button", class: "quiet" }, "Close");
-    done4.addEventListener("click", back);
+    const done5 = el("button", { type: "button", class: "quiet" }, "Close");
+    done5.addEventListener("click", back);
     const revoke = (key, button) => {
       const ask = el("div", {});
       button.after(ask);
@@ -986,12 +986,12 @@
       if (!answer.ok) {
         const shown = settle(screen, answer);
         if (shown !== null) {
-          fill(region, refusal(shown), done4);
+          fill(region, refusal(shown), done5);
         }
         return;
       }
       if (answer.value.length === 0) {
-        fill(region, el("p", {}, `${user2.name} has no access keys.`), done4);
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done5);
         return;
       }
       const rows = answer.value.map((key) => {
@@ -999,7 +999,7 @@
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
-      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done4);
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done5);
     };
     void show();
   }
@@ -1010,7 +1010,7 @@
   //! sealed and will not hand it back), listing and revoking keys, disabling or
   //! enabling the user, and granting or removing access to one bucket. Every
   //! change takes a reason.
-  function shownOnce(key, done4) {
+  function shownOnce(key, done5) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1022,7 +1022,7 @@
         said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -1033,9 +1033,9 @@
       said
     );
   }
-  function alreadyIssued(id, done4) {
+  function alreadyIssued(id, done5) {
     const finish = el("button", { type: "button", class: "primary" }, "Close");
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => finish.focus());
     return el(
       "div",
@@ -1140,7 +1140,7 @@
       opener.focus();
     };
     const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done4 = (words) => {
+    const done5 = (words) => {
       announce(words);
       back();
     };
@@ -1160,7 +1160,7 @@
       event.preventDefault();
       const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
       if (answer.ok) {
-        done4(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+        done5(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1168,7 +1168,7 @@
     remove.addEventListener("click", async () => {
       const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
       if (answer.ok) {
-        done4(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+        done5(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1810,7 +1810,7 @@
     });
     return form;
   }
-  function shownOnce2(node, token, expires, done4) {
+  function shownOnce2(node, token, expires, done5) {
     const copy = el("button", { type: "button" }, "Copy token");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1822,7 +1822,7 @@
         said.textContent = "Copying is not allowed here; select the token and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -2200,6 +2200,118 @@
     );
   }
 
+  // src/encryption-model.ts
+  //! This node's encryption keys as the console sees them: not yet created,
+  //! sealed, or held — and then which key new objects are wrapped under.
+  function readKeys2(v) {
+    if (!record(v)) {
+      return null;
+    }
+    const state2 = v["state"];
+    if (state2 === "uninitialised" || state2 === "sealed") {
+      return { state: state2 };
+    }
+    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"])) {
+      return { state: state2, active: v["active"], keys: v["keys"] };
+    }
+    return null;
+  }
+
+  // src/encryption.ts
+  //! The encryption keys of this node, for an operator: whether they are held,
+  //! the form that unseals them with the keys passphrase (the first unseal
+  //! creates them), and sealing them again. Each node holds its own keys, so
+  //! this acts on the node serving the console. The server wants a recent
+  //! sign-in and records every attempt without the passphrase.
+  var BASE3 = "/encryption";
+  function done4(screen, failure, said) {
+    if (failure === null) {
+      announce(said);
+      screen.redraw();
+      return null;
+    }
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function stateLine(keys2) {
+    switch (keys2.state) {
+      case "uninitialised":
+        return el("p", {}, el("span", { class: "chip warn" }, "Not created"), " The first unseal creates the keys under the passphrase you give.");
+      case "sealed":
+        return el("p", {}, el("span", { class: "chip bad" }, "Sealed"), " This node cannot read or write encrypted objects until the keys are unsealed.");
+      case "unsealed":
+        return el("p", {}, el("span", { class: "chip ok" }, "Unsealed"), " New objects are wrapped under ", mono(keys2.active), `; ${keys2.keys.toLocaleString()} held.`);
+    }
+  }
+  function unsealForm(screen, keys2) {
+    const first = keys2.state === "uninitialised";
+    const hint = first ? "At least 15 characters, without quotes or backslashes. It becomes the keys passphrase: there is no recovering it." : "The keys passphrase. Wrong ones in a row make the next try wait.";
+    const passphrase = field("keys-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, hint);
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "keys-unseal-title" },
+      el("p", { id: "keys-unseal-title" }, el("strong", {}, first ? "Create and unseal the keys" : "Unseal the keys")),
+      passphrase.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Unseal")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const answer = await call("POST", `${BASE3}/unseal`, readKeys2, { passphrase: passphrase.input.value });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, "The encryption keys are unsealed on this node.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function sealButton(screen, region) {
+    const button = el("button", { type: "button", class: "danger" }, "Seal…");
+    button.addEventListener(
+      "click",
+      () => fill(
+        region,
+        confirmation(
+          "keys-seal",
+          el("span", {}, "the encryption keys on this node"),
+          "This node forgets its keys: encrypted objects are refused here until someone unseals them with the passphrase.",
+          "Seal",
+          async (reason) => {
+            const answer = await call("POST", `${BASE3}/seal`, readKeys2, { reason });
+            return done4(screen, answer.ok ? null : answer, "The encryption keys are sealed on this node.");
+          },
+          () => fill(region)
+        )
+      )
+    );
+    return button;
+  }
+  async function encryptionCard(screen) {
+    if (screen.may?.operate !== true) {
+      return null;
+    }
+    const card = el("section", { class: "card" }, el("h2", {}, "Encryption keys"));
+    const answer = await call("GET", BASE3, readKeys2);
+    if (!answer.ok) {
+      card.append(refusal(answer));
+      return card;
+    }
+    const keys2 = answer.value;
+    const region = el("div", {});
+    card.append(stateLine(keys2));
+    if (keys2.state === "unsealed") {
+      card.append(el("div", { class: "actions" }, sealButton(screen, region)), region);
+    } else {
+      card.append(unsealForm(screen, keys2));
+    }
+    return card;
+  }
+
   // src/status.ts
   //! The overview: is this node and its cluster healthy, how much is stored and
   //! how full the drives are, and is anything waiting to be healed. Each tile
@@ -2302,7 +2414,7 @@
   }
   async function status(screen) {
     loading(screen, TITLE3, "the node's status");
-    const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
+    const [answer, usage, encryption] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen)]);
     if (!answer.ok) {
       failed(screen, TITLE3, answer);
       return;
@@ -2328,7 +2440,8 @@
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
         tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
       ),
-      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members)
+      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members),
+      encryption
     );
   }
 
@@ -2516,17 +2629,17 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${detail.etag}.`,
           "Delete object",
           async (why) => {
-            const done4 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
-            if (done4.ok) {
+            const done5 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
+            if (done5.ok) {
               announce(`Deleted ${key} from ${bucket2}.`);
               location.hash = back;
               return null;
             }
-            if (done4.status === 401) {
+            if (done5.status === 401) {
               screen.signIn();
               return null;
             }
-            return deleteRefusal(done4);
+            return deleteRefusal(done5);
           },
           () => {
             fill(asking);
@@ -2581,9 +2694,9 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
           "Delete object",
           async (reason) => {
-            const done4 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
-            if (!done4.ok) {
-              const shown = settle(screen, done4);
+            const done5 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done5.ok) {
+              const shown = settle(screen, done5);
               return shown === null ? null : deleteRefusal(shown);
             }
             close();
@@ -2986,7 +3099,7 @@
       intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
     };
   }
-  function signIn(main2, done4) {
+  function signIn(main2, done5) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
     const secret = field("secret-key", "Secret access key", { type: "password", autocomplete: "current-password", required: "" });
     const reason = field("reason", "Reason", { autocomplete: "off" }, "Why the root key, now: it is recorded and announced.");
@@ -3022,7 +3135,7 @@
       if (answer.ok) {
         key.input.value = "";
         reason.input.value = "";
-        done4();
+        done5();
         return;
       }
       if (answer.code === "reason_required") {
