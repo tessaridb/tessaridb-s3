@@ -95,12 +95,6 @@ fn key_text(key: &ObjectKey) -> Result<String> {
 /// `POST /{bucket}/{key}?uploads`.
 pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
-    if headers.encrypted {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "server-side encryption of a multipart upload is not implemented",
-        ));
-    }
     // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
     // carried yet, and are refused rather than dropped.
     if headers.lock.asked {
@@ -116,6 +110,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         tags: headers.tags,
         checksum_algorithm,
         checksum_type,
+        encrypted: headers.encrypted,
     };
     let bucket = call.bucket()?;
     let Created::Created(id, initiated) = call
@@ -148,6 +143,12 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
             response.headers_mut().insert(name, value);
         }
     }
+    if upload.encrypted {
+        response.headers_mut().insert(
+            "x-amz-server-side-encryption",
+            HeaderValue::from_static("AES256"),
+        );
+    }
     Ok(response)
 }
 
@@ -170,11 +171,11 @@ pub(crate) async fn upload_part(
     let storage = call.state.storage();
     let bucket = call.bucket()?;
     // Refuse before reading the body: a part for no upload is never written to a drive.
-    if !storage.multipart().exists(bucket, key, id).await? {
+    let Some(declared) = storage.multipart().find(bucket, key, id).await? else {
         return Err(no_such_upload());
-    }
+    };
     quota::admit(call, bucket, None, length).await?;
-    let (uploaded, trailer) = data::receive(call, body, length, false).await?;
+    let (uploaded, trailer) = data::receive(call, body, length, declared.encrypted).await?;
     let algorithm = match check(&integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {
@@ -197,6 +198,7 @@ pub(crate) async fn upload_part(
                 )
             })
             .collect(),
+        encryption: uploaded.encryption.clone(),
     };
     match storage
         .multipart()
@@ -207,6 +209,12 @@ pub(crate) async fn upload_part(
             let mut response = empty_response(StatusCode::OK);
             if let Ok(value) = HeaderValue::from_str(&etag) {
                 response.headers_mut().insert("etag", value);
+            }
+            if part.encryption.is_some() {
+                response.headers_mut().insert(
+                    "x-amz-server-side-encryption",
+                    HeaderValue::from_static("AES256"),
+                );
             }
             if integrity.checksum.is_some()
                 && let Ok(value) = HeaderValue::from_str(uploaded.digests.value(algorithm))

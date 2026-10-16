@@ -3,7 +3,7 @@
 //! bytes are copied — so a failure is an ordinary error response, never an error inside a 200.
 
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::{HeaderValue, Response, StatusCode};
 use quick_xml::Reader;
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
@@ -276,6 +276,7 @@ pub(crate) async fn complete(
         checksum: (algorithm, value),
         composite,
         version,
+        encrypted,
     } = outcome
     else {
         return Err(refused(&outcome));
@@ -288,7 +289,7 @@ pub(crate) async fn complete(
     } else {
         "FULL_OBJECT"
     };
-    Ok(with_version(
+    let mut response = with_version(
         xml_response(
             StatusCode::OK,
             format!(
@@ -300,7 +301,14 @@ pub(crate) async fn complete(
             ),
         ),
         version.as_deref(),
-    ))
+    );
+    if encrypted {
+        response.headers_mut().insert(
+            "x-amz-server-side-encryption",
+            HeaderValue::from_static("AES256"),
+        );
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

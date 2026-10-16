@@ -47,8 +47,8 @@ impl ObjectService {
             .then_some(bytes))
     }
 
-    /// Writes every byte of `object` to `out`, block by block; `false`, having written nothing, when it is larger than
-    /// `max` bytes.
+    /// Writes every byte of `object` to `out`, block by block — opened, where it was sealed; `false`, having written
+    /// nothing, when it is larger than `max` bytes.
     ///
     /// # Errors
     /// A data file's or the shards' failure, or `out`'s.
@@ -62,15 +62,18 @@ impl ObjectService {
             return Ok(false);
         }
         let pieces = match &object.content {
-            Content::Data(id) => vec![(*id, object.size)],
+            Content::Data(id) => vec![(*id, object.size, object.encryption.as_ref())],
             Content::Parts(multipart) => multipart
                 .parts
                 .iter()
-                .map(|part| (part.data, part.size))
+                .map(|part| (part.data, part.size, part.encryption.as_ref()))
                 .collect(),
         };
-        for (id, size) in pieces {
-            let reader = self.open(id, size).await?;
+        for (id, size, sealed) in pieces {
+            let reader = match sealed {
+                Some(wrapped) => self.open_sealed(id, size, wrapped).await?,
+                None => self.open(id, size).await?,
+            };
             let block = u64::from(reader.block_size()).max(1);
             for index in 0..size.div_ceil(block) {
                 out.write_all(&reader.read_block(index).await?)

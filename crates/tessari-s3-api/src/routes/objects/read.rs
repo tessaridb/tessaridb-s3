@@ -139,12 +139,8 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             }
             Content::Parts(multipart) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
-                let parts: Vec<([u8; 16], u64)> = multipart
-                    .parts
-                    .iter()
-                    .map(|part| (part.data, part.size))
-                    .collect();
-                body::send_parts(call.state.storage().objects(), &parts, start, end).await?
+                let parts = &multipart.parts;
+                body::send_parts(call.state.storage().objects(), parts, start, end).await?
             }
         }
     };
@@ -247,7 +243,9 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     if let Some(status) = &object.replication {
         set(headers, "x-amz-replication-status", status);
     }
-    if object.encryption.is_some() {
+    let sealed_parts = matches!(&object.content, Content::Parts(multipart)
+        if multipart.parts.iter().any(|part| part.encryption.is_some()));
+    if object.encryption.is_some() || sealed_parts {
         set(headers, "x-amz-server-side-encryption", "AES256");
     }
     if !object.tags.is_empty() {

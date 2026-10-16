@@ -27,7 +27,7 @@ pub struct Multipart {
 }
 
 /// One part of a multipart object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Part {
     /// The part number it was uploaded as.
     pub number: u16,
@@ -35,6 +35,8 @@ pub struct Part {
     pub data: [u8; 16],
     /// Size in bytes.
     pub size: u64,
+    /// The wrapped data key its bytes are sealed under; none for a part stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// A new object's metadata and where its bytes are, ready to commit.

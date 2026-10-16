@@ -6,8 +6,9 @@ use tessari_s3_infrastructure::tessaridb::{Number, Value};
 use super::repository::PartRow;
 use super::tessaridb::{malformed, string_map};
 use crate::Result;
+use crate::objects::entity::sealed;
 
-/// `number, data, size, etag, checksums` of one part.
+/// `number, data, size, etag, checksums` of one part, and its wrapped data key when sealed.
 pub(super) fn complete_row(value: &Value) -> Result<PartRow> {
     let Value::Object(fields) = value else {
         return Err(malformed("not an object"));
@@ -30,5 +31,6 @@ pub(super) fn complete_row(value: &Value) -> Result<PartRow> {
             },
             checksums: string_map(fields.get("checksums"))?,
         },
+        encryption: sealed(fields)?,
     })
 }

@@ -7,6 +7,8 @@ use tessari_s3_storage::objects::Content;
 use tessari_s3_types::{BucketName, ObjectKey};
 use zeroize::Zeroizing;
 
+use crate::complete::{complete, document};
+use crate::multipart::{etag, part, text};
 use crate::object_lock::refused;
 use crate::{IGNORED, Seen, call, call_with, fresh_with, scratch_dir};
 
@@ -28,14 +30,20 @@ fn body() -> Vec<u8> {
         .collect()
 }
 
-/// Whether the data file holding `bucket/key` contains `needle`.
-async fn drive_holds(
-    state: &tessari_s3_api::ApiState,
-    dir: &std::path::Path,
-    bucket: &str,
-    key: &str,
-    needle: &[u8],
-) -> bool {
+/// Whether data file `id` under `dir` contains `needle`.
+fn file_holds(dir: &std::path::Path, id: [u8; 16], needle: &[u8]) -> bool {
+    let name: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
+    let path = dir
+        .join("s3data")
+        .join(&name[0..2])
+        .join(&name[2..4])
+        .join(&name);
+    let bytes = std::fs::read(path).expect("the data file");
+    bytes.windows(needle.len()).any(|window| window == needle)
+}
+
+/// The data files holding `bucket/key`: its one file, or its parts' files in order.
+async fn data_files(state: &tessari_s3_api::ApiState, bucket: &str, key: &str) -> Vec<[u8; 16]> {
     let bucket = BucketName::new(bucket).expect("bucket");
     let key = ObjectKey::new(key).expect("key");
     let object = state
@@ -47,17 +55,24 @@ async fn drive_holds(
         .ok()
         .flatten()
         .expect("stored");
-    let Content::Data(id) = object.content else {
-        panic!("a single PUT has one data file")
-    };
-    let name: String = id.iter().map(|byte| format!("{byte:02x}")).collect();
-    let path = dir
-        .join("s3data")
-        .join(&name[0..2])
-        .join(&name[2..4])
-        .join(&name);
-    let bytes = std::fs::read(path).expect("the data file");
-    bytes.windows(needle.len()).any(|window| window == needle)
+    match object.content {
+        Content::Data(id) => vec![id],
+        Content::Parts(multipart) => multipart.parts.iter().map(|part| part.data).collect(),
+    }
+}
+
+/// Whether any data file holding `bucket/key` contains `needle`.
+async fn drive_holds(
+    state: &tessari_s3_api::ApiState,
+    dir: &std::path::Path,
+    bucket: &str,
+    key: &str,
+    needle: &[u8],
+) -> bool {
+    data_files(state, bucket, key)
+        .await
+        .into_iter()
+        .any(|id| file_holds(dir, id, needle))
 }
 
 #[tokio::test]
@@ -137,28 +152,6 @@ async fn an_object_asked_to_be_encrypted_is_sealed_on_the_drive_and_opened_on_ev
         "the scan finds plain bytes"
     );
 
-    // Paths that cannot seal yet refuse rather than store plain.
-    let multipart = call_with(
-        &state,
-        "POST",
-        "/sealed/m",
-        vec![("uploads", None)],
-        vec![SSE],
-        b"",
-    )
-    .await;
-    assert_eq!(refused(&multipart), (501, Some("NotImplemented")));
-    let copy = call_with(
-        &state,
-        "PUT",
-        "/sealed/copy",
-        vec![],
-        vec![SSE, ("x-amz-copy-source", "/sealed/plain")],
-        b"",
-    )
-    .await;
-    assert_eq!(refused(&copy), (501, Some("NotImplemented")));
-
     // Keys sealed again: the sealed object cannot be read, the plain one and a HEAD still can.
     state.storage().keys().seal();
     let closed = call(&state, "GET", "/sealed/k", vec![], b"").await;
@@ -177,6 +170,122 @@ async fn an_object_asked_to_be_encrypted_is_sealed_on_the_drive_and_opened_on_ev
     assert_eq!(
         call(&state, "HEAD", "/sealed/k", vec![], b"").await.status,
         200
+    );
+    std::fs::remove_dir_all(dir).expect("cleanup");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn multipart_parts_and_copies_asked_to_be_encrypted_are_sealed_and_read_whole() {
+    let _why = IGNORED;
+    let (state, _, dir) = fresh_with(scratch_dir()).await;
+    assert_eq!(
+        call(&state, "PUT", "/mpsealed", vec![], b"").await.status,
+        200
+    );
+    let passphrase = Passphrase::new(Zeroizing::new(
+        "a keys passphrase for the sse suite".to_owned(),
+    ))
+    .expect("usable");
+    state
+        .storage()
+        .keys()
+        .unseal(&passphrase)
+        .await
+        .expect("unsealed");
+    let bytes = body();
+    let plain = call(&state, "PUT", "/mpsealed/plain", vec![], &bytes).await;
+    assert_eq!(plain.status, 200, "{}", plain.body);
+
+    // A multipart upload: one uploaded part past a block, then the plain object copied whole as the last part.
+    let created = call_with(
+        &state,
+        "POST",
+        "/mpsealed/m",
+        vec![("uploads", None)],
+        vec![SSE],
+        b"",
+    )
+    .await;
+    assert_eq!(created.status, 200, "{}", created.body);
+    assert_eq!(sse_header(&created), Some(&b"AES256"[..]));
+    let upload = text(&created.body, "UploadId").expect("an upload id");
+    let first = vec![7_u8; 5 << 20];
+    let one = part(&state, "/mpsealed/m", &upload, "1", &first).await;
+    assert_eq!(one.status, 200, "{}", one.body);
+    assert_eq!(sse_header(&one), Some(&b"AES256"[..]));
+    let copied = call_with(
+        &state,
+        "PUT",
+        "/mpsealed/m",
+        vec![("partNumber", Some("2")), ("uploadId", Some(&upload))],
+        vec![("x-amz-copy-source", "/mpsealed/plain")],
+        b"",
+    )
+    .await;
+    assert_eq!(copied.status, 200, "{}", copied.body);
+    let two = text(&copied.body, "ETag").expect("an etag");
+    let done = complete(
+        &state,
+        "/mpsealed/m",
+        &upload,
+        Vec::new(),
+        &document(&[("1", etag(&one).as_str()), ("2", two.as_str())]),
+    )
+    .await;
+    assert_eq!(done.status, 200, "{}", done.body);
+    assert_eq!(sse_header(&done), Some(&b"AES256"[..]));
+    let whole = [first.as_slice(), &bytes].concat();
+    let got = call(&state, "GET", "/mpsealed/m", vec![], b"").await;
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(got.bytes, whole, "the parts read back in order");
+    assert_eq!(sse_header(&got), Some(&b"AES256"[..]));
+    assert_eq!(
+        sse_header(&call(&state, "HEAD", "/mpsealed/m", vec![], b"").await),
+        Some(&b"AES256"[..])
+    );
+    assert!(
+        !drive_holds(&state, &dir, "mpsealed", "m", &bytes[..32]).await,
+        "a copied part in clear"
+    );
+    assert!(
+        !drive_holds(&state, &dir, "mpsealed", "m", &first[..32]).await,
+        "an uploaded part in clear"
+    );
+
+    // A copy sealed from a plain source, and a plain copy of a sealed source.
+    let sealed = call_with(
+        &state,
+        "PUT",
+        "/mpsealed/sealed-copy",
+        vec![],
+        vec![SSE, ("x-amz-copy-source", "/mpsealed/plain")],
+        b"",
+    )
+    .await;
+    assert_eq!(sealed.status, 200, "{}", sealed.body);
+    assert_eq!(sse_header(&sealed), Some(&b"AES256"[..]));
+    assert!(!drive_holds(&state, &dir, "mpsealed", "sealed-copy", &bytes[..32]).await);
+    assert_eq!(
+        call(&state, "GET", "/mpsealed/sealed-copy", vec![], b"")
+            .await
+            .bytes,
+        bytes
+    );
+    let unsealed = call_with(
+        &state,
+        "PUT",
+        "/mpsealed/plain-copy",
+        vec![],
+        vec![("x-amz-copy-source", "/mpsealed/sealed-copy")],
+        b"",
+    )
+    .await;
+    assert_eq!(unsealed.status, 200, "{}", unsealed.body);
+    assert_eq!(sse_header(&unsealed), None);
+    assert!(
+        drive_holds(&state, &dir, "mpsealed", "plain-copy", &bytes[..32]).await,
+        "control: plain copy"
     );
     std::fs::remove_dir_all(dir).expect("cleanup");
 }

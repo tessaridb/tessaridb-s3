@@ -12,6 +12,7 @@ use super::entity::complete_row;
 use super::model::{NewPart, NewUpload, OpenUpload, StoredPart};
 use super::repository::{MultipartRepository, PartRow, PendingBatch, UploadRecord};
 use crate::answers::{bucket_read, first_record, incarnation_of};
+use crate::objects::entity::sealed_fields;
 use crate::{Error, Result};
 
 #[path = "tessaridb_pending.rs"]
@@ -160,7 +161,7 @@ impl MultipartRepository for TessariMultipart {
             .pool
             .run(
                 "SELECT bucket_name, key, incarnation, headers, metadata, tags, checksum_algorithm, checksum_type, \
-                 initiated, position FROM ONLY uploads:$upload;",
+                 sse, initiated, position FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -190,6 +191,7 @@ impl MultipartRepository for TessariMultipart {
                 },
                 checksum_algorithm: optional("checksum_algorithm"),
                 checksum_type: optional("checksum_type"),
+                encrypted: optional("sse").as_deref() == Some("AES256"),
             },
             opened: match fields.get("position") {
                 Some(Value::String(position)) => Some(OpenUpload {
@@ -222,6 +224,7 @@ impl MultipartRepository for TessariMultipart {
             ("checksums", strings(&part.checksums)),
         ]
         .into_iter()
+        .chain(part.encryption.iter().flat_map(sealed_fields))
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
         let parameters = vec![
@@ -285,7 +288,8 @@ impl MultipartRepository for TessariMultipart {
                 crate::params::count(usize::from(MULTIPART_MAX_PARTS)),
             ),
         ];
-        let script = "SELECT number, data, size, etag, checksums FROM parts WHERE upload = $upload \
+        let script = "SELECT number, data, size, etag, checksums, sse_alg, sse_kek, sse_nonce, sse_key FROM parts \
+             WHERE upload = $upload \
              LIMIT $limit USING INDEX by_upload;";
         let answers = self.pool.run(script, parameters).await?;
         let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {

@@ -1,6 +1,6 @@
 //! The `objects` domain: object records in TessariDB, every object's bytes in data files (ADR-0008).
 
-mod entity;
+pub(crate) mod entity;
 mod model;
 mod model_lock;
 mod model_tags;

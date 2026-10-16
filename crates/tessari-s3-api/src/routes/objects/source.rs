@@ -116,12 +116,8 @@ pub(crate) async fn bytes(
             .await?
         }
         Content::Parts(multipart) => {
-            let parts: Vec<([u8; 16], u64)> = multipart
-                .parts
-                .iter()
-                .map(|part| (part.data, part.size))
-                .collect();
-            body::stream_parts(objects, &parts, start, end).await?
+            let parts = &multipart.parts;
+            body::stream_parts(objects, parts, start, end).await?
         }
     })
 }
@@ -139,8 +135,13 @@ pub(crate) async fn into_file(
     objects: &ObjectService,
     mut stream: BoxStream<'static, std::io::Result<Bytes>>,
     length: u64,
+    sealed: bool,
 ) -> Result<Uploaded> {
-    let mut upload = objects.upload(length).await?;
+    let mut upload = if sealed {
+        objects.upload_sealed(length).await?
+    } else {
+        objects.upload(length).await?
+    };
     let id = upload.id();
     let mut written = Ok(());
     while let Some(chunk) = stream.next().await {

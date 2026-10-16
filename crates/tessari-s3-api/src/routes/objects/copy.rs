@@ -5,10 +5,11 @@
 //! against the source's before anything commits.
 
 use axum::body::Body;
-use axum::http::{HeaderMap, Response, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests};
 use tessari_s3_core::objects::copy::Directive;
+use tessari_s3_storage::encryption::WrappedKey;
 use tessari_s3_storage::objects::{Content, NewObject, ObjectService, StoredObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
@@ -25,12 +26,21 @@ fn invalid(code: ErrorCode, message: &str) -> Error {
     Error::new(code, message)
 }
 
-/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008).
-async fn copy_bytes(objects: &ObjectService, object: &StoredObject) -> Result<(Content, Digests)> {
+/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008) — sealed under a key of its own when
+/// `sealed`, whatever the source was — and the wrapped key it is sealed under.
+async fn copy_bytes(
+    objects: &ObjectService,
+    object: &StoredObject,
+    sealed: bool,
+) -> Result<(Content, Digests, Option<WrappedKey>)> {
     let last = object.size.saturating_sub(1);
     let stream = source::bytes(objects, object, 0, last).await?;
-    let uploaded = source::into_file(objects, stream, object.size).await?;
-    Ok((Content::Data(uploaded.id), uploaded.digests))
+    let uploaded = source::into_file(objects, stream, object.size, sealed).await?;
+    Ok((
+        Content::Data(uploaded.id),
+        uploaded.digests,
+        uploaded.encryption,
+    ))
 }
 
 /// The algorithm the copy carries: the request's `x-amz-checksum-algorithm`, else the source's, else CRC64NVME.
@@ -58,11 +68,6 @@ fn algorithm_for(headers: &HeaderMap, object: &StoredObject) -> Result<ChecksumA
 pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     source::refuse_encrypted_source(call.headers)?;
     let headers = read_put_headers(call.headers)?;
-    if headers.encrypted {
-        return Err(super::headers::not_implemented(
-            "server-side encryption of a copy",
-        ));
-    }
     if headers.integrity.content_md5.is_some() || headers.integrity.checksum.is_some() {
         return Err(invalid(
             ErrorCode::InvalidRequest,
@@ -102,7 +107,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     }
     quota::admit(call, bucket, Some(key), object.size).await?;
     let algorithm = algorithm_for(call.headers, &object)?;
-    let (content, digests) = copy_bytes(objects, &object).await?;
+    let (content, digests, encryption) = copy_bytes(objects, &object, headers.encrypted).await?;
     let value = digests.value(algorithm).to_owned();
     // A whole-object value of the same algorithm must survive the copy; a composite one (`…-N`) covers part
     // digests and cannot be compared.
@@ -128,7 +133,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         checksums: [(algorithm.name().to_owned(), value.clone())].into(),
         content,
         lock: headers.lock.lock(),
-        encryption: None,
+        encryption,
     };
     if damaged {
         if let Content::Data(id) = copied.content {
@@ -148,20 +153,29 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         .put(bucket, key, &copied, &headers.condition)
         .await?
     {
-        Written::Committed { modified, version } => Ok(with_version(
-            xml_response(
-                StatusCode::OK,
-                format!(
-                    "<CopyObjectResult xmlns=\"{S3_NAMESPACE}\"><ETag>{}</ETag><LastModified>{}</LastModified>\
+        Written::Committed { modified, version } => {
+            let mut response = with_version(
+                xml_response(
+                    StatusCode::OK,
+                    format!(
+                        "<CopyObjectResult xmlns=\"{S3_NAMESPACE}\"><ETag>{}</ETag><LastModified>{}</LastModified>\
                      <Checksum{name}>{}</Checksum{name}><ChecksumType>FULL_OBJECT</ChecksumType></CopyObjectResult>",
-                    escape(&copied.etag),
-                    modified.iso8601_millis(),
-                    escape(&value),
-                    name = algorithm.name()
+                        escape(&copied.etag),
+                        modified.iso8601_millis(),
+                        escape(&value),
+                        name = algorithm.name()
+                    ),
                 ),
-            ),
-            version.as_deref(),
-        )),
+                version.as_deref(),
+            );
+            if copied.encryption.is_some() {
+                response.headers_mut().insert(
+                    "x-amz-server-side-encryption",
+                    HeaderValue::from_static("AES256"),
+                );
+            }
+            Ok(response)
+        }
         refused => Err(not_written(&refused)),
     }
 }

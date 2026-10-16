@@ -93,12 +93,8 @@ pub(super) async fn download(
         .await
         .map_err(|error| failed(&error))?,
         Content::Parts(multipart) => {
-            let parts: Vec<([u8; 16], u64)> = multipart
-                .parts
-                .iter()
-                .map(|part| (part.data, part.size))
-                .collect();
-            body::send_parts(objects, &parts, 0, last)
+            let parts = &multipart.parts;
+            body::send_parts(objects, parts, 0, last)
                 .await
                 .map_err(|error| failed(&error))?
         }

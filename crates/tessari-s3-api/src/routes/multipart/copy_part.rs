@@ -83,7 +83,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
     }
     quota::admit(call, bucket, None, length).await?;
     let stream = source::bytes(objects, &object, first, last).await?;
-    let uploaded = source::into_file(objects, stream, length).await?;
+    let uploaded = source::into_file(objects, stream, length, declared.encrypted).await?;
     let etag = format!("\"{}\"", uploaded.digests.md5_hex);
     let part = NewPart {
         data: uploaded.id,
@@ -99,6 +99,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
                 )
             })
             .collect(),
+        encryption: uploaded.encryption,
     };
     match storage
         .multipart()

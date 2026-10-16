@@ -15,7 +15,7 @@ fn header<'a>(seen: &'a Seen, name: &str) -> Option<&'a str> {
 }
 
 /// The Complete document for `(number, etag)` pairs, in the given order.
-fn document(parts: &[(&str, &str)]) -> Vec<u8> {
+pub(crate) fn document(parts: &[(&str, &str)]) -> Vec<u8> {
     let listed: String = parts
         .iter()
         .map(|(number, etag)| {
@@ -26,7 +26,7 @@ fn document(parts: &[(&str, &str)]) -> Vec<u8> {
         .into_bytes()
 }
 
-async fn complete(
+pub(crate) async fn complete(
     state: &tessari_s3_api::ApiState,
     path: &str,
     upload: &str,

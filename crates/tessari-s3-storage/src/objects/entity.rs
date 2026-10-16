@@ -76,10 +76,10 @@ pub(crate) fn record(
     Ok(Value::Object(fields))
 }
 
-type Fields = BTreeMap<String, Value>;
+pub(crate) type Fields = BTreeMap<String, Value>;
 
-/// The fields holding a sealed object's wrapped data key.
-fn sealed_fields(key: &WrappedKey) -> [(&'static str, Value); 4] {
+/// The fields holding a sealed object's (or part's) wrapped data key.
+pub(crate) fn sealed_fields(key: &WrappedKey) -> [(&'static str, Value); 4] {
     [
         ("sse_alg", Value::String(key.algorithm.clone())),
         ("sse_kek", Value::String(key.kek_id.clone())),
@@ -89,7 +89,7 @@ fn sealed_fields(key: &WrappedKey) -> [(&'static str, Value); 4] {
 }
 
 /// A record's wrapped data key: none when it carries no part of one, refused when it carries only some.
-fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
+pub(crate) fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
     let field = |name| {
         fields
             .get(name)

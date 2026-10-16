@@ -179,6 +179,7 @@ impl MultipartService {
         let Some(declared) = self.find(bucket, key, id).await? else {
             return Ok(Completed::NoSuchUpload);
         };
+        let encrypted = declared.encrypted;
         let algorithm = match declared
             .checksum_algorithm
             .as_deref()
@@ -219,6 +220,7 @@ impl MultipartService {
                 number: row.number,
                 data: row.data,
                 size: row.record.size,
+                encryption: row.encryption.clone(),
             })
             .collect();
         let object = NewObject {
@@ -250,6 +252,7 @@ impl MultipartService {
                 checksum: (checksum.algorithm(), assembled.checksum),
                 composite: matches!(checksum, ObjectChecksum::Composite(_)),
                 version,
+                encrypted,
             }),
             // An abort or another completion that won leaves no upload, whatever else the refusal looked like.
             _ if self.repository.upload(id).await?.is_none() => Ok(Completed::NoSuchUpload),

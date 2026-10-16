@@ -7,6 +7,7 @@ use tessari_s3_core::objects::multipart::{ListedPart, Refusal};
 use tessari_s3_core::objects::upload_listing::UploadPage;
 use tessari_s3_types::{PartNumber, Timestamp, UploadId};
 
+use crate::encryption::WrappedKey;
 use crate::objects::{WriteCondition, Written};
 
 /// What CreateMultipartUpload fixes for the object the upload will become.
@@ -22,6 +23,8 @@ pub struct NewUpload {
     pub checksum_algorithm: Option<String>,
     /// `COMPOSITE` or `FULL_OBJECT`, when the client declared one.
     pub checksum_type: Option<String>,
+    /// Whether every part is sealed under the server's keys (`x-amz-server-side-encryption: AES256` at create).
+    pub encrypted: bool,
 }
 
 /// One uploaded part ready to commit: its bytes are already in data file `data`.
@@ -35,6 +38,8 @@ pub struct NewPart {
     pub etag: String,
     /// Checksums by algorithm name, base64.
     pub checksums: BTreeMap<String, String>,
+    /// The wrapped data key its bytes are sealed under; none for a part stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// A stored part, as ListParts shows it.
@@ -109,6 +114,8 @@ pub enum Completed {
         composite: bool,
         /// The completed object's version id once its bucket has been versioned.
         version: Option<String>,
+        /// Whether its parts are sealed under the server's keys.
+        encrypted: bool,
     },
     /// The upload does not exist for this bucket and key (never did, aborted, or completed).
     NoSuchUpload,

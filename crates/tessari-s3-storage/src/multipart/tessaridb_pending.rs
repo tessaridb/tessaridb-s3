@@ -103,6 +103,9 @@ pub(super) async fn create(
         .chain((!upload.tags.is_empty()).then(|| ("tags", strings(&upload.tags))))
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
+    if upload.encrypted {
+        record.insert("sse".to_owned(), Value::String("AES256".to_owned()));
+    }
     for (field, value) in [
         ("checksum_algorithm", &upload.checksum_algorithm),
         ("checksum_type", &upload.checksum_type),
