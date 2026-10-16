@@ -37,6 +37,15 @@ pub(crate) async fn original(
         .map(|object| (bucket, object)))
 }
 
+/// Whether `object`'s bytes are sealed: a rendition made from them is sealed too, so no form of a sealed original
+/// lands in clear.
+pub(crate) fn sealed(object: &StoredObject) -> bool {
+    match &object.content {
+        Content::Data(_) => object.encryption.is_some(),
+        Content::Parts(multipart) => multipart.parts.iter().any(|part| part.encryption.is_some()),
+    }
+}
+
 /// `<key>.renditions/<kind>-<size>.<ext>`.
 ///
 /// # Errors

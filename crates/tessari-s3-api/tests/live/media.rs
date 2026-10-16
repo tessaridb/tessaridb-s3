@@ -225,7 +225,7 @@ async fn renditions_wait_once_in_their_encoder_s_queue_and_are_held_retried_and_
 }
 
 /// A `width` × `height` PNG.
-fn png(width: u32, height: u32) -> Vec<u8> {
+pub(crate) fn png(width: u32, height: u32) -> Vec<u8> {
     let image = image::RgbImage::from_pixel(width, height, image::Rgb([40, 120, 200]));
     let mut out = std::io::Cursor::new(Vec::new());
     image

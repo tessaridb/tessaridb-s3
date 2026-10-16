@@ -43,7 +43,11 @@ fn file_holds(dir: &std::path::Path, id: [u8; 16], needle: &[u8]) -> bool {
 }
 
 /// The data files holding `bucket/key`: its one file, or its parts' files in order.
-async fn data_files(state: &tessari_s3_api::ApiState, bucket: &str, key: &str) -> Vec<[u8; 16]> {
+pub(crate) async fn data_files(
+    state: &tessari_s3_api::ApiState,
+    bucket: &str,
+    key: &str,
+) -> Vec<[u8; 16]> {
     let bucket = BucketName::new(bucket).expect("bucket");
     let key = ObjectKey::new(key).expect("key");
     let object = state
