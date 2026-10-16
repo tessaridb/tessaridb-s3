@@ -209,6 +209,7 @@ DEFINE TABLE IF NOT EXISTS layout_current (version int REQUIRED);
 DEFINE TABLE IF NOT EXISTS layout_staged (id string REQUIRED, base int REQUIRED, sets array REQUIRED, staged datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_layout ON shard_sets FIELDS layout;
+DEFINE FIELD IF NOT EXISTS sealed ON shard_sets TYPE bool;
 DEFINE TABLE IF NOT EXISTS layout_retire (old int REQUIRED, switched datetime REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_switched ON layout_retire FIELDS switched;
 DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;

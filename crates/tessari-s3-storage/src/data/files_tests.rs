@@ -166,12 +166,15 @@ async fn a_shard_reads_back_only_as_that_shard_of_that_data() {
     let files = DataFiles::new(root.clone(), BLOCK);
     let bytes = body();
     let size = u64::try_from(bytes.len()).expect("small");
-    let mut writer = files.create_shard(id(5), 2, 48).await.expect("create");
+    let mut writer = files
+        .create_shard(id(5), 2, 48, false)
+        .await
+        .expect("create");
     for chunk in bytes.chunks(13) {
         writer.append(chunk).await.expect("append");
     }
     assert_eq!(writer.finish().await.expect("finish").size, size);
-    let reader = files.open_shard(id(5), 2, size).await.expect("open");
+    let reader = files.open_shard(id(5), 2, size, false).await.expect("open");
     assert_eq!(reader.block_size(), 48);
     let mut read = Vec::new();
     for index in 0..4 {
@@ -185,7 +188,7 @@ async fn a_shard_reads_back_only_as_that_shard_of_that_data() {
     std::fs::rename(files.shard_path(id(5), 2), files.shard_path(id(5), 1)).expect("renamed");
     assert!(
         matches!(
-            files.open_shard(id(5), 1, size).await,
+            files.open_shard(id(5), 1, size, false).await,
             Err(Error::Corrupt {
                 reason: "header",
                 ..
@@ -207,13 +210,16 @@ async fn a_write_cut_short_by_a_crash_is_cleared_at_start_and_the_piece_can_be_w
     let root = scratch();
     let files = DataFiles::new(root.clone(), BLOCK);
     written(&files, id(7), &body(), 64).await;
-    let mut cut = files.create_shard(id(8), 1, 48).await.expect("create");
+    let mut cut = files
+        .create_shard(id(8), 1, 48, false)
+        .await
+        .expect("create");
     cut.append(&body()).await.expect("append");
     // The process died here: no destructor runs, and nothing removes the temp while the data stays referenced.
     std::mem::forget(cut);
     assert!(
         matches!(
-            files.create_shard(id(8), 1, 48).await,
+            files.create_shard(id(8), 1, 48, false).await,
             Err(Error::DataIo {
                 op: "create",
                 kind: std::io::ErrorKind::AlreadyExists
@@ -227,7 +233,7 @@ async fn a_write_cut_short_by_a_crash_is_cleared_at_start_and_the_piece_can_be_w
         "a committed file is not touched"
     );
     let mut again = files
-        .create_shard(id(8), 1, 48)
+        .create_shard(id(8), 1, 48, false)
         .await
         .expect("written again");
     again.append(&body()).await.expect("append");
@@ -244,12 +250,15 @@ async fn a_write_cut_short_by_a_crash_is_cleared_at_start_and_the_piece_can_be_w
 async fn a_write_dropped_unfinished_takes_its_temp_away_so_the_piece_can_be_written_again() {
     let root = scratch();
     let files = DataFiles::new(root.clone(), BLOCK);
-    let mut cancelled = files.create_shard(id(9), 0, 48).await.expect("create");
+    let mut cancelled = files
+        .create_shard(id(9), 0, 48, false)
+        .await
+        .expect("create");
     cancelled.append(&body()).await.expect("append");
     // A request whose client went away, or a heal that stopped: the future holding the writer is dropped.
     drop(cancelled);
     let mut again = files
-        .create_shard(id(9), 0, 48)
+        .create_shard(id(9), 0, 48, false)
         .await
         .expect("nothing is left in the way of the next writer");
     again.append(&body()).await.expect("append");

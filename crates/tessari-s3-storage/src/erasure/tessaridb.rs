@@ -36,9 +36,16 @@ impl ShardSetRepository for TessariShardSets {
         let mut parameters = data(id);
         parameters.push(("layout".to_owned(), Value::from(i64::from(set.layout))));
         parameters.push(("size".to_owned(), Value::from(size)));
+        // A plain set carries no `sealed` field, as a set written before sealed shards existed.
+        let sealed = if set.sealed {
+            parameters.push(("sealed".to_owned(), Value::Bool(true)));
+            ", sealed: $sealed"
+        } else {
+            ""
+        };
         // One transaction: an id is never queued without its shard set, nor recorded without being queued.
         let script = format!(
-            "BEGIN; {QUEUE_FOR_RECLAIM} CREATE shard_sets:$data = {{ layout: $layout, size: $size }}; COMMIT;"
+            "BEGIN; {QUEUE_FOR_RECLAIM} CREATE shard_sets:$data = {{ layout: $layout, size: $size{sealed} }}; COMMIT;"
         );
         self.pool.run(&script, parameters).await?;
         Ok(())
@@ -47,7 +54,10 @@ impl ShardSetRepository for TessariShardSets {
     async fn shard_set(&self, id: [u8; 16]) -> Result<Option<ShardSet>> {
         let answers = self
             .pool
-            .run("SELECT layout, size FROM ONLY shard_sets:$data;", data(id))
+            .run(
+                "SELECT layout, size, sealed FROM ONLY shard_sets:$data;",
+                data(id),
+            )
             .await?;
         let malformed = |reason| Error::Malformed {
             record: "shard_sets",
@@ -69,7 +79,16 @@ impl ShardSetRepository for TessariShardSets {
         let size = integer("size")
             .and_then(|size| u64::try_from(size).ok())
             .ok_or_else(|| malformed("size"))?;
-        Ok(Some(ShardSet { layout, size }))
+        let sealed = match fields.get("sealed") {
+            None | Some(Value::None | Value::Null) => false,
+            Some(Value::Bool(sealed)) => *sealed,
+            Some(_) => return Err(malformed("sealed")),
+        };
+        Ok(Some(ShardSet {
+            layout,
+            size,
+            sealed,
+        }))
     }
 
     async fn forget(&self, id: [u8; 16]) -> Result<()> {

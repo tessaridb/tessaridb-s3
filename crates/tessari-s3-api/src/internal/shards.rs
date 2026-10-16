@@ -1,5 +1,6 @@
 //! The shard routes. A PUT streams its body into the shard file one bounded block at a time and answers 200 only
-//! once the file and its directory are synced; a GET streams verified blocks; a DELETE removes the shard.
+//! once the file and its directory are synced; a GET streams verified blocks; a DELETE removes the shard. `sealed=1`
+//! names a shard of sealed data, written and read as a sealed shard and never as a plain one.
 
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use super::InternalState;
 use super::params::{Params, data_id, index};
 use super::refusal::Refusal;
 
-/// `PUT {path}/{id}/{index}?block=&size=` — stores the body as the shard.
+/// `PUT {path}/{id}/{index}?block=&size=[&sealed=1]` — stores the body as the shard.
 pub(super) async fn put_shard(
     State(state): State<InternalState>,
     Path((id, shard)): Path<(String, String)>,
@@ -23,12 +24,12 @@ pub(super) async fn put_shard(
 ) -> Response {
     let shard = async {
         let (id, shard) = (data_id(&id)?, index(&shard)?);
-        let params = Params::parse(uri.query(), &["block", "size"])?;
+        let params = Params::parse(uri.query(), &["block", "size", "sealed"])?;
         let (block, size) = (params.required("block")?, params.required("size")?);
         let mut write = state
             .storage()
             .shards()
-            .write(id, shard, block, size)
+            .write(id, shard, block, size, params.flag("sealed")?)
             .await?;
         let mut body = body.into_data_stream();
         while let Some(chunk) = body.next().await {
@@ -57,7 +58,8 @@ async fn abandon(write: ShardWrite) {
     }
 }
 
-/// `GET {path}/{id}/{index}?size=[&from=&to=]` — the shard's blocks `[from, to)`, each verified before it is sent.
+/// `GET {path}/{id}/{index}?size=[&from=&to=][&sealed=1]` — the shard's blocks `[from, to)`, each verified before it
+/// is sent.
 /// A block failing verification part way ends the body early; the caller knows the length it asked for.
 pub(super) async fn get_shard(
     State(state): State<InternalState>,
@@ -66,9 +68,14 @@ pub(super) async fn get_shard(
 ) -> Response {
     let blocks = async {
         let (id, shard) = (data_id(&id)?, index(&shard)?);
-        let params = Params::parse(uri.query(), &["size", "from", "to"])?;
+        let params = Params::parse(uri.query(), &["size", "from", "to", "sealed"])?;
         let size: u64 = params.required("size")?;
-        let reader = state.storage().shards().open(id, shard, size).await?;
+        let sealed = params.flag("sealed")?;
+        let reader = state
+            .storage()
+            .shards()
+            .open(id, shard, size, sealed)
+            .await?;
         let count = size.div_ceil(u64::from(reader.block_size()));
         let from = params.optional("from")?.unwrap_or(0);
         let to = params.optional("to")?.unwrap_or(count);

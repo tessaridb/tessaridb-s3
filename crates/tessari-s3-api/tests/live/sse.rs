@@ -12,16 +12,16 @@ use crate::multipart::{etag, part, text};
 use crate::object_lock::refused;
 use crate::{IGNORED, Seen, call, call_with, fresh_with, scratch_dir};
 
-const SSE: (&str, &str) = ("x-amz-server-side-encryption", "AES256");
+pub(crate) const SSE: (&str, &str) = ("x-amz-server-side-encryption", "AES256");
 
-fn sse_header(seen: &Seen) -> Option<&[u8]> {
+pub(crate) fn sse_header(seen: &Seen) -> Option<&[u8]> {
     seen.headers
         .get("x-amz-server-side-encryption")
         .map(|value| value.as_bytes())
 }
 
 /// Bytes past two whole blocks, a canary repeated so a raw scan can look for it.
-fn body() -> Vec<u8> {
+pub(crate) fn body() -> Vec<u8> {
     b"a canary no drive may hold in clear "
         .iter()
         .copied()
@@ -62,7 +62,7 @@ async fn data_files(state: &tessari_s3_api::ApiState, bucket: &str, key: &str) -
 }
 
 /// Whether any data file holding `bucket/key` contains `needle`.
-async fn drive_holds(
+pub(crate) async fn drive_holds(
     state: &tessari_s3_api::ApiState,
     dir: &std::path::Path,
     bucket: &str,
@@ -73,6 +73,20 @@ async fn drive_holds(
         .await
         .into_iter()
         .any(|id| file_holds(dir, id, needle))
+}
+
+/// Unseals the node's keys with the suite's passphrase.
+pub(crate) async fn unseal(state: &tessari_s3_api::ApiState) {
+    let passphrase = Passphrase::new(Zeroizing::new(
+        "a keys passphrase for the sse suite".to_owned(),
+    ))
+    .expect("usable");
+    state
+        .storage()
+        .keys()
+        .unseal(&passphrase)
+        .await
+        .expect("unsealed");
 }
 
 #[tokio::test]
@@ -95,16 +109,7 @@ async fn an_object_asked_to_be_encrypted_is_sealed_on_the_drive_and_opened_on_ev
         early.body
     );
 
-    let passphrase = Passphrase::new(Zeroizing::new(
-        "a keys passphrase for the sse suite".to_owned(),
-    ))
-    .expect("usable");
-    state
-        .storage()
-        .keys()
-        .unseal(&passphrase)
-        .await
-        .expect("unsealed");
+    unseal(&state).await;
 
     let put = call_with(&state, "PUT", "/sealed/k", vec![], vec![SSE], &bytes).await;
     assert_eq!(put.status, 200, "{}", put.body);
@@ -183,16 +188,7 @@ async fn multipart_parts_and_copies_asked_to_be_encrypted_are_sealed_and_read_wh
         call(&state, "PUT", "/mpsealed", vec![], b"").await.status,
         200
     );
-    let passphrase = Passphrase::new(Zeroizing::new(
-        "a keys passphrase for the sse suite".to_owned(),
-    ))
-    .expect("usable");
-    state
-        .storage()
-        .keys()
-        .unseal(&passphrase)
-        .await
-        .expect("unsealed");
+    unseal(&state).await;
     let bytes = body();
     let plain = call(&state, "PUT", "/mpsealed/plain", vec![], &bytes).await;
     assert_eq!(plain.status, 200, "{}", plain.body);

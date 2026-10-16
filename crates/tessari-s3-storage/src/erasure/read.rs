@@ -10,6 +10,7 @@ use futures_util::TryStreamExt;
 use tessari_s3_constants::DATA_BLOCK_SIZE;
 use tessari_s3_core::erasure::Stripes;
 
+use super::repository::ShardSet;
 use super::upload::Destination;
 use super::writes::ErasureWrites;
 use crate::peers::ShardRef;
@@ -20,6 +21,7 @@ pub struct ErasureReader {
     writes: Arc<ErasureWrites>,
     id: [u8; 16],
     size: u64,
+    sealed: bool,
     stripes: Stripes,
     shard_size: u64,
     sources: Vec<Destination>,
@@ -28,13 +30,14 @@ pub struct ErasureReader {
 }
 
 impl ErasureReader {
-    /// A reader of data `id` holding `size` bytes, its shard j at `sources[j]`.
+    /// A reader of data `id` holding the bytes of shard set `set`, its shard j at `sources[j]`.
     pub(super) fn new(
         writes: Arc<ErasureWrites>,
         id: [u8; 16],
-        size: u64,
+        set: ShardSet,
         sources: Vec<Destination>,
     ) -> Result<Self> {
+        let ShardSet { size, sealed, .. } = set;
         let stripes =
             Stripes::new(writes.code(), DATA_BLOCK_SIZE).map_err(|_| Error::InvalidShard {
                 reason: "stripe geometry",
@@ -49,6 +52,7 @@ impl ErasureReader {
             writes,
             id,
             size,
+            sealed,
             stripes,
             shard_size,
             sources,
@@ -132,6 +136,11 @@ impl ErasureReader {
         self.shard_size
     }
 
+    /// Whether the shards hold sealed data.
+    pub(super) const fn sealed(&self) -> bool {
+        self.sealed
+    }
+
     /// Whether shard `shard` is present at its full length with every block verified; any failure is `false`.
     pub(super) async fn intact(&self, shard: usize) -> bool {
         let stripes = self.stripes.stripe_count(self.size);
@@ -143,7 +152,7 @@ impl ErasureReader {
                 let Ok(reader) = self
                     .writes
                     .shards()
-                    .open(self.id, index, self.shard_size)
+                    .open(self.id, index, self.shard_size, self.sealed)
                     .await
                 else {
                     return false;
@@ -164,7 +173,7 @@ impl ErasureReader {
                 let Ok(body) = self
                     .writes
                     .peers()
-                    .get(endpoint, shard, self.shard_size, None, budget)
+                    .get(endpoint, shard, self.shard_size, self.sealed, None, budget)
                     .await
                 else {
                     return false;
@@ -210,7 +219,7 @@ impl ErasureReader {
                 let reader = self
                     .writes
                     .shards()
-                    .open(self.id, index, self.shard_size)
+                    .open(self.id, index, self.shard_size, self.sealed)
                     .await?;
                 reader.read_block(stripe).await
             }
@@ -224,6 +233,7 @@ impl ErasureReader {
                         endpoint,
                         shard,
                         self.shard_size,
+                        self.sealed,
                         Some(blocks),
                         self.writes.stall(),
                     )

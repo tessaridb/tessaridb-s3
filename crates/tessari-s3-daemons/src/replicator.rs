@@ -4,26 +4,34 @@
 //! so the destination decides on it as on any request. A sent version is stamped `COMPLETED`; one that cannot be sent
 //! waits and is tried again, and is stamped `FAILED` when the group gives it up.
 
-use std::io;
 use std::time::Duration;
 
-use bytes::Bytes;
-use futures_util::Stream;
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, REPLICATION_IN_FLIGHT, REPLICATION_POLL_SECS};
 use tessari_s3_core::auth::{SignedRequest, amz_date, sign_header, uri_encode};
 use tessari_s3_core::authz::UserName;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_infrastructure::ReplicaClient;
 use tessari_s3_storage::Storage;
-use tessari_s3_storage::objects::{Content, ObjectReader, ObjectService, VersionRead};
+use tessari_s3_storage::encryption::WrappedKey;
+use tessari_s3_storage::objects::{Content, VersionRead};
 use tessari_s3_storage::replication::Task;
 use tessari_s3_types::{BucketName, ObjectKey, SecretKey};
 
 use crate::Error;
 use crate::daemon::{Daemon, DaemonFuture, Report};
 
+#[path = "replicator_body.rs"]
+mod body;
+use body::blocks;
+
 /// The header a replica carries: the version id its source gave it.
 const REPLICA_VERSION: &str = "x-tessaridb-replica-version-id";
+
+/// The header that asks the destination to seal a replica whose source is sealed.
+const SEALED: (&str, &str) = ("x-amz-server-side-encryption", "AES256");
+
+/// One stored piece of a version: its data id, its size, and the wrapped key it is sealed under, if any.
+type Piece = ([u8; 16], u64, Option<WrappedKey>);
 
 fn failed(message: impl ToString) -> Error {
     Error::Run {
@@ -112,14 +120,18 @@ impl Replicator {
                     headers.push((algorithm.header().to_owned(), value.clone()));
                 }
             }
-            let pieces = match &object.content {
-                Content::Data(id) => vec![(*id, object.size)],
+            let pieces: Vec<Piece> = match &object.content {
+                Content::Data(id) => vec![(*id, object.size, object.encryption.clone())],
                 Content::Parts(multipart) => multipart
                     .parts
                     .iter()
-                    .map(|part| (part.data, part.size))
+                    .map(|part| (part.data, part.size, part.encryption.clone()))
                     .collect(),
             };
+            // A sealed source is sealed at the destination too, so a replica never lands in clear.
+            if pieces.iter().any(|(_, _, sealed)| sealed.is_some()) {
+                headers.push((SEALED.0.to_owned(), SEALED.1.to_owned()));
+            }
             ("PUT", Some(blocks(objects.clone(), pieces)))
         };
         let signed: Vec<(&str, &str)> = headers
@@ -182,55 +194,6 @@ fn now_secs() -> i64 {
         .map_or(0, |elapsed| {
             i64::try_from(elapsed.as_secs()).unwrap_or(i64::MAX)
         })
-}
-
-/// Where a body stream stands: the pieces left, and the piece open now with its next block and block count.
-struct Blocks {
-    objects: ObjectService,
-    pieces: std::vec::IntoIter<([u8; 16], u64)>,
-    open: Option<(ObjectReader, u64, u64)>,
-}
-
-/// The bytes of `pieces` (data id, size), block by block, as a request body; an unreadable block ends it.
-fn blocks(
-    objects: ObjectService,
-    pieces: Vec<([u8; 16], u64)>,
-) -> impl Stream<Item = std::result::Result<Bytes, io::Error>> + Send + 'static {
-    let start = Blocks {
-        objects,
-        pieces: pieces.into_iter(),
-        open: None,
-    };
-    futures_util::stream::unfold(start, |mut at| async move {
-        loop {
-            if let Some((reader, index, count)) = at.open.take()
-                && index < count
-            {
-                let block = reader
-                    .read_block(index)
-                    .await
-                    .map(Bytes::from)
-                    .map_err(|error| io::Error::other(error.to_string()));
-                if block.is_err() {
-                    at.pieces = Vec::new().into_iter();
-                } else {
-                    at.open = Some((reader, index.saturating_add(1), count));
-                }
-                return Some((block, at));
-            }
-            let (id, size) = at.pieces.next()?;
-            match at.objects.open(id, size).await {
-                Ok(reader) => {
-                    let count = size.div_ceil(u64::from(reader.block_size()).max(1));
-                    at.open = Some((reader, 0, count));
-                }
-                Err(error) => {
-                    at.pieces = Vec::new().into_iter();
-                    return Some((Err(io::Error::other(error.to_string())), at));
-                }
-            }
-        }
-    })
 }
 
 impl Daemon for Replicator {

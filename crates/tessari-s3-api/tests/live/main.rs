@@ -83,6 +83,8 @@ mod replication_tasks;
 mod signer;
 mod spaces;
 mod sse;
+mod sse_erasure;
+mod sse_replication;
 mod tagging;
 mod tagging_carried;
 mod upload_keys;

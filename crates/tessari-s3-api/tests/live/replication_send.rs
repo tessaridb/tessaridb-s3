@@ -14,11 +14,9 @@ fn header<'a>(seen: &'a Seen, name: &str) -> Option<&'a str> {
     seen.headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-#[tokio::test]
-#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn a_version_and_its_delete_marker_reach_the_destination_as_replicas() {
-    let _why = IGNORED;
-    let (state, _planter, _) = fresh_with(scratch_dir()).await;
+/// `origin` replicating to `copies` (both versioned, delete markers included) through this node's own surface,
+/// signed as user `replicator`.
+pub(crate) async fn replicating(state: &tessari_s3_api::ApiState) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a port");
@@ -37,14 +35,14 @@ async fn a_version_and_its_delete_marker_reach_the_destination_as_replicas() {
 
     for bucket in ["origin", "copies"] {
         assert_eq!(
-            call(&state, "PUT", &format!("/{bucket}"), vec![], b"")
+            call(state, "PUT", &format!("/{bucket}"), vec![], b"")
                 .await
                 .status,
             200
         );
         assert_eq!(
             call(
-                &state,
+                state,
                 "PUT",
                 &format!("/{bucket}"),
                 vec![("versioning", None)],
@@ -65,7 +63,7 @@ async fn a_version_and_its_delete_marker_reach_the_destination_as_replicas() {
             "<DeleteMarkerReplication><Status>Enabled</Status>",
         );
     let configured = call(
-        &state,
+        state,
         "PUT",
         "/origin",
         vec![("replication", None)],
@@ -73,7 +71,15 @@ async fn a_version_and_its_delete_marker_reach_the_destination_as_replicas() {
     )
     .await;
     assert_eq!(configured.status, 200, "{}", configured.body);
+}
 
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_version_and_its_delete_marker_reach_the_destination_as_replicas() {
+    let _why = IGNORED;
+    let (state, _planter, _) = fresh_with(scratch_dir()).await;
+    replicating(&state).await;
+    let storage = state.storage();
     let written = call_with(
         &state,
         "PUT",

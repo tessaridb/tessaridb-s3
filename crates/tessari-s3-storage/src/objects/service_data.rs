@@ -27,8 +27,8 @@ impl ObjectService {
     }
 
     /// As [`Self::upload`], every byte sealed under a data key drawn for this data id alone and wrapped under the
-    /// active encryption key; the finished upload carries the wrapped key. Shards still carry format 2 on a cluster
-    /// member (the sealed shard format reaches the peers with W3c of the plan).
+    /// active encryption key; the finished upload carries the wrapped key. On a cluster member the shards are sealed
+    /// shards (format 4).
     ///
     /// # Errors
     /// [`Error::KeysSealed`] when this node holds no encryption keys; as [`Self::upload`]; [`Error::SealedLength`]
@@ -59,7 +59,7 @@ impl ObjectService {
     /// Starts writing `size` stored bytes under data id `id`, a sealed file's header when `sealed`.
     async fn start(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<Upload> {
         if let Some(writes) = &self.erasure {
-            return match writes.start(id, size).await {
+            return match writes.start(id, size, sealed).await {
                 Ok(upload) => Ok(Upload::erasure(id, upload, Arc::clone(writes))),
                 Err(error) => {
                     self.release_logged(id).await;
@@ -258,7 +258,7 @@ impl ObjectService {
     /// Opens data `id` holding `size` stored bytes, a sealed file's header expected when `sealed`.
     async fn open_stored(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<ObjectReader> {
         if let Some(writes) = &self.erasure
-            && let Some(reader) = writes.open(id, size).await?
+            && let Some(reader) = writes.open(id, size, sealed).await?
         {
             return Ok(ObjectReader::Erasure(reader));
         }

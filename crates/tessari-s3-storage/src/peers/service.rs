@@ -28,6 +28,17 @@ pub struct ShardRef {
     pub index: u16,
 }
 
+/// What a shard holds: its length in blocks of one size, and whether it is a shard of sealed data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShardShape {
+    /// Bytes per block (the erasure block length).
+    pub block_len: u32,
+    /// The shard's length in bytes.
+    pub size: u64,
+    /// Whether the shard holds sealed data, written and read as a sealed shard.
+    pub sealed: bool,
+}
+
 /// Shard calls to other nodes as `node`, over mutual TLS: this node's certificate speaks for it, and a peer is
 /// reached only when its certificate speaks for the node dialled.
 #[derive(Clone)]
@@ -48,8 +59,8 @@ impl RemoteShards {
         })
     }
 
-    /// Stores `body` — `size` bytes in blocks of `block_size` — as `shard` on `peer`; returns once
-    /// the peer has made it durable. `budget` covers sending the whole body.
+    /// Stores `body` — the bytes `shape` describes — as `shard` on `peer`; returns once the peer has made it durable.
+    /// `budget` covers sending the whole body.
     ///
     /// # Errors
     /// [`Error::PeerRefused`] with the peer's status, or [`Error::Peer`] when it does not answer in time.
@@ -57,15 +68,20 @@ impl RemoteShards {
         &self,
         peer: &PeerAt,
         shard: ShardRef,
-        block_size: u32,
-        size: u64,
+        shape: ShardShape,
         body: S,
         budget: Duration,
     ) -> Result<()>
     where
         S: Stream<Item = std::io::Result<Bytes>> + Send + 'static,
     {
-        let target = format!("{}?block={block_size}&size={size}", path(shard));
+        let target = format!(
+            "{}?block={}&size={}{}",
+            path(shard),
+            shape.block_len,
+            shape.size,
+            sealed_param(shape.sealed)
+        );
         let body = PeerBody::Stream(body.boxed());
         let reply = self
             .call(PeerMethod::Put, peer, &target, body, budget)
@@ -73,7 +89,7 @@ impl RemoteShards {
         answered(&reply, 200)
     }
 
-    /// Reads `shard` of `size` bytes from `peer`, all of it or the blocks in `blocks`; each block is
+    /// Reads `shard` of `size` bytes from `peer` — a sealed shard when `sealed` — all of it or the blocks in `blocks`; each block is
     /// verified by the peer before it is sent. The stream ending early is the peer's failure part way — the caller
     /// knows the length it asked for.
     ///
@@ -84,13 +100,14 @@ impl RemoteShards {
         peer: &PeerAt,
         shard: ShardRef,
         size: u64,
+        sealed: bool,
         blocks: Option<Range<u64>>,
         budget: Duration,
     ) -> Result<BoxStream<'static, Result<Bytes>>> {
         let range = blocks.map_or_else(String::new, |blocks| {
             format!("&from={}&to={}", blocks.start, blocks.end)
         });
-        let target = format!("{}?size={size}{range}", path(shard));
+        let target = format!("{}?size={size}{range}{}", path(shard), sealed_param(sealed));
         let reply = self
             .call(PeerMethod::Get, peer, &target, PeerBody::Empty, budget)
             .await?;
@@ -202,4 +219,9 @@ fn answered(reply: &PeerReply, expected: u16) -> Result<()> {
             status: reply.status(),
         })
     }
+}
+
+/// The query parameter naming a shard of sealed data; plain shards carry none, so a plain call is what it always was.
+const fn sealed_param(sealed: bool) -> &'static str {
+    if sealed { "&sealed=1" } else { "" }
 }
