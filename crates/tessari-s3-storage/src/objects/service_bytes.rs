@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::ObjectService;
 use crate::objects::{
-    Content, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
+    Content, Lock, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
 };
 use crate::{Error, Result};
 
@@ -144,6 +144,7 @@ impl ObjectService {
             )]),
             content: Content::Data(uploaded.id),
             copied: false,
+            lock: Lock::default(),
         };
         self.put(bucket, key, &object, &WriteCondition::None).await
     }

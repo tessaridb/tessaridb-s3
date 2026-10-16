@@ -11,7 +11,7 @@ use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
 use super::model::{Completed, Completion, Created, NewPart, NewUpload, PartWritten, PartsPage};
 use super::repository::{MultipartRepository, UploadRecord};
 use super::tessaridb::TessariMultipart;
-use crate::objects::{Content, Multipart, NewObject, ObjectService, Part, Written};
+use crate::objects::{Content, Lock, Multipart, NewObject, ObjectService, Part, Written};
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -236,6 +236,7 @@ impl MultipartService {
                 upload: id.bytes(),
                 parts,
             }),
+            lock: Lock::default(),
         };
         match self
             .objects

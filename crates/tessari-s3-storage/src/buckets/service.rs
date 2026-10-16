@@ -5,7 +5,7 @@ use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::BucketName;
 
-use super::model::{Acknowledgement, Bucket};
+use super::model::{Acknowledgement, Bucket, LockSet};
 use super::repository::{BucketRepository, Inserted};
 use super::tessaridb::TessariBuckets;
 use crate::Result;
@@ -55,7 +55,8 @@ impl BucketService {
         Self { repository }
     }
 
-    /// Creates `name` in `region`, owned by `space` and made by `creator` (`None` for the root credential).
+    /// Creates `name` in `region`, owned by `space` and made by `creator` (`None` for the root credential); with
+    /// `object_lock` it has Object Lock on and versioning enabled from its first instant.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
@@ -65,8 +66,13 @@ impl BucketService {
         region: &str,
         space: &SpaceName,
         creator: Option<&str>,
+        object_lock: bool,
     ) -> Result<Created> {
-        match self.repository.insert(name, region, space, creator).await? {
+        match self
+            .repository
+            .insert(name, region, space, creator, object_lock)
+            .await?
+        {
             Inserted::Created(entity) => Ok(Created::Created(Box::new(Bucket::try_from(*entity)?))),
             Inserted::Exists => Ok(Created::Exists),
         }
@@ -159,6 +165,32 @@ impl BucketService {
             .set_lifecycle(name, rules.map(super::lifecycle::to_value))
             .await?;
         Ok(true)
+    }
+
+    /// Turns Object Lock on for `name`, or replaces its default retention; the bucket's versioning must be enabled.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_object_lock(
+        &self,
+        name: &BucketName,
+        configuration: &tessari_s3_core::object_lock::Configuration,
+    ) -> Result<LockSet> {
+        let Some(bucket) = self.repository.get(name).await? else {
+            return Ok(LockSet::NoSuchBucket);
+        };
+        if bucket.versioning.as_deref() != Some("Enabled") {
+            return Ok(LockSet::NotVersioned);
+        }
+        if self
+            .repository
+            .set_object_lock(name, super::object_lock::to_value(configuration))
+            .await?
+        {
+            Ok(LockSet::Done)
+        } else {
+            Ok(LockSet::NotVersioned)
+        }
     }
 
     /// Sets `name`'s replication configuration (already validated), or removes it with `None`; `false` when there is

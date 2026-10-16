@@ -103,7 +103,7 @@ pub(super) async fn create(
     let created = state
         .storage()
         .buckets()
-        .create(&name, state.region(), &space, creator)
+        .create(&name, state.region(), &space, creator, false)
         .await?;
     let outcome = match created {
         Created::Created(_) => "done",

@@ -29,11 +29,17 @@ async fn a_listing_scoped_to_a_space_returns_only_its_buckets() {
     let buckets = state.storage().buckets();
     let region = state.region();
     buckets
-        .create(&name("alpha-photos"), region, &space("alpha"), Some("ann"))
+        .create(
+            &name("alpha-photos"),
+            region,
+            &space("alpha"),
+            Some("ann"),
+            false,
+        )
         .await
         .expect("created");
     buckets
-        .create(&name("beta-photos"), region, &space("beta"), None)
+        .create(&name("beta-photos"), region, &space("beta"), None, false)
         .await
         .expect("created");
     assert_eq!(

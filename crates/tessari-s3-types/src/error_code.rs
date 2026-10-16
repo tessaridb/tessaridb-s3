@@ -38,6 +38,8 @@ pub enum ErrorCode {
     NoSuchLifecycleConfiguration,
     /// The bucket has no replication configuration.
     ReplicationConfigurationNotFoundError,
+    /// The bucket has no Object Lock configuration.
+    ObjectLockConfigurationNotFoundError,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -122,6 +124,7 @@ impl ErrorCode {
             Self::NoSuchVersion => "NoSuchVersion",
             Self::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
             Self::ReplicationConfigurationNotFoundError => "ReplicationConfigurationNotFoundError",
+            Self::ObjectLockConfigurationNotFoundError => "ObjectLockConfigurationNotFoundError",
             Self::InvalidPart => "InvalidPart",
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
@@ -186,7 +189,8 @@ impl ErrorCode {
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchLifecycleConfiguration
-            | Self::ReplicationConfigurationNotFoundError => 404,
+            | Self::ReplicationConfigurationNotFoundError
+            | Self::ObjectLockConfigurationNotFoundError => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -241,6 +245,11 @@ mod tests {
             (
                 ErrorCode::ReplicationConfigurationNotFoundError,
                 "ReplicationConfigurationNotFoundError",
+                404,
+            ),
+            (
+                ErrorCode::ObjectLockConfigurationNotFoundError,
+                "ObjectLockConfigurationNotFoundError",
                 404,
             ),
             (ErrorCode::InvalidPart, "InvalidPart", 400),

@@ -91,7 +91,7 @@ pub(super) async fn write(
             )
         }
     };
-    let changes = versions::statements(bucket, key, incarnation, plan, true)?;
+    let changes = versions::statements(bucket, key, incarnation, plan, true, &object.lock)?;
     let versioned = changes.script;
     let commit = versions::commit(plan.local);
     parameters.extend(changes.parameters);

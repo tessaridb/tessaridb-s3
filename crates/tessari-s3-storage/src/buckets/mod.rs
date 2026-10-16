@@ -5,12 +5,13 @@ mod lifecycle;
 mod media;
 mod model;
 mod notification;
+pub(crate) mod object_lock;
 pub(crate) mod replication;
 mod repository;
 mod service;
 mod tessaridb;
 
 pub(crate) use model::LOCAL;
-pub use model::{Acknowledgement, Bucket};
+pub use model::{Acknowledgement, Bucket, LockSet};
 pub use service::{AcknowledgementSet, BucketService, Created, Deleted};
 pub use tessaridb::TessariBuckets;

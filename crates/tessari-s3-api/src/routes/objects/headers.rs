@@ -14,6 +14,11 @@ use tessari_s3_types::ErrorCode;
 
 use crate::{Error, Result};
 
+#[path = "headers_lock.rs"]
+mod lock;
+pub(crate) use lock::LockAsked;
+use lock::read_lock;
+
 /// System headers stored verbatim and returned on reads.
 const STORED: [&str; 6] = [
     "cache-control",
@@ -38,9 +43,10 @@ pub(crate) struct PutHeaders {
     pub(crate) metadata: BTreeMap<String, String>,
     pub(crate) integrity: Integrity,
     pub(crate) condition: WriteCondition,
+    pub(crate) lock: LockAsked,
 }
 
-fn not_implemented(what: &str) -> Error {
+pub(super) fn not_implemented(what: &str) -> Error {
     Error::new(
         ErrorCode::NotImplemented,
         format!("{what} is not implemented"),
@@ -50,7 +56,7 @@ fn not_implemented(what: &str) -> Error {
 /// Reads `headers` for a PutObject.
 ///
 /// # Errors
-/// `NotImplemented` for tagging, encryption, Object Lock, website redirects, appends and unsupported checksum
+/// `NotImplemented` for tagging, encryption, an Object Lock event hold, website redirects, appends and unsupported checksum
 /// algorithms; `AccessControlListNotSupported`, `InvalidStorageClass`, `MetadataTooLarge`, `InvalidDigest`,
 /// `InvalidRequest` and `InvalidArgument` for the rest.
 pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
@@ -79,8 +85,6 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
             return Err(not_implemented("object tagging"));
         } else if name.starts_with("x-amz-server-side-encryption") {
             return Err(not_implemented("server-side encryption"));
-        } else if name.starts_with("x-amz-object-lock-") {
-            return Err(not_implemented("Object Lock"));
         } else if name == "x-amz-website-redirect-location" {
             return Err(not_implemented("a website redirect"));
         } else if name == "x-amz-write-offset-bytes" {
@@ -139,6 +143,7 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         metadata,
         integrity,
         condition,
+        lock: read_lock(headers)?,
     })
 }
 

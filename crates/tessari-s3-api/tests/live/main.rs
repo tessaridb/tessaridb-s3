@@ -54,6 +54,8 @@ mod namespaces_dropped;
 mod no_bytes;
 mod notifications;
 mod notify_delivery;
+mod object_lock;
+mod object_lock_yielding;
 mod objects;
 #[path = "../wire/oidc_provider.rs"]
 #[allow(

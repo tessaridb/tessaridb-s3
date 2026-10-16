@@ -79,7 +79,12 @@ async fn delete_version(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bod
         .state
         .storage()
         .objects()
-        .delete_version(call.bucket()?, key, version)
+        .delete_version(
+            call.bucket()?,
+            key,
+            version,
+            crate::routes::retention::bypass_asked(call),
+        )
         .await?;
     let response = with_version(empty_response(StatusCode::NO_CONTENT), Some(version));
     match removed {
@@ -90,6 +95,7 @@ async fn delete_version(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bod
             "Invalid version id specified",
         )),
         VersionRemoved::NoSuchBucket => Err(no_such_bucket()),
+        VersionRemoved::Locked => Err(crate::routes::retention::locked()),
     }
 }
 

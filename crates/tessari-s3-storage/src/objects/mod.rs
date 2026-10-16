@@ -2,6 +2,7 @@
 
 mod entity;
 mod model;
+mod model_lock;
 mod reader;
 mod repository;
 mod service;
@@ -14,6 +15,7 @@ pub use model::{
     NewObject, ObjectSummary, Part, Reclaimed, Removed, RemovedIf, Replicated, StoredObject,
     VersionKind, VersionRead, VersionRemoved, VersionsListed, WriteCondition, Written,
 };
+pub use model_lock::{Lock, LockOutcome, RetainUntil, VersionLock};
 pub use reader::ObjectReader;
 pub use service::ObjectService;
 pub use tessaridb::TessariObjects;

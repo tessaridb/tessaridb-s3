@@ -64,6 +64,10 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             "a copy has no body for Content-MD5 or a checksum to describe",
         ));
     }
+    // A copy's bytes are checked against the source's stored checksum, so its retention needs no client digest.
+    if headers.lock.asked {
+        crate::routes::retention::lock_bucket(call).await?;
+    }
     let (source_bucket, source_key) = source::source_of(call.headers)?;
     let directive = |name: &str| {
         Directive::parse(source::text(call.headers, name)).ok_or_else(|| {
@@ -113,6 +117,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         metadata: user,
         checksums: [(algorithm.name().to_owned(), value.clone())].into(),
         content,
+        lock: headers.lock.lock(),
     };
     if damaged {
         if let Content::Data(id) = copied.content {

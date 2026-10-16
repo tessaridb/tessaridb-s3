@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use tessari_s3_types::Timestamp;
 
+use super::model_lock::Lock;
+
 /// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
@@ -51,6 +53,8 @@ pub struct NewObject {
     pub content: Content,
     /// Whether CopyObject made it — the change a notification names (`s3:ObjectCreated:Copy` rather than `Put`).
     pub copied: bool,
+    /// What Object Lock keeps the new version under (ADR-0016); nothing for a bucket without Object Lock.
+    pub lock: Lock,
 }
 
 /// A stored object.
@@ -255,6 +259,8 @@ pub enum VersionRemoved {
     Malformed,
     /// The bucket does not exist.
     NoSuchBucket,
+    /// Object Lock keeps it: a legal hold, or a retention that has not passed (GOVERNANCE without a bypass).
+    Locked,
 }
 
 /// What a replica write ended in.

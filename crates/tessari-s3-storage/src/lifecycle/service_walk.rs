@@ -188,6 +188,10 @@ impl LifecycleService {
                 Ok(true)
             }
             VersionRemoved::Absent | VersionRemoved::NoSuchBucket => Ok(false),
+            VersionRemoved::Locked => {
+                tracing::info!(bucket = bucket.as_str(), key = key.as_str(), version = %version.version_id, rule, "lifecycle kept a version Object Lock holds");
+                Ok(false)
+            }
             VersionRemoved::Malformed => Err(Error::Malformed {
                 record: "version",
                 reason: "version id",

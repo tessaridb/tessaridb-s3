@@ -64,7 +64,7 @@ fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
         ErrorCode::NotImplemented
     );
     assert_eq!(
-        refused(&[("x-amz-object-lock-mode", "GOVERNANCE")]),
+        refused(&[("x-amz-object-lock-event-hold", "ON")]),
         ErrorCode::NotImplemented
     );
     assert_eq!(
@@ -178,4 +178,54 @@ fn an_upload_declaring_its_algorithm_and_type_declares_no_checksum_value() {
     ]))
     .expect("an upload's declaration is not a checksum header");
     assert_eq!(read.integrity.checksum, None);
+}
+
+#[test]
+fn object_lock_headers_ask_for_a_retention_and_a_hold_or_are_refused_as_invalid() {
+    use tessari_s3_core::object_lock::Mode;
+
+    let asked = read_put_headers(&headers(&[
+        ("x-amz-object-lock-mode", "COMPLIANCE"),
+        (
+            "x-amz-object-lock-retain-until-date",
+            "2999-01-01T00:00:00Z",
+        ),
+        ("x-amz-object-lock-legal-hold", "ON"),
+    ]))
+    .expect("reads")
+    .lock;
+    assert_eq!(
+        asked.retention.map(|(mode, _)| mode),
+        Some(Mode::Compliance)
+    );
+    assert!(asked.legal_hold && asked.asked);
+    let off = read_put_headers(&headers(&[("x-amz-object-lock-legal-hold", "OFF")]))
+        .expect("reads")
+        .lock;
+    assert!(!off.legal_hold && off.asked && off.retention.is_none());
+    assert!(!read_put_headers(&headers(&[])).expect("reads").lock.asked);
+    for pairs in [
+        &[("x-amz-object-lock-mode", "GOVERNANCE")][..],
+        &[(
+            "x-amz-object-lock-retain-until-date",
+            "2999-01-01T00:00:00Z",
+        )],
+        &[
+            ("x-amz-object-lock-mode", "FOREVER"),
+            (
+                "x-amz-object-lock-retain-until-date",
+                "2999-01-01T00:00:00Z",
+            ),
+        ],
+        &[
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+            (
+                "x-amz-object-lock-retain-until-date",
+                "2001-01-01T00:00:00Z",
+            ),
+        ],
+        &[("x-amz-object-lock-legal-hold", "MAYBE")],
+    ] {
+        assert_eq!(refused(pairs), ErrorCode::InvalidArgument, "{pairs:?}");
+    }
 }

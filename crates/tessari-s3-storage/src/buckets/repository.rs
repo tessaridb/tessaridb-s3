@@ -20,13 +20,15 @@ pub(crate) enum Inserted {
 
 /// Bucket queries; no rule beyond what a query states.
 pub(crate) trait BucketRepository: Send + Sync {
-    /// Writes a new bucket record with a fresh incarnation, owned by `space` and made by `creator`.
+    /// Writes a new bucket record with a fresh incarnation, owned by `space` and made by `creator`; with `object_lock`
+    /// it is created with Object Lock on and versioning enabled, in the same write.
     fn insert(
         &self,
         name: &BucketName,
         region: &str,
         space: &SpaceName,
         creator: Option<&str>,
+        object_lock: bool,
     ) -> impl Future<Output = Result<Inserted>> + Send;
     /// The record of `name`, if any.
     fn get(&self, name: &BucketName) -> impl Future<Output = Result<Option<BucketEntity>>> + Send;
@@ -52,6 +54,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         name: &BucketName,
         rules: Option<Value>,
     ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Sets `name`'s Object Lock configuration while its versioning is enabled; `false` when it was not.
+    fn set_object_lock(
+        &self,
+        name: &BucketName,
+        configuration: Value,
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Sets `name`'s replication configuration, or removes it when `configuration` is `None`.
     fn set_replication(

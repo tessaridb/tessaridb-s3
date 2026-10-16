@@ -12,6 +12,7 @@ pub mod lifecycle;
 pub mod media;
 pub mod multipart;
 pub mod notification;
+pub mod object_lock;
 pub mod objects;
 pub mod quota;
 #[cfg(test)]

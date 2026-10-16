@@ -34,8 +34,27 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
         // Refused before it creates anything; named for the match, never for the bucket.
         Principal::Upload(upload) => (upload.parent.space.clone(), None),
     };
+    // Object Lock is on from the bucket's first instant, with versioning, or never asked for here (S3 ref 08 M5).
+    let object_lock = match call
+        .headers
+        .get("x-amz-bucket-object-lock-enabled")
+        .map(HeaderValue::as_bytes)
+    {
+        None => false,
+        Some(value) if value.eq_ignore_ascii_case(b"true") => true,
+        Some(value) if value.eq_ignore_ascii_case(b"false") => false,
+        Some(_) => {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                "x-amz-bucket-object-lock-enabled must be true or false",
+            ));
+        }
+    };
     let buckets = call.state.storage().buckets();
-    match buckets.create(name, region, &space, creator).await? {
+    match buckets
+        .create(name, region, &space, creator, object_lock)
+        .await?
+    {
         Created::Created(_) => {
             let mut response = empty_response(StatusCode::OK);
             if let Ok(location) = HeaderValue::from_str(&format!("/{}", name.as_str())) {

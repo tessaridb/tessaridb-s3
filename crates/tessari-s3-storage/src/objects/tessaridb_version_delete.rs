@@ -7,7 +7,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::super::repository::Removal;
 use super::super::version_id::{NULL, Naming, key_prefix, record_id};
-use super::{TessariObjects, id, is_lost_or_refused, versions};
+use super::{TessariObjects, id, is_lock_refusal, is_lost_or_refused, versions};
 use crate::answers::{bucket_read, first_record};
 use crate::{Error, Result};
 
@@ -30,12 +30,55 @@ pub(crate) enum Successor {
     Nothing,
 }
 
+/// What Object Lock keeps a version under, judged by the metadata store's clock when it was read (ADR-0016).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kept {
+    /// Nothing: no legal hold, and no retention or one that has passed.
+    Free,
+    /// A legal hold.
+    Held,
+    /// A GOVERNANCE retention that has not passed.
+    Governance,
+    /// A COMPLIANCE retention that has not passed.
+    Compliance,
+}
+
+impl Kept {
+    /// Whether it keeps the version from a removal that asks to bypass governance retention or not.
+    pub(crate) const fn keeps(self, bypass: bool) -> bool {
+        match self {
+            Self::Free => false,
+            Self::Held | Self::Compliance => true,
+            Self::Governance => !bypass,
+        }
+    }
+}
+
+fn kept(answer: Option<Value>) -> Result<Kept> {
+    let Some(Value::Object(fields)) = answer else {
+        return Ok(Kept::Free);
+    };
+    if fields.get("held") == Some(&Value::Bool(true)) {
+        return Ok(Kept::Held);
+    }
+    if fields.get("retained") != Some(&Value::Bool(true)) {
+        return Ok(Kept::Free);
+    }
+    match fields.get("lock_mode") {
+        Some(Value::String(mode)) if mode == "COMPLIANCE" => Ok(Kept::Compliance),
+        Some(Value::String(mode)) if mode == "GOVERNANCE" => Ok(Kept::Governance),
+        _ => Err(malformed("a retained version's lock mode")),
+    }
+}
+
 /// The version a delete names, as it was read.
 pub(crate) struct Target {
     seq: u64,
     version_id: String,
     /// Whether it is a delete marker.
     pub(crate) marker: bool,
+    /// What Object Lock keeps it under.
+    pub(crate) kept: Kept,
     /// What becomes current, when the target is the key's newest version.
     successor: Option<Successor>,
     /// Whether the bucket notifies, read with the target.
@@ -126,6 +169,8 @@ impl TessariObjects {
         ];
         let script = format!(
             "BEGIN; SELECT {FIELDS} FROM ONLY versions:$target; \
+             SELECT (legal_hold ?? false) AS held, (retain_until != NONE AND retain_until > time::now()) AS retained, \
+             lock_mode FROM ONLY versions:$target; \
              SELECT {FIELDS} FROM versions AFTER versions:$prefix LIMIT 2; {} COMMIT;",
             bucket_read(&self.pool, "notify, acknowledge")
         );
@@ -138,6 +183,7 @@ impl TessariObjects {
         if target.get("version_id") != Some(&Value::String(version_id.to_owned())) {
             return Ok(None);
         }
+        let kept = kept(first_record(answers.next())?)?;
         let mut newest = of_key(answers.next(), bucket, key)?.into_iter();
         let bucket_record = first_record(answers.next())?;
         let notify = matches!(&bucket_record, Some(Value::Object(fields))
@@ -159,6 +205,7 @@ impl TessariObjects {
         Ok(Some(Target {
             seq: target_seq,
             marker: is_marker(&target),
+            kept,
             version_id: version_id.to_owned(),
             successor,
             notify,
@@ -174,6 +221,7 @@ impl TessariObjects {
         key: &ObjectKey,
         target: &Target,
         removal: Removal,
+        bypass: bool,
     ) -> Result<bool> {
         let prefix = key_prefix(bucket.as_str(), key.as_str());
         let mut parameters = vec![
@@ -201,8 +249,15 @@ impl TessariObjects {
         } else {
             ""
         };
+        // A GOVERNANCE retention lets the removal through only with the bypass flag set in this same transaction,
+        // which the store's `locked_release` event reads (ADR-0016); the record goes with the flag on it.
+        let bypassing = if bypass && target.kept == Kept::Governance {
+            "UPDATE versions:$target SET lock_bypass = true; "
+        } else {
+            ""
+        };
         let mut script = format!(
-            "BEGIN; UPDATE versions:$target SET version_id = $vid{stamp} WHERE version_id = $vid; \
+            "BEGIN; {bypassing}UPDATE versions:$target SET version_id = $vid{stamp} WHERE version_id = $vid; \
              DELETE versions:$target; ",
         );
         if target.version_id == NULL {
@@ -240,6 +295,8 @@ impl TessariObjects {
         match self.pool.run(&script, parameters).await {
             Ok(_) => Ok(true),
             Err(error) if is_lost_or_refused(&error) => Ok(false),
+            // Held or retained since it was read: reading it again finds what keeps it.
+            Err(error) if is_lock_refusal(&error) => Ok(false),
             Err(error) => Err(error.into()),
         }
     }

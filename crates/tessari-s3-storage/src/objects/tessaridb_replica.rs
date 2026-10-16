@@ -6,6 +6,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 
 use super::super::entity::record;
 use super::super::model::{Content, NewObject};
+use super::super::model_lock::Lock;
 use super::super::repository::VersionPlan;
 use super::super::version_id::{key_prefix, record_id};
 use super::{is_lost_or_refused, versions};
@@ -54,7 +55,14 @@ impl super::TessariObjects {
         object: Option<&NewObject>,
         plan: &VersionPlan,
     ) -> Result<bool> {
-        let changes = versions::statements(bucket, key, incarnation, plan, object.is_some())?;
+        let changes = versions::statements(
+            bucket,
+            key,
+            incarnation,
+            plan,
+            object.is_some(),
+            &Lock::default(),
+        )?;
         let mut parameters = changes.parameters;
         // The data commits with the removal of its pending `reclaims` entry, as an ordinary write's does.
         let reclaim = match object {

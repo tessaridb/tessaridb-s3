@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
-use tessari_s3_storage::objects::{Content, NewObject, WriteCondition, Written};
+use tessari_s3_storage::objects::{Content, Lock, NewObject, WriteCondition, Written};
 use tessari_s3_types::{BucketName, ObjectKey};
 
 use crate::large::{body, data_of, files, queued};
@@ -82,6 +82,7 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
         metadata: BTreeMap::new(),
         checksums: BTreeMap::new(),
         content: Content::Data(uploaded.id),
+        lock: Lock::default(),
     };
     let bucket = BucketName::new("race").expect("name");
     let key = ObjectKey::new("k").expect("key");
