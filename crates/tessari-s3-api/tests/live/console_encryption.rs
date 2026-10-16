@@ -321,3 +321,50 @@ async fn customer_keys_are_allowed_only_beside_a_default_and_s3_answers_what_was
         "{recorded}"
     );
 }
+
+const ROTATE: &str = "/api/v1/encryption/rotate";
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn root_rotates_the_server_key_under_the_passphrase_and_the_act_is_recorded() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let body = format!(r#"{{"passphrase":"{RIGHT}","reason":"yearly"}}"#);
+    let opened = send(&console, "POST", UNSEAL, Some(&root), Some(&body)).await;
+    assert_eq!(opened.status, 200);
+
+    let wrong = r#"{"passphrase":"not the keys passphrase at all","reason":"yearly"}"#;
+    let refused = send(&console, "POST", ROTATE, Some(&root), Some(wrong)).await;
+    assert_eq!(
+        (refused.status, refused.code().as_deref()),
+        (400, Some("wrong_passphrase"))
+    );
+    let key = user_with_key(state.storage(), "rot", "rot-space", Role::SpaceAdmin, true).await;
+    let user = sign_in_as(&console, &key).await.expect("signed in");
+    let denied = send(&console, "POST", ROTATE, Some(&user), Some(&body)).await;
+    assert_eq!(denied.status, 403);
+    let held = send(&console, "GET", STATE, Some(&root), None).await.json();
+    assert_eq!(held["active"], "server_1", "neither refusal rotated");
+
+    let rotated = send(&console, "POST", ROTATE, Some(&root), Some(&body)).await;
+    assert_eq!(rotated.status, 200);
+    assert_eq!(
+        (
+            rotated.json()["active"].clone(),
+            rotated.json()["keys"].clone()
+        ),
+        (Value::from("server_2"), Value::from(2))
+    );
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let text = String::from_utf8_lossy(&actions.bytes).into_owned();
+    assert!(!text.contains(RIGHT), "{text}");
+    let outcomes: Vec<String> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| action["operation"] == "rotate_server_key")
+        .map(|action| action["outcome"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(outcomes, ["rotated", "wrong_passphrase"], "newest first");
+}

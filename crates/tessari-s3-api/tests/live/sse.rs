@@ -79,16 +79,20 @@ pub(crate) async fn drive_holds(
         .any(|id| file_holds(dir, id, needle))
 }
 
-/// Unseals the node's keys with the suite's passphrase.
-pub(crate) async fn unseal(state: &tessari_s3_api::ApiState) {
-    let passphrase = Passphrase::new(Zeroizing::new(
+/// The suite's keys passphrase.
+pub(crate) fn passphrase() -> Passphrase {
+    Passphrase::new(Zeroizing::new(
         "a keys passphrase for the sse suite".to_owned(),
     ))
-    .expect("usable");
+    .expect("usable")
+}
+
+/// Unseals the node's keys with the suite's passphrase.
+pub(crate) async fn unseal(state: &tessari_s3_api::ApiState) {
     state
         .storage()
         .keys()
-        .unseal(&passphrase)
+        .unseal(&passphrase())
         .await
         .expect("unsealed");
 }

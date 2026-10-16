@@ -27,4 +27,11 @@ pub(crate) trait KeyVault: Send + Sync {
         id: &str,
         key: &Zeroizing<[u8; 32]>,
     ) -> impl Future<Output = Result<()>> + Send;
+    /// Opens the declared vault with `passphrase` and stores `key` as the next server key — numbered one past the
+    /// highest the vault holds — and answers its id; the vault is sealed again before this answers.
+    fn rotate(
+        &self,
+        passphrase: &Passphrase,
+        key: &Zeroizing<[u8; 32]>,
+    ) -> impl Future<Output = Result<String>> + Send;
 }

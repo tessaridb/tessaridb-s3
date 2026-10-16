@@ -104,6 +104,21 @@ impl KeyService {
         self.unseal(passphrase).await
     }
 
+    /// Rotates the server key: creates the next one — 32 bytes from the platform's generator — in the keys vault,
+    /// which `passphrase` opens, then holds the keys again so this node wraps new data keys under it at once. Other
+    /// nodes go on wrapping under the key they hold until their next unseal; every older key still unwraps.
+    ///
+    /// # Errors
+    /// [`Error::KeyExists`] when another rotation took the same number first, [`Error::KeysSealed`] before the vault
+    /// exists, [`Error::WrongPassphrase`], [`Error::PassphraseThrottled`], [`Error::Randomness`], or the metadata
+    /// store's.
+    pub async fn rotate(&self, passphrase: &Passphrase) -> Result<KeyState> {
+        let mut key = Zeroizing::new([0_u8; 32]);
+        getrandom::fill(key.as_mut_slice()).map_err(|_| Error::Randomness)?;
+        self.vault.rotate(passphrase, &key).await?;
+        self.unseal(passphrase).await
+    }
+
     /// Forgets the keys; encrypted objects cannot be read or written on this node until the next unseal.
     pub fn seal(&self) {
         *self.ring.write().unwrap_or_else(PoisonError::into_inner) = None;

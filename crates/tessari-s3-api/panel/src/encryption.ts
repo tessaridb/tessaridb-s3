@@ -1,7 +1,7 @@
 //! The encryption keys of this node, for an operator: whether they are held,
 //! the form that unseals them with the keys passphrase (the first unseal
 //! creates them), sealing them again, and the keys created by name that
-//! objects can be sealed under with `aws:kms`. Each node holds its own keys,
+//! objects can be sealed under with `aws:kms`, and rotating the server key. Each node holds its own keys,
 //! so this acts on the node serving the console; other nodes hold a new named
 //! key after their next unseal. The server wants a recent sign-in and records
 //! every attempt without the passphrase.
@@ -104,6 +104,36 @@ function createForm(screen: Screen): HTMLElement {
   return form;
 }
 
+function rotateForm(screen: Screen, keys: Keys & { state: "unsealed" }): HTMLElement {
+  const passphrase = field("rotate-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+  const why = field("rotate-reason", "Reason", { autocomplete: "off" }, "Kept in the action record.");
+  const said = el("div", { "aria-live": "polite" });
+  const form = el(
+    "form",
+    { class: "confirm card-part", novalidate: "", "aria-labelledby": "keys-rotate-title" },
+    el("p", { id: "keys-rotate-title" }, el("strong", {}, "Rotate the server key")),
+    el("p", {}, "New objects are wrapped under a new key in place of ", mono(keys.active), "; objects under older keys still open. Other nodes take the new key at their next unseal."),
+    passphrase.row,
+    why.row,
+    el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Rotate")),
+    said,
+  );
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const reason = why.input.value.trim();
+    const answer = await call("POST", `${BASE}/rotate`, readKeys, {
+      passphrase: passphrase.input.value,
+      ...(reason === "" ? {} : { reason }),
+    });
+    passphrase.input.value = "";
+    const failure = done(screen, answer.ok ? null : answer, "A new server key is active on this node.");
+    if (failure !== null) {
+      fill(said, refusal(failure));
+    }
+  });
+  return form;
+}
+
 function sealButton(screen: Screen, region: HTMLElement): HTMLElement {
   const button = el("button", { type: "button", class: "danger" }, "Seal…");
   button.addEventListener("click", () =>
@@ -140,7 +170,7 @@ export async function encryptionCard(screen: Screen): Promise<HTMLElement | null
   const region = el("div", {});
   card.append(stateLine(keys));
   if (keys.state === "unsealed") {
-    card.append(namedKeys(keys.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm(screen));
+    card.append(namedKeys(keys.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm(screen), rotateForm(screen, keys));
   } else {
     card.append(unsealForm(screen, keys));
   }

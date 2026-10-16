@@ -89,7 +89,7 @@ pub struct KeyRing {
 }
 
 /// The number in a server key's id, `None` for any other id.
-fn server_number(id: &str) -> Option<u64> {
+pub(crate) fn server_number(id: &str) -> Option<u64> {
     id.strip_prefix(SERVER_KEY_PREFIX)?.parse().ok()
 }
 

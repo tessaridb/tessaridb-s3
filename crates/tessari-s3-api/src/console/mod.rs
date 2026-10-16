@@ -268,6 +268,7 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/encryption/unseal", post(encryption::unseal))
         .route("/api/v1/encryption/seal", post(encryption::seal))
         .route("/api/v1/encryption/keys", post(encryption::create))
+        .route("/api/v1/encryption/rotate", post(encryption::rotate))
         .route("/api/v1/regions", get(regions::list))
         .route("/api/v1/regions/failover", post(regions::fail_over))
         .route("/api/v1/regions/restore", post(regions::restore))
