@@ -3,6 +3,18 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.1.0-beta — 2026-10-16
+
+Metadata on TessariDB `0.34.2-beta`.
+
+- Object Lock: GetObjectLockConfiguration, PutObjectLockConfiguration, Get/PutObjectRetention, Get/PutObjectLegalHold;
+  retention and legal hold on PutObject and CopyObject. COMPLIANCE is never shortened; GOVERNANCE yields to who
+  administers the bucket with `x-amz-bypass-governance-retention`. The metadata store refuses every path that would
+  delete or rewrite a kept version, lifecycle included.
+- Tagging: Get/Put/DeleteObjectTagging, Get/Put/DeleteBucketTagging; `x-amz-tagging` on PutObject, CopyObject and
+  CreateMultipartUpload; `x-amz-tagging-count` on GetObject and HeadObject.
+- Console: an object's retention, legal hold and tags.
+
 ## 0.0.1-alpha — 2026-10-16
 
 First release; image `tessaridb/s3`. Metadata on TessariDB `0.34.2-beta`.

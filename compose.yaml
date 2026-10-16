@@ -42,7 +42,7 @@ services:
       - ./docker/s3-account.sh:/s3-account.sh:ro
 
   s3:
-    image: tessaridb/s3:0.0.1-alpha
+    image: tessaridb/s3:0.1.0-beta
     build: .
     restart: unless-stopped
     depends_on:
