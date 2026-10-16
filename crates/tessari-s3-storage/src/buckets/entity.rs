@@ -27,6 +27,8 @@ pub struct BucketEntity {
     pub versioning: Option<String>,
     /// The lifecycle rules as stored; absent while none are set.
     pub lifecycle: Option<Vec<Value>>,
+    /// The CORS rules as stored; absent while none are set.
+    pub cors: Option<Vec<Value>>,
     /// The notification configuration as stored; absent while none is set.
     pub notify: Option<Value>,
     /// The replication configuration as stored; absent while none is set.
@@ -95,6 +97,11 @@ impl BucketEntity {
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("lifecycle")),
         };
+        let cors = match fields.get("cors") {
+            None | Some(Value::None) => None,
+            Some(Value::Array(rules)) => Some(rules.clone()),
+            Some(_) => return Err(malformed("cors")),
+        };
         let replication = match fields.get("replication") {
             None | Some(Value::None) => None,
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
@@ -156,6 +163,7 @@ impl BucketEntity {
             max_objects: limit("max_objects")?,
             versioning,
             lifecycle,
+            cors,
             notify,
             replication,
             object_lock,

@@ -61,6 +61,7 @@ const TAGGING_BODY: &[u8] =
     b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
 const ENCRYPTION_BODY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
     <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const CORS_BODY: &[u8] = b"<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>";
 const BLOCK_BODY: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicPolicy>true</BlockPublicPolicy></PublicAccessBlockConfiguration>";
 const POLICY_BODY: &[u8] = br#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::alpha:user/cid"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::ann-photos/*"}]}"#;
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
@@ -249,6 +250,27 @@ pub(crate) fn table(upload: &str) -> Vec<Probe> {
             "DELETE",
             "/ann-photos",
             &[("policy", None)],
+        ),
+        Probe {
+            body: CORS_BODY,
+            ..probe(
+                Operation::PutBucketCors,
+                "PUT",
+                "/ann-photos",
+                &[("cors", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketCors,
+            "GET",
+            "/ann-photos",
+            &[("cors", None)],
+        ),
+        probe(
+            Operation::DeleteBucketCors,
+            "DELETE",
+            "/ann-photos",
+            &[("cors", None)],
         ),
         probe(
             Operation::GetBucketPolicyStatus,

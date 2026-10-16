@@ -178,6 +178,15 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
+    async fn set_cors(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("rules".to_owned(), rules.unwrap_or(Value::None)));
+        self.pool
+            .run("UPDATE buckets:$name SET cors = $rules;", parameters)
+            .await?;
+        Ok(())
+    }
+
     async fn set_lifecycle(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
         let mut parameters = name_param(name);
         // The rules are the bucket's, in the global database; the queue is the region's. No transaction writes both, so

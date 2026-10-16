@@ -35,6 +35,7 @@ mod console_store;
 mod console_users;
 mod copy;
 mod copy_part;
+mod cors;
 mod delete_many;
 mod erasure;
 mod erasure_heals;

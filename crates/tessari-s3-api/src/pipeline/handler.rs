@@ -40,7 +40,8 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
     } else {
         None
     };
-    let (response, code) = match serve(state.clone(), request, &mut trail).await {
+    let browser = cross_origin(&state, &request);
+    let (mut response, code) = match serve(state.clone(), request, &mut trail).await {
         Ok(response) => {
             tracing::info!(request_id = %request_id, method = %method, status = response.status().as_u16(), "served");
             (with_request_id(response, &request_id), "None")
@@ -59,6 +60,9 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
             )
         }
     };
+    if let Some((origin, bucket)) = browser {
+        routes::cors::answer_origin(&state, &bucket, &origin, method.as_str(), &mut response).await;
+    }
     // A streamed body has no exact size; its length is the header it was answered with.
     let answered =
         content_length(response.headers()).max(response.body().size_hint().exact().unwrap_or(0));
@@ -91,6 +95,32 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
     response
 }
 
+/// The `Origin` and the bucket of a cross-origin request other than a preflight — the answer then carries what the
+/// bucket's CORS rules allow; `None` for any other request.
+fn cross_origin(
+    state: &ApiState,
+    request: &Request,
+) -> Option<(String, tessari_s3_types::BucketName)> {
+    if request.method() == axum::http::Method::OPTIONS {
+        return None;
+    }
+    let origin = request.headers().get("origin")?.to_str().ok()?.to_owned();
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| {
+            request
+                .uri()
+                .authority()
+                .map(|authority| authority.as_str())
+        })?;
+    let bucket = resolve(host, request.uri().path(), state.domains())
+        .ok()?
+        .bucket?;
+    Some((origin, bucket))
+}
+
 /// The declared body length in `headers`; `0` when they declare none.
 fn content_length(headers: &axum::http::HeaderMap) -> u64 {
     headers
@@ -104,12 +134,6 @@ fn content_length(headers: &axum::http::HeaderMap) -> u64 {
 /// bucket, key and signer while the access log is on.
 async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<Response<Body>> {
     let (parts, body) = request.into_parts();
-    let method = Method::parse(parts.method.as_str()).ok_or_else(|| {
-        Error::new(
-            ErrorCode::MethodNotAllowed,
-            "the method is not part of the S3 API",
-        )
-    })?;
     let mut headers = Vec::with_capacity(parts.headers.len());
     for (name, value) in &parts.headers {
         let value = value.to_str().map_err(|_| {
@@ -136,6 +160,17 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
             .map(|bucket| bucket.as_str().to_owned());
         trail.key = addressed.key.as_ref().map(|key| key.as_str().to_owned());
     }
+    // A browser's preflight carries no credentials: it is answered from the bucket's CORS rules alone.
+    if parts.method == axum::http::Method::OPTIONS {
+        trail.operation = "PreflightCors";
+        return routes::cors::preflight(&state, addressed.bucket.as_ref(), &parts.headers).await;
+    }
+    let method = Method::parse(parts.method.as_str()).ok_or_else(|| {
+        Error::new(
+            ErrorCode::MethodNotAllowed,
+            "the method is not part of the S3 API",
+        )
+    })?;
     let query = decode_query(raw_query)?;
     let query_refs: Vec<(&str, Option<&str>)> = query
         .iter()

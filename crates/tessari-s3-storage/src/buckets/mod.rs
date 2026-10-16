@@ -1,5 +1,6 @@
 //! The `buckets` domain: bucket records in TessariDB.
 
+mod cors;
 mod encryption;
 mod entity;
 mod lifecycle;

@@ -62,6 +62,12 @@ pub enum ErrorCode {
     MalformedPolicy,
     /// 404: the bucket has no policy.
     NoSuchBucketPolicy,
+    /// 404: the bucket has no CORS configuration.
+    NoSuchCorsConfiguration,
+    /// 403: a CORS preflight that no rule allows, or for a bucket without CORS.
+    AccessForbidden,
+    /// 400: a CORS preflight without its Origin or requested method.
+    BadRequest,
     /// 404: the bucket carries no Block Public Access configuration.
     NoSuchPublicAccessBlockConfiguration,
     /// 400: the bucket would be created in another region than this server's.
@@ -159,6 +165,9 @@ impl ErrorCode {
             Self::MalformedXml => "MalformedXML",
             Self::MalformedPolicy => "MalformedPolicy",
             Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
+            Self::NoSuchCorsConfiguration => "NoSuchCORSConfiguration",
+            Self::AccessForbidden => "AccessForbidden",
+            Self::BadRequest => "BadRequest",
             Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
@@ -190,7 +199,8 @@ impl ErrorCode {
             Self::AccessDenied
             | Self::InvalidAccessKeyId
             | Self::RequestTimeTooSkewed
-            | Self::SignatureDoesNotMatch => 403,
+            | Self::SignatureDoesNotMatch
+            | Self::AccessForbidden => 403,
             Self::BadDigest
             | Self::IncompleteBody
             | Self::InvalidArgument
@@ -222,6 +232,7 @@ impl ErrorCode {
             | Self::ObjectLockConfigurationNotFoundError
             | Self::NoSuchTagSet
             | Self::NoSuchBucketPolicy
+            | Self::NoSuchCorsConfiguration
             | Self::NoSuchPublicAccessBlockConfiguration => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
@@ -236,7 +247,8 @@ impl ErrorCode {
             | Self::InvalidPart
             | Self::InvalidPartOrder
             | Self::EntityTooSmall
-            | Self::AccessControlListNotSupported => 400,
+            | Self::AccessControlListNotSupported
+            | Self::BadRequest => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
             Self::SlowDown => 503,
@@ -311,6 +323,13 @@ mod tests {
             (ErrorCode::MalformedXml, "MalformedXML", 400),
             (ErrorCode::MalformedPolicy, "MalformedPolicy", 400),
             (ErrorCode::NoSuchBucketPolicy, "NoSuchBucketPolicy", 404),
+            (
+                ErrorCode::NoSuchCorsConfiguration,
+                "NoSuchCORSConfiguration",
+                404,
+            ),
+            (ErrorCode::AccessForbidden, "AccessForbidden", 403),
+            (ErrorCode::BadRequest, "BadRequest", 400),
             (
                 ErrorCode::NoSuchPublicAccessBlockConfiguration,
                 "NoSuchPublicAccessBlockConfiguration",

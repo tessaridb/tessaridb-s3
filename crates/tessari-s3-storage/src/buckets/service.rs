@@ -149,6 +149,24 @@ impl BucketService {
         Ok(true)
     }
 
+    /// Sets `name`'s CORS rules (already validated), or removes them with `None`; `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_cors(
+        &self,
+        name: &BucketName,
+        rules: Option<&[tessari_s3_core::cors::Rule]>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_cors(name, rules.map(super::cors::to_value))
+            .await?;
+        Ok(true)
+    }
+
     /// Sets `name`'s lifecycle rules (already validated), or removes them with `None`; `false` when there is no such
     /// bucket.
     ///

@@ -35,6 +35,8 @@ pub struct Bucket {
     pub versioning: Option<Versioning>,
     /// Its lifecycle rules; `None` while none are set.
     pub lifecycle: Option<Vec<tessari_s3_core::lifecycle::Rule>>,
+    /// Its CORS rules; `None` while none are set.
+    pub cors: Option<Vec<tessari_s3_core::cors::Rule>>,
     /// Its notification rules; `None` while none are set.
     pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
     /// Its replication configuration; `None` while none is set.
@@ -151,6 +153,11 @@ impl TryFrom<BucketEntity> for Bucket {
             creator: entity.creator,
             quota,
             versioning,
+            cors: entity
+                .cors
+                .as_ref()
+                .map(|rules| super::cors::from_values(rules))
+                .transpose()?,
             lifecycle: entity
                 .lifecycle
                 .as_ref()

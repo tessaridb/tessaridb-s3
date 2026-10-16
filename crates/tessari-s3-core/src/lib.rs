@@ -5,6 +5,9 @@ pub mod auth;
 pub mod authz;
 pub mod buckets;
 pub mod console;
+pub mod cors;
+#[cfg(test)]
+mod cors_tests;
 pub mod dispatch;
 pub mod erasure;
 mod error;

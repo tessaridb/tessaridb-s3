@@ -10,6 +10,7 @@ use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
 pub mod buckets;
+pub(crate) mod cors;
 mod encryption;
 mod lifecycle;
 pub mod listing;
@@ -57,6 +58,8 @@ pub(crate) async fn route(
             | Operation::GetBucketPolicy
             | Operation::DeleteBucketPolicy
             | Operation::GetBucketPolicyStatus
+            | Operation::GetBucketCors
+            | Operation::DeleteBucketCors
             | Operation::GetPublicAccessBlock
             | Operation::DeletePublicAccessBlock
     ) {
@@ -94,6 +97,9 @@ pub(crate) async fn route(
         Operation::GetBucketTagging => tagging::get_bucket(call).await,
         Operation::PutBucketTagging => tagging::put_bucket(call, body).await,
         Operation::DeleteBucketTagging => tagging::delete_bucket(call).await,
+        Operation::GetBucketCors => cors::get(call).await,
+        Operation::PutBucketCors => cors::put(call, body).await,
+        Operation::DeleteBucketCors => cors::delete(call).await,
         Operation::GetBucketPolicy => policy::get(call).await,
         Operation::PutBucketPolicy => policy::put(call, body).await,
         Operation::DeleteBucketPolicy => policy::delete(call).await,

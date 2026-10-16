@@ -48,6 +48,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         state: &'static str,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s CORS rules, or removes them when `rules` is `None`.
+    fn set_cors(
+        &self,
+        name: &BucketName,
+        rules: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Sets `name`'s lifecycle rules, or removes them when `rules` is `None`.
     fn set_lifecycle(
         &self,

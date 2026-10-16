@@ -70,6 +70,7 @@ DEFINE FIELD IF NOT EXISTS max_bytes ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS max_objects ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE FIELD IF NOT EXISTS lifecycle ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS cors ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
