@@ -33,6 +33,7 @@ getrandom.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
+zeroize.workspace = true
 tessari-s3-daemons.workspace = true
 rskafka.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs"] }

@@ -117,6 +117,21 @@ pub enum Error {
     /// Another node holds the claim on this data id (it is healing or reclaiming it); try on a later pass.
     #[error("another node is working on this data id")]
     Held,
+    /// This node holds no encryption keys: an operator has not unsealed them since it started.
+    #[error("the encryption keys are sealed on this node")]
+    KeysSealed,
+    /// A keys passphrase that cannot be used; the reason never quotes it.
+    #[error("the keys passphrase is not usable: {reason}")]
+    WeakPassphrase {
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+    /// The keys vault did not open with the passphrase given.
+    #[error("the keys passphrase is wrong")]
+    WrongPassphrase,
+    /// Too many wrong passphrases in a row: the metadata store makes the next attempt wait, right or not.
+    #[error("too many wrong keys passphrases; wait before trying again")]
+    PassphraseThrottled,
 }
 
 impl Error {
@@ -144,6 +159,9 @@ impl Error {
                 ErrorCategory::Validation
             }
             Self::Contended | Self::Held => ErrorCategory::Conflict,
+            Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
+            Self::WeakPassphrase { .. } => ErrorCategory::Validation,
+            Self::WrongPassphrase => ErrorCategory::Unauthorized,
         }
     }
 }

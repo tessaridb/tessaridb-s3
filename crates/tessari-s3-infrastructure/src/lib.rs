@@ -8,6 +8,7 @@ pub mod credential;
 mod error;
 mod iam_config;
 mod kafka;
+mod keys_config;
 pub mod media_image;
 pub mod media_video;
 mod meta_config;

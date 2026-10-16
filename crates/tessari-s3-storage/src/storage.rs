@@ -16,6 +16,7 @@ use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
 use crate::identities::{IdentityService, TessariIdentities};
+use crate::keys::{KeyService, TessariKeys};
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::media::{MediaService, TessariMedia};
 use crate::members::{MembershipService, TessariMembers};
@@ -45,6 +46,8 @@ pub struct Storage {
     spaces: SpaceService,
     users: UserService,
     identities: IdentityService,
+    /// Shared by every clone: an unseal on this node is seen by all of them.
+    keys: Arc<KeyService>,
     pool: MetaPool,
     regional: MetaPool,
     reclaim_grace_secs: u64,
@@ -74,6 +77,7 @@ impl Storage {
             usage: UsageService::new(TessariUsage::new(regional.clone())),
             users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
             identities: IdentityService::new(TessariIdentities::new(pool.clone())),
+            keys: Arc::new(KeyService::new(TessariKeys::new(pool.clone()))),
             spaces,
             objects,
             shards,
@@ -168,6 +172,12 @@ impl Storage {
     #[must_use]
     pub const fn cluster(&self) -> &ClusterService {
         &self.cluster
+    }
+
+    /// The encryption keys this node holds, sealed until an operator unseals them.
+    #[must_use]
+    pub fn keys(&self) -> &KeyService {
+        &self.keys
     }
 
     /// Which nodes an operator admitted to the cluster, and which were removed.

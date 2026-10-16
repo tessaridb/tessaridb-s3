@@ -23,6 +23,7 @@ axum.workspace = true
 tokio = { workspace = true, features = ["net", "time", "sync"] }
 tracing.workspace = true
 anyhow.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 tessari-s3-types.workspace = true

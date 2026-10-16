@@ -3069,6 +3069,7 @@ dependencies = [
  "tower",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -3194,6 +3195,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

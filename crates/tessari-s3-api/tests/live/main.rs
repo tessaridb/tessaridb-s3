@@ -41,6 +41,7 @@ mod erasure_pacing;
 mod erasure_reads;
 mod erasure_retires;
 mod identities;
+mod keys_vault;
 mod large;
 mod lifecycle;
 mod listing;

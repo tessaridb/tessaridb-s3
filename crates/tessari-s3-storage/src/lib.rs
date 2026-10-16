@@ -10,6 +10,7 @@ pub mod encryption;
 pub mod erasure;
 mod error;
 pub mod identities;
+pub mod keys;
 pub mod lifecycle;
 pub mod media;
 pub mod members;
