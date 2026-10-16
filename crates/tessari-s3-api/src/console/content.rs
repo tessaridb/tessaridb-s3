@@ -12,6 +12,7 @@ use axum::http::header::{
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
@@ -63,13 +64,22 @@ pub(super) async fn download(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
 ) -> Result<Response, ConsoleError> {
     let Query(query) = query.map_err(|_| ConsoleError::bad_request("key is required"))?;
     let why = reason(query.reason, false)?;
     let bucket = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &bucket, Action::ReadObject).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &bucket,
+        Action::ReadObject,
+        ("s3:GetObject", query.key.as_deref()),
+    )
+    .await?;
     let key = object_key(query.key.as_deref())?;
     let objects = state.storage().objects();
     let object = match objects.get(&bucket, &key).await? {

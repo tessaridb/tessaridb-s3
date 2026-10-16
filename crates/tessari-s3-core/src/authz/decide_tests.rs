@@ -26,6 +26,7 @@ fn bucket(name: &str, in_space: &str, creator: Option<&str>) -> BucketResource {
         name: name.to_owned(),
         space: space(in_space),
         creator: creator.map(str::to_owned),
+        policy: None,
     }
 }
 

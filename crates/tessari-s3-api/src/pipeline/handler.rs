@@ -7,13 +7,15 @@ use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::http::Response;
 use tessari_s3_core::auth::SignedRequest;
+use tessari_s3_core::authz::Principal;
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::dispatch::{DispatchRequest, Method, dispatch, is_implemented};
-use tessari_s3_observability::Served;
+use tessari_s3_observability::{AuthRefusal, Served};
 use tessari_s3_types::ErrorCode;
 
 use super::address::resolve;
 use super::authenticate::authenticate;
-use super::authorize::authorize_operation;
+use super::authorize::{authorize_operation, may_list};
 use super::call::Call;
 use super::fence::writable;
 use super::query::decode_query;
@@ -155,7 +157,11 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
     };
     let (verified, principal) = authenticate(&state, &signed).await?;
     if trail.logged {
-        trail.principal = Some(verified.access_key().to_owned());
+        trail.principal = Some(if verified.is_anonymous() {
+            "anonymous".to_owned()
+        } else {
+            verified.access_key().to_owned()
+        });
     }
     if !is_implemented(spec.operation) {
         return Err(Error::new(
@@ -166,6 +172,8 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
     let replica = parts
         .headers
         .contains_key(crate::routes::objects::REPLICA_VERSION);
+    let secure = parts.extensions.get::<crate::OverTls>().is_some();
+    let context = context(&state, &parts, &query, spec.operation, &verified, secure);
     authorize_operation(
         &state,
         spec.operation,
@@ -173,11 +181,17 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
         &addressed,
         &parts.headers,
         query.iter().any(|(name, _)| name == "versionId") || replica,
+        &context,
     )
     .await
     .inspect_err(|error| {
         if error.code == ErrorCode::AccessDenied {
-            state.metrics().denied(spec.name);
+            // A request with no credentials that nothing grants is refused for want of them, as it always was.
+            if matches!(principal, Principal::Anonymous) {
+                state.metrics().auth_refused(AuthRefusal::Anonymous);
+            } else {
+                state.metrics().denied(spec.name);
+            }
         }
     })?;
     writable(&state, method, replica).await?;
@@ -188,7 +202,76 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
         verified: &verified,
         principal: &principal,
         headers: &parts.headers,
-        secure: parts.extensions.get::<crate::OverTls>().is_some(),
+        secure,
+        context: &context,
     };
-    routes::route(spec.operation, &call, body).await
+    let answered = routes::route(spec.operation, &call, body).await;
+    // A key's absence is told only to a caller who may list the bucket (S3 ref 04 M7); anyone else hears it is denied.
+    match (answered, addressed.bucket.as_ref()) {
+        (Err(error), Some(bucket))
+            if matches!(error.code, ErrorCode::NoSuchKey | ErrorCode::NoSuchVersion)
+                && !may_list(&state, &principal, bucket, &context).await? =>
+        {
+            Err(Error::new(ErrorCode::AccessDenied, "Access Denied"))
+        }
+        (answered, _) => answered,
+    }
+}
+
+/// What a bucket policy's conditions read of this request: its transport, peer, time, how it was signed, the
+/// headers a write declares and, on a listing, its prefix, delimiter and page size.
+fn context(
+    state: &ApiState,
+    parts: &axum::http::request::Parts,
+    query: &[(String, Option<String>)],
+    operation: tessari_s3_core::dispatch::Operation,
+    verified: &tessari_s3_core::auth::Verified,
+    secure: bool,
+) -> Context {
+    use tessari_s3_core::dispatch::Operation as O;
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let value = |name: &str| {
+        query
+            .iter()
+            .find(|(n, _)| n == name)
+            .and_then(|(_, value)| value.clone())
+    };
+    let presigned = query.iter().any(|(name, _)| name == "X-Amz-Signature");
+    let listing = matches!(
+        operation,
+        O::ListObjects | O::ListObjectsV2 | O::ListObjectVersions
+    );
+    Context {
+        secure_transport: secure,
+        source_ip: parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|axum::extract::ConnectInfo(address)| address.ip()),
+        now_secs: state.now(),
+        auth_type: match (verified.is_anonymous(), presigned) {
+            (true, _) => None,
+            (false, true) => Some("REST-QUERY-STRING"),
+            (false, false) => Some("REST-HEADER"),
+        },
+        signature_version: (!verified.is_anonymous()).then_some("AWS4-HMAC-SHA256"),
+        content_sha256: header("x-amz-content-sha256"),
+        server_side_encryption: header("x-amz-server-side-encryption"),
+        prefix: listing.then(|| value("prefix").unwrap_or_default()),
+        delimiter: if listing { value("delimiter") } else { None },
+        max_keys: if listing {
+            Some(
+                value("max-keys")
+                    .and_then(|text| text.parse().ok())
+                    .unwrap_or(1000),
+            )
+        } else {
+            None
+        },
+    }
 }

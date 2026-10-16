@@ -71,7 +71,22 @@ pub(super) async fn require_session(
         },
     }
     .ok_or(ConsoleError::unauthorized())?;
+    // What a bucket policy's conditions read of a console request: its transport, its peer and the time.
+    let context = tessari_s3_core::authz::policy::Context {
+        secure_transport: request.extensions().get::<crate::OverTls>().is_some(),
+        source_ip: request
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|axum::extract::ConnectInfo(address)| address.ip()),
+        now_secs: now,
+        ..tessari_s3_core::authz::policy::Context::default()
+    };
+    request.extensions_mut().insert(super::access::Caller {
+        principal: principal.clone(),
+        context: context.clone(),
+    });
     request.extensions_mut().insert(principal);
     request.extensions_mut().insert(session);
+    request.extensions_mut().insert(context);
     Ok(next.run(request).await)
 }

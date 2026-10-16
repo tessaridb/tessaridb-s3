@@ -1,5 +1,6 @@
 //! A bucket as the rest of the server sees it.
 
+use tessari_s3_core::authz::policy::BucketPolicy;
 use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
@@ -87,13 +88,17 @@ pub enum Acknowledgement {
 }
 
 impl Bucket {
-    /// The bucket as the access evaluator sees it.
+    /// The bucket as the access evaluator sees it, its policy parsed (a stored text that no longer parses is
+    /// carried as the error, which refuses everything it governs).
     #[must_use]
     pub fn resource(&self) -> BucketResource {
         BucketResource {
             name: self.name.as_str().to_owned(),
             space: self.space.clone(),
             creator: self.creator.clone(),
+            policy: self.policy.as_deref().map(|text| {
+                std::sync::Arc::new(BucketPolicy::parse(text, self.name.as_str(), &self.space))
+            }),
         }
     }
 }

@@ -10,6 +10,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
@@ -40,6 +41,7 @@ pub(super) async fn set(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -62,7 +64,15 @@ pub(super) async fn set(
         }
     };
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::ConfigureBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ConfigureBucket,
+        ("s3:PutBucketAcknowledgement", None),
+    )
+    .await?;
     let set = state
         .storage()
         .buckets()

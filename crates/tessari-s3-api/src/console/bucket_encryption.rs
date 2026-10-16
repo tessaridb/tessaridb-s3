@@ -7,6 +7,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::Error;
@@ -52,6 +53,7 @@ pub(super) async fn set(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -77,7 +79,15 @@ pub(super) async fn set(
         ));
     }
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::ConfigureBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ConfigureBucket,
+        ("s3:PutEncryptionConfiguration", None),
+    )
+    .await?;
     let checked = match &sealing {
         Some(sealing) => match state.storage().keys().check(sealing) {
             Ok(()) => Ok(()),

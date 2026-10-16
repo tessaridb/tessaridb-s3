@@ -1,6 +1,9 @@
 //! The evaluator's inputs: who is asking, what they want to do, and to which bucket.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use super::policy::{BucketPolicy, PolicyError};
 
 /// A space's name: the tenant buckets and users belong to.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -112,6 +115,8 @@ pub enum Principal {
     User(UserPrincipal),
     /// A one-key upload credential.
     Upload(UploadPrincipal),
+    /// A request that carried no credentials: reaches only what a bucket policy grants everyone.
+    Anonymous,
 }
 
 impl Principal {
@@ -135,6 +140,12 @@ impl Principal {
             // A one-key credential lists nothing: no user is called "", and it is granted no bucket.
             Self::Upload(upload) => Visible::Reachable {
                 space: upload.parent.space.clone(),
+                user: String::new(),
+                granted: Vec::new(),
+            },
+            // Nobody lists every bucket anonymously; listing is refused before it gets here.
+            Self::Anonymous => Visible::Reachable {
+                space: SpaceName::default_space(),
                 user: String::new(),
                 granted: Vec::new(),
             },
@@ -169,6 +180,8 @@ pub struct BucketResource {
     pub space: SpaceName,
     /// The user who created it, when a user did.
     pub creator: Option<String>,
+    /// Its policy, parsed when the bucket was read; `Err` when the stored text no longer parses.
+    pub policy: Option<Arc<Result<BucketPolicy, PolicyError>>>,
 }
 
 /// A user as the evaluator needs it when somebody manages them: who they are, where, and with what authority.
@@ -218,4 +231,20 @@ pub enum Action {
     ManageUser(UserResource),
     /// Create and remove spaces, set quotas, read every space, change the cluster's layout.
     Operate,
+}
+
+impl Action {
+    /// The bucket the action is on, if it is on one.
+    #[must_use]
+    pub const fn bucket(&self) -> Option<&BucketResource> {
+        match self {
+            Self::DeleteBucket(bucket)
+            | Self::ConfigureBucket(bucket)
+            | Self::ReadBucket(bucket)
+            | Self::ReadObject(bucket)
+            | Self::WriteObject(bucket)
+            | Self::Upload { bucket, .. } => Some(bucket),
+            _ => None,
+        }
+    }
 }

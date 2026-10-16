@@ -2,8 +2,8 @@
 //! refusal is counted in the node's metrics by its reason; a metadata store that cannot answer is not a refusal.
 
 use tessari_s3_core::auth::{
-    AuthError, AuthorizationHeader, PresignedQuery, SignedRequest, Verified, verify_header,
-    verify_presigned,
+    AuthError, AuthorizationHeader, PayloadHash, PresignedQuery, SignedRequest, Verified,
+    parse_payload_hash, verify_header, verify_presigned,
 };
 use tessari_s3_core::authz::Principal;
 use tessari_s3_observability::AuthRefusal;
@@ -12,11 +12,12 @@ use tessari_s3_types::ErrorCode;
 use crate::state::ApiState;
 use crate::{Error, Result};
 
-/// Verifies the request's signature with the secret of the key it names, and answers who signed it. Anonymous
-/// requests are refused: no bucket policy can grant public access yet.
+/// Verifies the request's signature with the secret of the key it names, and answers who signed it. A request with
+/// no credentials is the anonymous principal, which reaches only what a bucket policy grants everyone; its body is
+/// protected by the digest or unsigned stream it declares, and a signed chunk stream without a signature is refused.
 ///
 /// # Errors
-/// `AccessDenied` for an anonymous request, `InvalidArgument` for two authentication forms at once,
+/// `InvalidArgument` for two authentication forms at once,
 /// `InvalidAccessKeyId` for an unknown or disabled key, and the SigV4 refusals.
 pub async fn authenticate(
     state: &ApiState,
@@ -66,10 +67,16 @@ async fn verify(
                 "only one authentication method may be used",
             ),
         )),
-        (None, None) => Err((
-            Some(AuthRefusal::Anonymous),
-            Error::new(ErrorCode::AccessDenied, "anonymous access is not allowed"),
-        )),
+        (None, None) => {
+            let payload = match request.header("x-amz-content-sha256") {
+                None => PayloadHash::Unsigned,
+                Some(declared) => parse_payload_hash(declared).map_err(refused)?,
+            };
+            Ok((
+                Verified::anonymous(payload).map_err(refused)?,
+                Principal::Anonymous,
+            ))
+        }
         (Some(value), None) => {
             if request.header("x-amz-security-token").is_some() {
                 return Err((

@@ -68,6 +68,8 @@ mod objects;
 )]
 mod oidc_provider;
 mod policy;
+mod policy_enforced;
+mod policy_probe;
 mod quota;
 mod quota_window;
 mod reclaim;

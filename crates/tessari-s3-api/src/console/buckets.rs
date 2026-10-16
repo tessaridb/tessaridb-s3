@@ -7,6 +7,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal, SpaceName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
@@ -125,6 +126,7 @@ pub(super) async fn create(
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
         // Refused before it creates anything; named for the match, never for the bucket.
         Principal::Upload(upload) => (upload.parent.space.clone(), None),
+        Principal::Anonymous => (SpaceName::default_space(), None),
     };
     allow(&principal, &Action::CreateBucket(space.clone()))?;
     let created = state
@@ -171,6 +173,7 @@ pub(super) async fn delete(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -179,7 +182,15 @@ pub(super) async fn delete(
     let Delete { reason: given } = json(&headers, &body, "expected reason")?;
     let why = reason(given, true)?;
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::DeleteBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::DeleteBucket,
+        ("s3:DeleteBucket", None),
+    )
+    .await?;
     super::regions::writable(&state).await?;
     let deleted = state.storage().buckets().delete(&name).await?;
     let outcome = match deleted {

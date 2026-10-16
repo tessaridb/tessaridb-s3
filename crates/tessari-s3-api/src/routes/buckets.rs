@@ -33,6 +33,7 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
         // Refused before it creates anything; named for the match, never for the bucket.
         Principal::Upload(upload) => (upload.parent.space.clone(), None),
+        Principal::Anonymous => (SpaceName::default_space(), None),
     };
     // Object Lock is on from the bucket's first instant, with versioning, or never asked for here (S3 ref 08 M5).
     let object_lock = match call

@@ -43,18 +43,18 @@ fn host() -> [(String, String); 1] {
 #[tokio::test]
 async fn a_refused_request_is_counted_by_its_operation_status_and_code() {
     let served = state(NOW, 64);
-    let seen = send(served.clone(), request("GET", "/bucket/key", &host())).await;
+    let seen = send(served.clone(), request("GET", "/", &host())).await;
     assert_eq!(seen.status, 403);
     let text = scrape(served).await;
     assert!(
         text.contains(
-            "s3_requests_total{operation=\"GetObject\",status=\"403\",code=\"AccessDenied\"} 1\n"
+            "s3_requests_total{operation=\"ListBuckets\",status=\"403\",code=\"AccessDenied\"} 1\n"
         ),
         "{text}"
     );
     assert!(
         text.contains(
-            "s3_request_duration_seconds_count{operation=\"GetObject\",size=\"lt_64KiB\"} 1\n"
+            "s3_request_duration_seconds_count{operation=\"ListBuckets\",size=\"lt_64KiB\"} 1\n"
         ),
         "{text}"
     );
@@ -117,7 +117,7 @@ async fn authentication_refusals_are_counted_by_reason() {
     let (target, headers) = signed("AKIDUNKNOWN");
     let unknown = send(at_now.clone(), request("GET", &target, &headers)).await;
     assert_eq!(unknown.code.as_deref(), Some("InvalidAccessKeyId"));
-    let anonymous = send(at_now.clone(), request("GET", "/bucket/key", &host())).await;
+    let anonymous = send(at_now.clone(), request("GET", "/", &host())).await;
     assert_eq!(anonymous.code.as_deref(), Some("AccessDenied"));
     let text = scrape(at_now).await;
     for line in [
@@ -181,7 +181,7 @@ async fn a_full_access_log_queue_drops_the_record_and_still_serves_the_request()
     let _writer = served.audit_writer(1).expect("the access log starts once");
     assert!(served.audit_writer(1).is_none(), "and only once");
     for _ in 0..2 {
-        let seen = send(served.clone(), request("GET", "/bucket/key", &host())).await;
+        let seen = send(served.clone(), request("GET", "/", &host())).await;
         assert_eq!(seen.code.as_deref(), Some("AccessDenied"));
     }
     let text = scrape(served).await;

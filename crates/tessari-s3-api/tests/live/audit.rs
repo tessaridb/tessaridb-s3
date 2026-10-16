@@ -140,7 +140,7 @@ async fn every_request_leaves_one_record_and_no_secret() {
         "a/b.txt",
         ACCESS_KEY,
         bob.id.as_str(),
-        "unauthenticated",
+        "anonymous",
     ] {
         assert!(text.contains(expected), "missing {expected} in {text}");
     }

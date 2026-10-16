@@ -7,6 +7,7 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_core::media::{MediaError, Output, Rule, validate};
@@ -63,10 +64,19 @@ fn refused(error: &MediaError) -> ConsoleError {
 pub(super) async fn get(
     State(state): State<ConsoleState>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
 ) -> Result<Json<MediaRules>, ConsoleError> {
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::ReadBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ReadBucket,
+        ("s3:GetBucketMedia", None),
+    )
+    .await?;
     let found = state
         .storage()
         .buckets()
@@ -91,6 +101,7 @@ pub(super) async fn set(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -101,7 +112,15 @@ pub(super) async fn set(
     } = json(&headers, &body, "expected rules and an optional reason")?;
     let why = reason(given, false)?;
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::ConfigureBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ConfigureBucket,
+        ("s3:PutBucketMedia", None),
+    )
+    .await?;
     let rules = rules
         .into_iter()
         .map(|rule| {
