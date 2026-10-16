@@ -2,6 +2,7 @@
 //! store's passphrase nor any authority in the store opens it. One record per key-encryption key, its 32 bytes in a
 //! `SECRET` field. Every read of it is a `REVEAL`, which the engine records before it answers.
 
+use tessari_s3_constants::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS};
 use tessari_s3_infrastructure::tessaridb::{
     MetaError, MetaPool, RecordId, RecordRef, RefusalClass, SealState, Value, VaultLink,
 };
@@ -18,7 +19,6 @@ const VAULT: &str = "s3_keys";
 /// Its fields; re-run on every open, so a node that stopped between declaring the vault and its field converges.
 const FIELDS: &str = "DEFINE FIELD IF NOT EXISTS key ON s3_keys TYPE bytes SECRET;";
 /// Times one open is tried when another node seals the vault between this one's unseal and its reads.
-const OPEN_ATTEMPTS: usize = 3;
 /// Most keys read in one open: one listing page.
 const MAX_KEYS: u32 = 10_000;
 
@@ -231,21 +231,28 @@ impl KeyVault for TessariKeys {
         passphrase: &Passphrase,
         first: &Zeroizing<[u8; 32]>,
     ) -> Result<Vec<StoredKey>> {
-        for _ in 0..OPEN_ATTEMPTS {
+        let mut attempt: u32 = 1;
+        loop {
             let mut link = self.pool.vault_link(VAULT).await?;
             match open_once(&mut link, passphrase, first).await {
-                // Another node sealed it mid-read, or two nodes declared or created at once: open again.
+                // Another node sealed it mid-read, or the declaration or the first key lost to another catalog
+                // commit — which contends across the whole metadata store: open again after a wait, and when every
+                // attempt lost, answer what the last one met.
                 Err(
-                    Error::KeysSealed
+                    error @ (Error::KeysSealed
                     | Error::Meta(MetaError::Refused {
                         class: Some(RefusalClass::Retry),
                         ..
-                    }),
-                ) => {}
+                    })),
+                ) if attempt < KEYS_OPEN_ATTEMPTS => {
+                    tracing::debug!(attempt, error = %error, "the keys vault was contended; opening again");
+                    tokio::time::sleep(crate::backoff::backoff(attempt, KEYS_OPEN_BACKOFF_MS))
+                        .await;
+                    attempt = attempt.saturating_add(1);
+                }
                 answered => return answered,
             }
         }
-        Err(Error::KeysSealed)
     }
 
     async fn create(

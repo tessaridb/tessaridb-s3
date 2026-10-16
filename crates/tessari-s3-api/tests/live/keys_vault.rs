@@ -109,3 +109,28 @@ async fn two_nodes_unsealing_a_new_store_at_once_hold_one_key_and_a_wrong_passph
     assert!(matches!(one.keys().ring(), Err(Error::KeysSealed)));
     assert!(two.keys().ring().is_ok());
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn many_stores_opening_their_keys_vaults_at_once_all_open() {
+    let _why = IGNORED;
+    // Declaring a vault is a catalog commit, and catalog commits contend across the whole metadata store: eight
+    // stores declaring theirs at the same moment lose to one another and must each try again.
+    let mut stores = Vec::new();
+    for _ in 0..8 {
+        stores.push(prepared(&live_config(test_node(), None, &scratch_dir())).await);
+    }
+    let opened = futures_util::future::join_all(
+        stores
+            .iter()
+            .map(|storage| async { storage.keys().unseal(&passphrase(RIGHT)).await }),
+    )
+    .await;
+    for (store, outcome) in opened.into_iter().enumerate() {
+        let outcome = outcome.map_err(|error| error.to_string());
+        assert!(
+            matches!(outcome, Ok(KeyState::Unsealed { .. })),
+            "store {store}: {outcome:?}"
+        );
+    }
+}
