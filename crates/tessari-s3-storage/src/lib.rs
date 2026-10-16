@@ -6,6 +6,7 @@ mod backoff;
 pub mod buckets;
 pub mod cluster;
 pub mod data;
+pub mod encryption;
 pub mod erasure;
 mod error;
 pub mod identities;
