@@ -54,6 +54,8 @@ mod namespaces_dropped;
 mod no_bytes;
 mod notifications;
 mod notify_delivery;
+mod object_lock;
+mod object_lock_yielding;
 mod objects;
 #[path = "../wire/oidc_provider.rs"]
 #[allow(
@@ -78,6 +80,8 @@ mod replication_tasks;
 )]
 mod signer;
 mod spaces;
+mod tagging;
+mod tagging_carried;
 mod upload_keys;
 mod uploads;
 mod usage;

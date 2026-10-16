@@ -15,7 +15,11 @@ export function pairs(caption: string, values: Readonly<Record<string, string>>)
     : table(caption, ["Name", "Value"], entries.map(([name, value]) => row(mono(name), mono(value))));
 }
 
-/** Type, size, ETag, age and how it was uploaded. */
+/** What keeps the version: its retention's mode and end, or that none does. */
+const retained = (detail: Detail): string =>
+  detail.retention === null ? "None" : `${detail.retention.mode === "COMPLIANCE" ? "Compliance" : "Governance"} until ${moment(detail.retention.until)}`;
+
+/** Type, size, ETag, age, how it was uploaded, and what Object Lock keeps it under. */
 export function facts(detail: Detail): HTMLElement {
   const type = detail.headers["content-type"] ?? null;
   return el(
@@ -31,5 +35,9 @@ export function facts(detail: Detail): HTMLElement {
     el("dd", {}, moment(detail.modified)),
     el("dt", {}, "Upload"),
     el("dd", {}, detail.parts === null ? "Single request" : `Multipart, ${detail.parts} parts`),
+    el("dt", {}, "Retention"),
+    el("dd", {}, retained(detail)),
+    el("dt", {}, "Legal hold"),
+    el("dd", {}, detail.legalHold ? "On" : "Off"),
   );
 }

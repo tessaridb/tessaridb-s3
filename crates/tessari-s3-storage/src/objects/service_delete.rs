@@ -18,6 +18,7 @@ async fn remove_named(
     key: &ObjectKey,
     version_id: &str,
     removal: Removal,
+    bypass: bool,
 ) -> Result<VersionRemoved> {
     let Some(named) = parse(version_id) else {
         return Ok(VersionRemoved::Malformed);
@@ -29,8 +30,11 @@ async fn remove_named(
         else {
             return Ok(VersionRemoved::Absent);
         };
+        if target.kept.keeps(bypass) {
+            return Ok(VersionRemoved::Locked);
+        }
         if repository
-            .remove_version(bucket, key, &target, removal)
+            .remove_version(bucket, key, &target, removal, bypass)
             .await?
         {
             return Ok(VersionRemoved::Done {
@@ -42,7 +46,8 @@ async fn remove_named(
 }
 
 impl ObjectService {
-    /// Removes each entry — the current object of a key, or the version it names — a few at a time, one outcome per
+    /// Removes each entry — the current object of a key, or the version it names (`bypass` lets a GOVERNANCE retention
+    /// go; the caller has checked who may ask) — a few at a time, one outcome per
     /// entry in order; `None` when the bucket does not exist. A missing key or version is removed successfully, as in
     /// S3.
     ///
@@ -52,6 +57,7 @@ impl ObjectService {
         &self,
         bucket: &BucketName,
         entries: &[(ObjectKey, Option<String>)],
+        bypass: bool,
     ) -> Result<Option<Vec<Result<Deleted>>>> {
         use futures_util::StreamExt;
         let Some(incarnation) = self.repository.incarnation(bucket).await? else {
@@ -64,11 +70,16 @@ impl ObjectService {
             let bucket = bucket.clone();
             async move {
                 match version {
-                    Some(version) => {
-                        remove_named(&repository, &bucket, &key, &version, Removal::Request)
-                            .await
-                            .map(Deleted::Version)
-                    }
+                    Some(version) => remove_named(
+                        &repository,
+                        &bucket,
+                        &key,
+                        &version,
+                        Removal::Request,
+                        bypass,
+                    )
+                    .await
+                    .map(Deleted::Version),
                     None => versions::remove_key(&repository, &bucket, &key, incarnation)
                         .await
                         .map(|marker| Deleted::Current { marker }),
@@ -95,7 +106,8 @@ impl ObjectService {
     }
 
     /// Permanently removes the version of `bucket/key` whose id is `version_id`; when it was the newest, the next newest
-    /// becomes the current object. Read and removed again while the key keeps moving under it.
+    /// becomes the current object. Read and removed again while the key keeps moving under it. A version Object Lock
+    /// keeps is [`VersionRemoved::Locked`]; `bypass` lets a GOVERNANCE retention go (the caller has checked who may).
     ///
     /// # Errors
     /// The metadata store's refusal or outage; [`Error::Contended`] when every attempt lost to another writer.
@@ -104,8 +116,9 @@ impl ObjectService {
         bucket: &BucketName,
         key: &ObjectKey,
         version_id: &str,
+        bypass: bool,
     ) -> Result<VersionRemoved> {
-        self.remove_version_for(bucket, key, version_id, Removal::Request)
+        self.remove_version_for(bucket, key, version_id, Removal::Request, bypass)
             .await
     }
 
@@ -120,7 +133,7 @@ impl ObjectService {
         key: &ObjectKey,
         version_id: &str,
     ) -> Result<VersionRemoved> {
-        self.remove_version_for(bucket, key, version_id, Removal::Lifecycle)
+        self.remove_version_for(bucket, key, version_id, Removal::Lifecycle, false)
             .await
     }
 
@@ -130,6 +143,7 @@ impl ObjectService {
         key: &ObjectKey,
         version_id: &str,
         removal: Removal,
+        bypass: bool,
     ) -> Result<VersionRemoved> {
         if parse(version_id).is_none() {
             return Ok(VersionRemoved::Malformed);
@@ -137,7 +151,7 @@ impl ObjectService {
         if self.repository.incarnation(bucket).await?.is_none() {
             return Ok(VersionRemoved::NoSuchBucket);
         }
-        remove_named(&self.repository, bucket, key, version_id, removal).await
+        remove_named(&self.repository, bucket, key, version_id, removal, bypass).await
     }
 
     /// Removes the object at `bucket/key` only while its ETag is `etag` — the check and the delete are one step.

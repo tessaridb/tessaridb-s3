@@ -39,6 +39,8 @@ export async function describe(screen: Screen, pane: HTMLElement, bucket: string
     pairs("Stored headers", detail.headers),
     el("h3", {}, "User metadata"),
     pairs("User metadata", detail.metadata),
+    el("h3", {}, "Tags"),
+    pairs("Tags", detail.tags),
     el("h3", {}, "Checksums"),
     pairs("Stored checksums", detail.checksums),
   );

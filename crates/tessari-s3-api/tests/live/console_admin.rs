@@ -240,6 +240,7 @@ async fn a_space_admin_disables_and_grants_only_within_its_ceiling() {
             "us-east-1",
             &space("beta"),
             None,
+            false,
         )
         .await
         .expect("created");

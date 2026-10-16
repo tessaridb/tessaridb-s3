@@ -34,6 +34,9 @@ fn write(operation: Operation, method: &'static str, path: &'static str) -> Writ
 }
 
 const DELETE: &str = "<Delete><Object><Key>zzz</Key></Object></Delete>";
+const TAGGING: &str = "<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
+const RETENTION: &str = "<Retention><Mode>GOVERNANCE</Mode>\
+<RetainUntilDate>2999-01-01T00:00:00Z</RetainUntilDate></Retention>";
 
 fn source() -> Vec<(&'static str, String)> {
     vec![("x-amz-copy-source", "/source/src".to_owned())]
@@ -88,6 +91,22 @@ fn writes(upload: &str, first_part: &str, spare: &str) -> Vec<Write> {
             ..write(Operation::DeleteObjects, "POST", "/full")
         },
         write(Operation::DeleteObject, "DELETE", "/full/zzz"),
+        Write {
+            query: vec![("tagging", None)],
+            body: TAGGING.as_bytes().to_vec(),
+            ..write(Operation::PutObjectTagging, "PUT", "/full/a")
+        },
+        Write {
+            query: vec![("tagging", None)],
+            ..write(Operation::DeleteObjectTagging, "DELETE", "/full/a")
+        },
+        // Retention needs a bucket with Object Lock, as full as `full`.
+        Write {
+            query: vec![("retention", None)],
+            headers: vec![("content-md5", md5_of(RETENTION))],
+            body: RETENTION.as_bytes().to_vec(),
+            ..write(Operation::PutObjectRetention, "PUT", "/kept/a")
+        },
         Write {
             query: vec![("uploadId", Some(spare.to_owned()))],
             ..write(Operation::AbortMultipartUpload, "DELETE", "/full/spare")
@@ -177,6 +196,18 @@ async fn a_full_bucket_refuses_every_adding_write_and_no_other() {
     let first_part = first.headers["etag"].to_str().expect("etag").to_owned();
     ok(&state, "PUT", "/full/a", b"0123456789").await;
     limit(&state, "full", bytes(10)).await;
+    let kept = call_with(
+        &state,
+        "PUT",
+        "/kept",
+        vec![],
+        vec![("x-amz-bucket-object-lock-enabled", "true")],
+        b"",
+    )
+    .await;
+    assert_eq!(kept.status, 200, "{}", kept.body);
+    ok(&state, "PUT", "/kept/a", b"0123456789").await;
+    limit(&state, "kept", bytes(10)).await;
     measure(&state).await;
 
     let rows = writes(&upload, &first_part, &spare);

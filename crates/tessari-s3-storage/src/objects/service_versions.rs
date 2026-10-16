@@ -65,6 +65,7 @@ pub(super) fn plan(head: &Head, key: &ObjectKey, delete: bool) -> Result<Version
         local: head.local,
         replicate,
         replica: false,
+        lock_default: head.lock_default,
     })
 }
 
@@ -108,6 +109,7 @@ mod tests {
             current: false,
             local: false,
             replication: None,
+            lock_default: None,
         }
     }
 

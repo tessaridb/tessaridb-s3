@@ -74,6 +74,11 @@ DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
+DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;
+DEFINE EVENT OR REPLACE object_lock_kept ON buckets FOR UPDATE \
+WHEN $before.object_lock != NONE AND ($after.object_lock = NONE OR $after.versioning != 'Enabled') \
+THEN THROW 'ObjectLockKept: a bucket with Object Lock keeps it, and keeps versioning enabled';
 DEFINE INDEX IF NOT EXISTS by_space ON buckets FIELDS space_name;
 DEFINE TOPIC IF NOT EXISTS console_actions RETAIN 365d;
 DEFINE TABLE IF NOT EXISTS spaces (name string REQUIRED, created datetime REQUIRED);
@@ -155,6 +160,25 @@ UPSERT reclaims:$old SET data = $old, due = time::now() + duration::from_secs($r
 DEFINE EVENT IF NOT EXISTS version_parts_released ON versions FOR UPDATE, DELETE \
 WHEN $before.upload != NONE AND $before.upload != $after.upload \
 THEN { LET $old = $before.upload; DELETE FROM parts WHERE upload = $old LIMIT ALL; };
+DEFINE FIELD IF NOT EXISTS lock_mode ON versions TYPE 'COMPLIANCE' | 'GOVERNANCE';
+DEFINE FIELD IF NOT EXISTS retain_until ON versions TYPE datetime;
+DEFINE FIELD IF NOT EXISTS legal_hold ON versions TYPE bool;
+DEFINE FIELD IF NOT EXISTS lock_bypass ON versions TYPE bool;
+DEFINE FIELD IF NOT EXISTS tags ON versions TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
+DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \
+WHEN ($before.legal_hold ?? false) OR ($before.retain_until != NONE AND $before.retain_until > time::now() \
+ AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false)) \
+THEN THROW 'ObjectLocked: this version is under retention or a legal hold';
+DEFINE EVENT OR REPLACE locked_change ON versions FOR UPDATE \
+WHEN ($before.retain_until != NONE AND $before.retain_until > time::now() \
+  AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false) \
+  AND ($after.retain_until = NONE OR $after.retain_until < $before.retain_until \
+   OR ($before.lock_mode = 'COMPLIANCE' AND $after.lock_mode != 'COMPLIANCE') \
+   OR $after.data != $before.data OR $after.upload != $before.upload)) \
+ OR (($before.legal_hold ?? false) AND ($after.data != $before.data OR $after.upload != $before.upload)) \
+THEN THROW 'ObjectLocked: this version is under retention or a legal hold';
 DEFINE TABLE IF NOT EXISTS pending (\
  upload uuid REQUIRED, bucket_name string REQUIRED, key string REQUIRED, incarnation uuid REQUIRED,\
  initiated datetime REQUIRED, position string REQUIRED);

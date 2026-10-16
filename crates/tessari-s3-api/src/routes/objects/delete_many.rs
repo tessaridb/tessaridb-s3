@@ -187,7 +187,11 @@ pub(crate) async fn delete_many(call: &Call<'_>, body: Body) -> Result<Response<
         .state
         .storage()
         .objects()
-        .delete_many(bucket, &entries)
+        .delete_many(
+            bucket,
+            &entries,
+            crate::routes::retention::bypass_asked(call),
+        )
         .await?
         .ok_or_else(|| {
             Error::new(
@@ -257,6 +261,9 @@ fn report(
                 "the specified bucket does not exist",
             ),
         ),
+        Ok(Deleted::Version(VersionRemoved::Locked)) => {
+            error(out, crate::routes::retention::locked());
+        }
         Ok(_) if quiet => {}
         Ok(Deleted::Current { marker: added }) => {
             let added = added.as_deref().map(marker).unwrap_or_default();

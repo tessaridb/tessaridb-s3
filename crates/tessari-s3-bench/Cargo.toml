@@ -1,9 +1,10 @@
 [package]
 name = "tessari-s3-bench"
-version.workspace = true
+version = "0.1.0-beta"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
 publish.workspace = true
 
 [[bin]]

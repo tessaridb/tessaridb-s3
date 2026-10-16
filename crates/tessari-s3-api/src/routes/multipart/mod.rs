@@ -95,10 +95,19 @@ fn key_text(key: &ObjectKey) -> Result<String> {
 /// `POST /{bucket}/{key}?uploads`.
 pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
+    // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
+    // carried yet, and are refused rather than dropped.
+    if headers.lock.asked {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "Object Lock headers on a multipart upload are not implemented; the bucket's default retention applies",
+        ));
+    }
     let (checksum_algorithm, checksum_type) = declared_checksum(call)?;
     let upload = NewUpload {
         headers: headers.system,
         metadata: headers.metadata,
+        tags: headers.tags,
         checksum_algorithm,
         checksum_type,
     };

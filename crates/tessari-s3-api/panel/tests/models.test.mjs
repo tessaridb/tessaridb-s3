@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readBuckets, readCapabilities, readFailedRenditions, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
+import { readBuckets, readCapabilities, readDetail, readFailedRenditions, readCluster, readIssued, readListing, readSpaces, readStatus, readUploadKey, readUsage, readUsers } from "../src/models.ts";
 
 const drive = { capacity: 1000, free: 400, available: 300 };
 const status = (members, own = drive) => ({ version: "0.0.0", node: "n1", region: "us-east-1", erasure: "2+1", members, heal_backlog: { listed: 0, more: false, at_risk: 0 }, replication: null, drive: own });
@@ -150,4 +150,20 @@ test("replication is read as its three counts, or as nothing to show", () => {
   assert.equal(readStatus(status(null))?.replication, null);
   assert.equal(readStatus({ ...status(null), replication: { backlog: 1, in_flight: 0 } }), null);
   assert.equal(readStatus({ ...status(null), replication: undefined }), null, "the server always says it, null when there is none");
+});
+
+test("an object's detail carries its tags, its retention and its legal hold", () => {
+  const detail = { key: "doc.txt", size: 5, etag: '"e"', modified: "2026-10-16T10:00:00.000Z", headers: {}, metadata: {}, checksums: {}, parts: null };
+  const kept = { ...detail, tags: { team: "blue" }, retention: { mode: "GOVERNANCE", until: "2026-10-17T10:00:00.000Z" }, legal_hold: true };
+  assert.deepEqual(readDetail(kept), {
+    ...detail,
+    tags: { team: "blue" },
+    retention: { mode: "GOVERNANCE", until: "2026-10-17T10:00:00.000Z" },
+    legalHold: true,
+  });
+  assert.deepEqual(readDetail({ ...kept, retention: null, legal_hold: false })?.retention, null, "no retention is null");
+  assert.equal(readDetail(detail), null, "the lock and the tags are always sent");
+  assert.equal(readDetail({ ...kept, retention: { mode: "FOREVER", until: "2026-10-17T10:00:00.000Z" } }), null, "a mode is GOVERNANCE or COMPLIANCE");
+  assert.equal(readDetail({ ...kept, legal_hold: "ON" }), null, "the hold is a boolean");
+  assert.equal(readDetail({ ...kept, tags: { team: 1 } }), null, "a tag value is text");
 });

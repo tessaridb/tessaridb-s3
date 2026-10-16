@@ -111,6 +111,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
             "a replica write carries no condition",
         ));
     }
+    crate::routes::retention::admit_lock(call, &headers.lock, &headers.integrity).await?;
     let length = declared_length(call)?;
     if length > SINGLE_PUT_MAX {
         return Err(Error::new(
@@ -160,12 +161,14 @@ async fn commit(
         etag: etag.clone(),
         headers: headers.system,
         metadata: headers.metadata,
+        tags: headers.tags,
         checksums: [(
             algorithm.name().to_owned(),
             digests.value(algorithm).to_owned(),
         )]
         .into(),
         content,
+        lock: headers.lock.lock(),
     };
     let bucket = call.bucket()?;
     let objects = call.state.storage().objects();

@@ -196,7 +196,7 @@ async fn stored_version(call: &Call<'_>, key: &ObjectKey, version: &str) -> Resu
         .get_version(call.bucket()?, key, version)
         .await?
     {
-        VersionRead::Object(object) => Ok(object),
+        VersionRead::Object(object) => Ok(*object),
         VersionRead::Marker { modified } => Err(Error::new(
             ErrorCode::MethodNotAllowed,
             "The specified method is not allowed against this resource.",
@@ -238,6 +238,13 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     }
     if let Some(status) = &object.replication {
         set(headers, "x-amz-replication-status", status);
+    }
+    if !object.tags.is_empty() {
+        set(
+            headers,
+            "x-amz-tagging-count",
+            &object.tags.len().to_string(),
+        );
     }
     let checksum_mode = call
         .headers

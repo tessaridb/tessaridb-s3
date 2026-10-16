@@ -58,14 +58,21 @@ impl BucketRepository for TessariBuckets {
         region: &str,
         space: &SpaceName,
         creator: Option<&str>,
+        object_lock: bool,
     ) -> Result<Inserted> {
         let mut parameters = name_param(name);
         parameters.push(("region".to_owned(), Value::String(region.to_owned())));
         parameters.push(("space".to_owned(), Value::String(space.as_str().to_owned())));
         let creator = creator.map_or(Value::None, |creator| Value::String(creator.to_owned()));
         parameters.push(("creator".to_owned(), creator));
-        let script = "CREATE buckets:$name = { name: $name, created: time::now(), region: $region, \
-                      incarnation: rand::uuid(), space_name: $space, creator: $creator } RETURN AFTER;";
+        let script = if object_lock {
+            "CREATE buckets:$name = { name: $name, created: time::now(), region: $region, \
+             incarnation: rand::uuid(), space_name: $space, creator: $creator, versioning: 'Enabled', \
+             object_lock: {} } RETURN AFTER;"
+        } else {
+            "CREATE buckets:$name = { name: $name, created: time::now(), region: $region, \
+             incarnation: rand::uuid(), space_name: $space, creator: $creator } RETURN AFTER;"
+        };
         match self.pool.run(script, parameters).await {
             Ok(answers) => match single(answers)? {
                 Some(value) => Ok(Inserted::Created(Box::new(BucketEntity::from_value(
@@ -96,6 +103,28 @@ impl BucketRepository for TessariBuckets {
         parameters.push(("state".to_owned(), Value::String(state.to_owned())));
         self.pool
             .run("UPDATE buckets:$name SET versioning = $state;", parameters)
+            .await?;
+        Ok(())
+    }
+
+    async fn set_object_lock(&self, name: &BucketName, configuration: Value) -> Result<bool> {
+        let mut parameters = name_param(name);
+        parameters.push(("configuration".to_owned(), configuration));
+        let answers = self
+            .pool
+            .run(
+                "UPDATE buckets:$name SET object_lock = $configuration WHERE versioning = 'Enabled' RETURN AFTER;",
+                parameters,
+            )
+            .await?;
+        Ok(single(answers)?.is_some())
+    }
+
+    async fn set_tags(&self, name: &BucketName, tags: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("tags".to_owned(), tags.unwrap_or(Value::None)));
+        self.pool
+            .run("UPDATE buckets:$name SET tags = $tags;", parameters)
             .await?;
         Ok(())
     }

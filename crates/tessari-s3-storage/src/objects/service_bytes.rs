@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::ObjectService;
 use crate::objects::{
-    Content, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
+    Content, Lock, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
 };
 use crate::{Error, Result};
 
@@ -28,7 +28,7 @@ impl ObjectService {
     ) -> Result<Option<StoredObject>> {
         Ok(match version_id {
             Some(version) => match self.get_version(bucket, key, version).await? {
-                VersionRead::Object(object) => Some(object),
+                VersionRead::Object(object) => Some(*object),
                 _ => None,
             },
             None => self.get(bucket, key).await?.ok().flatten(),
@@ -138,12 +138,14 @@ impl ObjectService {
             etag: format!("\"{}\"", uploaded.digests.md5_hex),
             headers: BTreeMap::from([("content-type".to_owned(), content_type.to_owned())]),
             metadata: BTreeMap::new(),
+            tags: BTreeMap::new(),
             checksums: BTreeMap::from([(
                 algorithm.name().to_owned(),
                 uploaded.digests.value(algorithm).to_owned(),
             )]),
             content: Content::Data(uploaded.id),
             copied: false,
+            lock: Lock::default(),
         };
         self.put(bucket, key, &object, &WriteCondition::None).await
     }

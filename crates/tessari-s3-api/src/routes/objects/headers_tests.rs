@@ -56,15 +56,11 @@ fn system_headers_and_metadata_are_kept_and_aws_chunked_is_removed() {
 #[test]
 fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
     assert_eq!(
-        refused(&[("x-amz-tagging", "a=b")]),
-        ErrorCode::NotImplemented
-    );
-    assert_eq!(
         refused(&[("x-amz-server-side-encryption", "AES256")]),
         ErrorCode::NotImplemented
     );
     assert_eq!(
-        refused(&[("x-amz-object-lock-mode", "GOVERNANCE")]),
+        refused(&[("x-amz-object-lock-event-hold", "ON")]),
         ErrorCode::NotImplemented
     );
     assert_eq!(
@@ -178,4 +174,81 @@ fn an_upload_declaring_its_algorithm_and_type_declares_no_checksum_value() {
     ]))
     .expect("an upload's declaration is not a checksum header");
     assert_eq!(read.integrity.checksum, None);
+}
+
+#[test]
+fn object_lock_headers_ask_for_a_retention_and_a_hold_or_are_refused_as_invalid() {
+    use tessari_s3_core::object_lock::Mode;
+
+    let asked = read_put_headers(&headers(&[
+        ("x-amz-object-lock-mode", "COMPLIANCE"),
+        (
+            "x-amz-object-lock-retain-until-date",
+            "2999-01-01T00:00:00Z",
+        ),
+        ("x-amz-object-lock-legal-hold", "ON"),
+    ]))
+    .expect("reads")
+    .lock;
+    assert_eq!(
+        asked.retention.map(|(mode, _)| mode),
+        Some(Mode::Compliance)
+    );
+    assert!(asked.legal_hold && asked.asked);
+    let off = read_put_headers(&headers(&[("x-amz-object-lock-legal-hold", "OFF")]))
+        .expect("reads")
+        .lock;
+    assert!(!off.legal_hold && off.asked && off.retention.is_none());
+    assert!(!read_put_headers(&headers(&[])).expect("reads").lock.asked);
+    for pairs in [
+        &[("x-amz-object-lock-mode", "GOVERNANCE")][..],
+        &[(
+            "x-amz-object-lock-retain-until-date",
+            "2999-01-01T00:00:00Z",
+        )],
+        &[
+            ("x-amz-object-lock-mode", "FOREVER"),
+            (
+                "x-amz-object-lock-retain-until-date",
+                "2999-01-01T00:00:00Z",
+            ),
+        ],
+        &[
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+            (
+                "x-amz-object-lock-retain-until-date",
+                "2001-01-01T00:00:00Z",
+            ),
+        ],
+        &[("x-amz-object-lock-legal-hold", "MAYBE")],
+    ] {
+        assert_eq!(refused(pairs), ErrorCode::InvalidArgument, "{pairs:?}");
+    }
+}
+
+#[test]
+fn the_tagging_header_is_read_as_tags_or_refused_as_an_invalid_tag() {
+    let read = read_put_headers(&headers(&[("x-amz-tagging", "team=blue&tier=gold%20plus")]))
+        .expect("reads");
+    assert_eq!(
+        read.tags
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<Vec<_>>(),
+        [("team", "blue"), ("tier", "gold plus")]
+    );
+    assert!(
+        read_put_headers(&headers(&[]))
+            .expect("reads")
+            .tags
+            .is_empty()
+    );
+    let eleven: Vec<String> = (0..11).map(|n| format!("k{n}=v")).collect();
+    for header in [eleven.join("&").as_str(), "aws:x=1", "a=%Z1", "a=1&a=2"] {
+        assert_eq!(
+            refused(&[("x-amz-tagging", header)]),
+            ErrorCode::InvalidTag,
+            "{header}"
+        );
+    }
 }

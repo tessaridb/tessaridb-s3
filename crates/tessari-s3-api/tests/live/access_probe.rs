@@ -52,6 +52,13 @@ const REPLICATION_BODY: &[u8] = b"<ReplicationConfiguration><Role>r</Role><Rule>
 </ReplicationConfiguration>";
 const VERSIONING_BODY: &[u8] =
     b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
+const LOCK_BODY: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled>\
+</ObjectLockConfiguration>";
+const RETENTION_BODY: &[u8] = b"<Retention><Mode>GOVERNANCE</Mode>\
+<RetainUntilDate>2999-01-01T00:00:00Z</RetainUntilDate></Retention>";
+const HOLD_BODY: &[u8] = b"<LegalHold><Status>ON</Status></LegalHold>";
+const TAGGING_BODY: &[u8] =
+    b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
 const COMPLETE_BODY: &[u8] =
     b"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"x\"</ETag></Part></CompleteMultipartUpload>";
@@ -176,6 +183,87 @@ fn table(upload: &str) -> Vec<Probe> {
             "/ann-photos/a.txt",
             &[("tagging", None)],
         ),
+        probe(
+            Operation::GetBucketTagging,
+            "GET",
+            "/ann-photos",
+            &[("tagging", None)],
+        ),
+        Probe {
+            body: TAGGING_BODY,
+            ..probe(
+                Operation::PutBucketTagging,
+                "PUT",
+                "/ann-photos",
+                &[("tagging", None)],
+            )
+        },
+        probe(
+            Operation::DeleteBucketTagging,
+            "DELETE",
+            "/ann-photos",
+            &[("tagging", None)],
+        ),
+        Probe {
+            body: TAGGING_BODY,
+            ..probe(
+                Operation::PutObjectTagging,
+                "PUT",
+                "/ann-photos/a.txt",
+                &[("tagging", None)],
+            )
+        },
+        probe(
+            Operation::DeleteObjectTagging,
+            "DELETE",
+            "/ann-photos/a.txt",
+            &[("tagging", None)],
+        ),
+        probe(
+            Operation::GetObjectLockConfiguration,
+            "GET",
+            "/ann-photos",
+            &[("object-lock", None)],
+        ),
+        Probe {
+            body: LOCK_BODY,
+            ..probe(
+                Operation::PutObjectLockConfiguration,
+                "PUT",
+                "/ann-photos",
+                &[("object-lock", None)],
+            )
+        },
+        probe(
+            Operation::GetObjectRetention,
+            "GET",
+            "/ann-photos/a.txt",
+            &[("retention", None)],
+        ),
+        Probe {
+            body: RETENTION_BODY,
+            ..probe(
+                Operation::PutObjectRetention,
+                "PUT",
+                "/ann-photos/a.txt",
+                &[("retention", None)],
+            )
+        },
+        probe(
+            Operation::GetObjectLegalHold,
+            "GET",
+            "/ann-photos/a.txt",
+            &[("legal-hold", None)],
+        ),
+        Probe {
+            body: HOLD_BODY,
+            ..probe(
+                Operation::PutObjectLegalHold,
+                "PUT",
+                "/ann-photos/a.txt",
+                &[("legal-hold", None)],
+            )
+        },
         Probe {
             body: b"new",
             ..probe(Operation::PutObject, "PUT", "/ann-photos/b.txt", &[])

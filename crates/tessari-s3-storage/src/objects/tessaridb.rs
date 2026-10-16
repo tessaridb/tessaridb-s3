@@ -27,8 +27,12 @@ mod replica;
 mod version_delete;
 #[path = "tessaridb_version_list.rs"]
 mod version_list;
+#[path = "tessaridb_version_lock.rs"]
+mod version_lock;
 #[path = "tessaridb_version_read.rs"]
 mod version_read;
+#[path = "tessaridb_version_tags.rs"]
+mod version_tags;
 
 pub(crate) use version_read::Found;
 #[path = "tessaridb_versions.rs"]
@@ -65,6 +69,12 @@ fn is_condition_refusal(error: &MetaError) -> bool {
 /// first — the store answers that collision `retry` (TessariDB ref 05 M6), and the caller plans the write again.
 fn is_lost_or_refused(error: &MetaError) -> bool {
     is_condition_refusal(error) || error.is_class(RefusalClass::Retry)
+}
+
+/// The refusal of the store's own Object Lock events (`locked_release`, `locked_change`): the version became held or
+/// retained after it was read, so the caller reads it again and answers that it is kept (ADR-0016).
+fn is_lock_refusal(error: &MetaError) -> bool {
+    matches!(error, MetaError::Refused { message, class: Some(RefusalClass::Invalid) } if message.contains("ObjectLocked:"))
 }
 
 impl ObjectRepository for TessariObjects {

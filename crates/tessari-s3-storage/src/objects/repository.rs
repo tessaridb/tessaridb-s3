@@ -49,6 +49,8 @@ pub(crate) struct Head {
     pub(crate) local: bool,
     /// The bucket's replication configuration; `None` while it has none.
     pub(crate) replication: Option<tessari_s3_core::replication::Configuration>,
+    /// The bucket's default Object Lock retention, given to a version written without one.
+    pub(crate) lock_default: Option<tessari_s3_core::object_lock::DefaultRetention>,
 }
 
 /// The version a write or a delete adds.
@@ -88,6 +90,8 @@ pub(crate) struct VersionPlan {
     /// Whether the version this change adds is a replica another bucket sent: it keeps the id it was sent with, is
     /// stamped `REPLICA`, and is never replicated again.
     pub(crate) replica: bool,
+    /// The bucket's default Object Lock retention, given to the object version this change adds unless it names one.
+    pub(crate) lock_default: Option<tessari_s3_core::object_lock::DefaultRetention>,
 }
 
 impl VersionPlan {

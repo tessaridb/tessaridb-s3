@@ -4,6 +4,7 @@
 use tessari_s3_infrastructure::tessaridb::{MetaPool, Value};
 use tessari_s3_types::{BucketName, ObjectKey, Timestamp};
 
+use super::super::model_lock::Lock;
 use super::super::repository::VersionPlan;
 use super::{id, is_lost_or_refused, versions};
 use crate::Result;
@@ -60,7 +61,7 @@ pub(super) async fn remove(
     } else {
         ""
     };
-    let changes = versions::statements(bucket, key, incarnation, plan, false)?;
+    let changes = versions::statements(bucket, key, incarnation, plan, false, &Lock::default())?;
     parameters.extend(changes.parameters);
     let script = format!(
         "BEGIN; LET $now = time::now(); {guard}{stamp}DELETE objects:$id; {}{}",

@@ -14,9 +14,12 @@ mod lifecycle;
 pub mod listing;
 pub mod multipart;
 mod notification;
+mod object_lock;
 pub mod objects;
 mod quota;
 mod replication;
+mod retention;
+pub(crate) mod tagging;
 mod versioning;
 mod xml_tree;
 
@@ -43,6 +46,9 @@ pub(crate) async fn route(
             | Operation::GetBucketNotificationConfiguration
             | Operation::GetBucketReplication
             | Operation::DeleteBucketReplication
+            | Operation::GetObjectLockConfiguration
+            | Operation::GetBucketTagging
+            | Operation::DeleteBucketTagging
     ) {
         buckets::resident(call).await?;
     }
@@ -69,7 +75,22 @@ pub(crate) async fn route(
         Operation::CopyObject => objects::copy(call, objects::key(call)?).await,
         Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
-        Operation::GetObjectTagging => objects::tagging(call, objects::key(call)?).await,
+        Operation::GetObjectTagging => tagging::get_object(call, objects::key(call)?).await,
+        Operation::PutObjectTagging => tagging::put_object(call, objects::key(call)?, body).await,
+        Operation::DeleteObjectTagging => tagging::delete_object(call, objects::key(call)?).await,
+        Operation::GetBucketTagging => tagging::get_bucket(call).await,
+        Operation::PutBucketTagging => tagging::put_bucket(call, body).await,
+        Operation::DeleteBucketTagging => tagging::delete_bucket(call).await,
+        Operation::GetObjectLockConfiguration => object_lock::get(call).await,
+        Operation::PutObjectLockConfiguration => object_lock::put(call, body).await,
+        Operation::GetObjectRetention => retention::get_retention(call, objects::key(call)?).await,
+        Operation::PutObjectRetention => {
+            retention::put_retention(call, objects::key(call)?, body).await
+        }
+        Operation::GetObjectLegalHold => retention::get_legal_hold(call, objects::key(call)?).await,
+        Operation::PutObjectLegalHold => {
+            retention::put_legal_hold(call, objects::key(call)?, body).await
+        }
         Operation::DeleteObject => objects::delete(call, objects::key(call)?).await,
         Operation::DeleteObjects => objects::delete_many(call, body).await,
         Operation::CreateMultipartUpload => multipart::create(call, objects::key(call)?).await,

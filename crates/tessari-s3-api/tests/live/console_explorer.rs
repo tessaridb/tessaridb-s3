@@ -159,6 +159,61 @@ async fn an_objects_details_come_from_its_record_with_no_byte_of_it_read() {
     std::fs::remove_dir_all(&data_dir).expect("scratch removed");
 }
 
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_objects_details_show_its_retention_legal_hold_and_tags() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let made = call_with(
+        &state,
+        "PUT",
+        "/kept",
+        vec![],
+        vec![("x-amz-bucket-object-lock-enabled", "true")],
+        b"",
+    )
+    .await;
+    assert_eq!(made.status, 200, "{}", made.body);
+    let until = crate::object_lock::in_an_hour();
+    crate::object_lock::locked_put(
+        &state,
+        "/kept/doc.txt",
+        "hello",
+        &[
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+            ("x-amz-object-lock-retain-until-date", &until),
+            ("x-amz-object-lock-legal-hold", "ON"),
+            ("x-amz-tagging", "team=blue&tier=gold"),
+        ],
+    )
+    .await;
+    assert_eq!(call(&state, "PUT", "/plain", vec![], b"").await.status, 200);
+    assert_eq!(
+        call(&state, "PUT", "/plain/doc.txt", vec![], b"x")
+            .await
+            .status,
+        200
+    );
+
+    let detail = |path: &'static str| send(&console, "GET", path, Some(&root), None);
+    let kept = detail("/api/v1/buckets/kept/object?key=doc.txt").await;
+    assert_eq!(kept.status, 200, "{:?}", kept.json());
+    let shown = kept.json();
+    assert_eq!(shown["retention"]["mode"], Value::from("GOVERNANCE"));
+    assert_eq!(shown["retention"]["until"], Value::from(until.as_str()));
+    assert_eq!(shown["legal_hold"], Value::from(true));
+    assert_eq!(shown["tags"]["team"], Value::from("blue"));
+    assert_eq!(shown["tags"]["tier"], Value::from("gold"));
+
+    let plain = detail("/api/v1/buckets/plain/object?key=doc.txt").await;
+    assert_eq!(plain.status, 200, "{:?}", plain.json());
+    let shown = plain.json();
+    assert_eq!(shown["retention"], Value::Null);
+    assert_eq!(shown["legal_hold"], Value::from(false));
+    assert_eq!(shown["tags"], serde_json::json!({}));
+}
+
 /// Writes `keys` into `bucket`, a bounded number at a time.
 async fn put_many(state: &tessari_s3_api::ApiState, bucket: &str, keys: &[String]) {
     for chunk in keys.chunks(32) {

@@ -10,6 +10,18 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
+    /// The current instant by this machine's clock (the epoch when the clock is before it).
+    #[must_use]
+    pub fn now() -> Self {
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        Self {
+            seconds: i64::try_from(since.as_secs()).unwrap_or(i64::MAX),
+            nanos: since.subsec_nanos(),
+        }
+    }
+
     /// `2009-10-12T17:50:30.000Z` — the XML `LastModified` / `CreationDate` form, milliseconds and `Z`.
     #[must_use]
     pub fn iso8601_millis(self) -> String {

@@ -38,6 +38,12 @@ pub enum ErrorCode {
     NoSuchLifecycleConfiguration,
     /// The bucket has no replication configuration.
     ReplicationConfigurationNotFoundError,
+    /// The bucket has no Object Lock configuration.
+    ObjectLockConfigurationNotFoundError,
+    /// 404: the bucket has no tags.
+    NoSuchTagSet,
+    /// 400: a tag breaks S3's limits.
+    InvalidTag,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
     /// 404: the bucket does not exist.
@@ -122,6 +128,9 @@ impl ErrorCode {
             Self::NoSuchVersion => "NoSuchVersion",
             Self::NoSuchLifecycleConfiguration => "NoSuchLifecycleConfiguration",
             Self::ReplicationConfigurationNotFoundError => "ReplicationConfigurationNotFoundError",
+            Self::ObjectLockConfigurationNotFoundError => "ObjectLockConfigurationNotFoundError",
+            Self::NoSuchTagSet => "NoSuchTagSet",
+            Self::InvalidTag => "InvalidTag",
             Self::InvalidPart => "InvalidPart",
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
@@ -179,14 +188,17 @@ impl ErrorCode {
             | Self::OperationAborted => 409,
             Self::IllegalLocationConstraintException
             | Self::MalformedXml
-            | Self::MaxMessageLengthExceeded => 400,
+            | Self::MaxMessageLengthExceeded
+            | Self::InvalidTag => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
             Self::NoSuchKey
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchLifecycleConfiguration
-            | Self::ReplicationConfigurationNotFoundError => 404,
+            | Self::ReplicationConfigurationNotFoundError
+            | Self::ObjectLockConfigurationNotFoundError
+            | Self::NoSuchTagSet => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -243,6 +255,13 @@ mod tests {
                 "ReplicationConfigurationNotFoundError",
                 404,
             ),
+            (
+                ErrorCode::ObjectLockConfigurationNotFoundError,
+                "ObjectLockConfigurationNotFoundError",
+                404,
+            ),
+            (ErrorCode::NoSuchTagSet, "NoSuchTagSet", 404),
+            (ErrorCode::InvalidTag, "InvalidTag", 400),
             (ErrorCode::InvalidPart, "InvalidPart", 400),
             (ErrorCode::InvalidPartOrder, "InvalidPartOrder", 400),
             (ErrorCode::EntityTooSmall, "EntityTooSmall", 400),

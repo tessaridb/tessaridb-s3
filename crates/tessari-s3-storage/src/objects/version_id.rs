@@ -26,7 +26,7 @@ pub(crate) fn record_id(prefix: &[u8], seq: u64) -> Vec<u8> {
 }
 
 /// The id of the null version.
-pub(crate) const NULL: &str = "null";
+pub const NULL: &str = "null";
 
 /// The id of version `seq` whose nonce is `nonce`.
 pub(crate) fn named(seq: u64, nonce: u64) -> String {

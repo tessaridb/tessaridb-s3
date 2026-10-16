@@ -50,6 +50,14 @@ pub(crate) async fn put(call: &Call<'_>, body: Body) -> Result<Response<Body>> {
     }
     // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
     crate::routes::buckets::resident(call).await?;
+    // Object Lock needs every version kept, so a bucket with it keeps versioning on; the store's `object_lock_kept`
+    // event refuses it too (ADR-0016).
+    if state == Versioning::Suspended && existing(call).await?.object_lock.is_some() {
+        return Err(Error::new(
+            ErrorCode::InvalidBucketState,
+            "versioning cannot be suspended on a bucket with Object Lock",
+        ));
+    }
     // Replication sends versions by id, so a bucket that replicates keeps versioning on (S3 ref 11 M4).
     if state == Versioning::Suspended && existing(call).await?.replication.is_some() {
         return Err(Error::new(

@@ -57,6 +57,7 @@ pub(super) fn replica_plan(
             local: head.local,
             replicate: None,
             replica: true,
+            lock_default: head.lock_default,
         },
         current,
     }
@@ -177,6 +178,7 @@ mod tests {
                     delete_markers: true,
                 }],
             }),
+            lock_default: None,
         }
     }
 

@@ -69,21 +69,33 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::PutBucketNotificationConfiguration
         | Operation::PutBucketReplication
         | Operation::DeleteBucketReplication
-        | Operation::DeleteBucketLifecycle => on(Need::ConfigureBucket),
+        | Operation::DeleteBucketLifecycle
+        | Operation::PutObjectLockConfiguration
+        | Operation::PutBucketTagging
+        | Operation::DeleteBucketTagging
+        // Releasing a legal hold must not be a plain write: a hold exists to outlast who may write.
+        | Operation::PutObjectLegalHold => on(Need::ConfigureBucket),
         Operation::HeadBucket
         | Operation::GetBucketLocation
         | Operation::GetBucketVersioning
         | Operation::GetBucketLifecycleConfiguration
         | Operation::GetBucketNotificationConfiguration
         | Operation::GetBucketReplication
+        | Operation::GetObjectLockConfiguration
+        | Operation::GetBucketTagging
         | Operation::ListObjects
         | Operation::ListObjectsV2
         | Operation::ListObjectVersions
         | Operation::ListMultipartUploads => on(Need::ReadBucket),
         Operation::ListParts => uploading(Need::ReadBucket),
-        Operation::GetObject | Operation::HeadObject | Operation::GetObjectTagging => {
-            on(Need::ReadObject)
-        }
+        Operation::GetObject
+        | Operation::HeadObject
+        | Operation::GetObjectTagging
+        | Operation::GetObjectRetention
+        | Operation::GetObjectLegalHold => on(Need::ReadObject),
+        // Extending a retention is a write; shortening a GOVERNANCE one also needs who administers the bucket.
+        Operation::PutObjectRetention => on(Need::WriteObject),
+        Operation::PutObjectTagging | Operation::DeleteObjectTagging => on(Need::WriteObject),
         Operation::DeleteObject | Operation::DeleteObjects => on(Need::WriteObject),
         Operation::PutObject
         | Operation::CreateMultipartUpload

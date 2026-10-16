@@ -95,7 +95,7 @@ impl Replicator {
                 .await
                 .map_err(|error| error.to_string())?
             {
-                VersionRead::Object(object) => object,
+                VersionRead::Object(object) => *object,
                 // Removed by its id since it was queued: nothing is left to send.
                 VersionRead::Absent => return Ok(()),
                 other => return Err(format!("the version cannot be read: {other:?}")),

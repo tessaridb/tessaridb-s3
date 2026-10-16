@@ -100,6 +100,7 @@ pub(super) async fn create(
             ("headers", strings(&upload.headers)),
             ("metadata", strings(&upload.metadata)),
         ])
+        .chain((!upload.tags.is_empty()).then(|| ("tags", strings(&upload.tags))))
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
     for (field, value) in [

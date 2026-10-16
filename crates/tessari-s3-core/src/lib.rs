@@ -12,11 +12,13 @@ pub mod lifecycle;
 pub mod media;
 pub mod multipart;
 pub mod notification;
+pub mod object_lock;
 pub mod objects;
 pub mod quota;
 #[cfg(test)]
 mod quota_tests;
 pub mod replication;
+pub mod tagging;
 pub mod versioning;
 
 pub use error::{Error, Result};

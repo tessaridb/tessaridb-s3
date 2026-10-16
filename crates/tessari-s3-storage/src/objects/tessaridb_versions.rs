@@ -5,6 +5,7 @@ use tessari_s3_core::versioning::Versioning;
 use tessari_s3_infrastructure::tessaridb::{MetaPool, Number, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::model_lock::{Lock, RetainUntil};
 use super::super::repository::{Head, VersionPlan};
 use super::super::version_id::{NULL, key_prefix, record_id};
 use crate::answers::{bucket_read, first_record};
@@ -76,7 +77,10 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
     let script = format!(
         "BEGIN; {} SELECT bucket_name, key, seq FROM versions AFTER versions:$prefix LIMIT 1; \
          SELECT seq FROM ONLY version_nulls:$prefix; SELECT op FROM ONLY objects:$object; COMMIT;",
-        bucket_read(pool, "versioning, notify, media, acknowledge, replication")
+        bucket_read(
+            pool,
+            "versioning, notify, media, acknowledge, replication, object_lock"
+        )
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();
     let _begin = answers.next();
@@ -90,6 +94,13 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
         Some(Value::Object(fields)) => match fields.get("replication") {
             None | Some(Value::None) => None,
             Some(stored) => Some(crate::buckets::replication::from_value(stored)?),
+        },
+        _ => None,
+    };
+    let lock_default = match &bucket_record {
+        Some(Value::Object(fields)) => match fields.get("object_lock") {
+            None | Some(Value::None) => None,
+            Some(stored) => crate::buckets::object_lock::from_value(stored)?.default,
         },
         _ => None,
     };
@@ -122,6 +133,7 @@ pub(super) async fn head(pool: &MetaPool, bucket: &BucketName, key: &ObjectKey) 
         notifies,
         current,
         replication,
+        lock_default,
     })
 }
 
@@ -133,6 +145,7 @@ pub(super) fn statements(
     incarnation: [u8; 16],
     plan: &VersionPlan,
     with_object: bool,
+    lock: &Lock,
 ) -> Result<Statements> {
     let prefix = key_prefix(bucket.as_str(), key.as_str());
     let mut script = String::new();
@@ -166,6 +179,49 @@ pub(super) fn statements(
                 "v_replicate_to".to_owned(),
                 Value::String(destination.clone()),
             ));
+        }
+        // Object Lock is the version's own (ADR-0016): the store's events refuse releasing it while it holds.
+        // A version written without a retention gets the bucket's default, counted from the commit.
+        let retention = lock.retention.or_else(|| {
+            plan.lock_default
+                .filter(|_| with_object)
+                .and_then(|default| {
+                    default
+                        .seconds()
+                        .map(|seconds| (default.mode, RetainUntil::AfterCommit(seconds)))
+                })
+        });
+        if let Some((mode, until)) = retention {
+            parameters.push((
+                "v_lock_mode".to_owned(),
+                Value::String(mode.as_str().to_owned()),
+            ));
+            match until {
+                RetainUntil::At(at) => {
+                    fields.push_str(", lock_mode: $v_lock_mode, retain_until: $v_retain_until");
+                    parameters.push((
+                        "v_retain_until".to_owned(),
+                        Value::Datetime {
+                            seconds: at.seconds,
+                            nanos: at.nanos,
+                        },
+                    ));
+                }
+                RetainUntil::AfterCommit(seconds) => {
+                    fields.push_str(
+                        ", lock_mode: $v_lock_mode, retain_until: $now + duration::from_secs($v_retain_secs)",
+                    );
+                    parameters.push((
+                        "v_retain_secs".to_owned(),
+                        Value::Number(Number::Integer(
+                            i64::try_from(seconds).map_err(|_| malformed("a retention period"))?,
+                        )),
+                    ));
+                }
+            }
+        }
+        if lock.legal_hold {
+            fields.push_str(", legal_hold: true");
         }
         // A null version's sequence is kept at the key's own address, where `head` reads it by identity.
         if version.version_id == NULL {

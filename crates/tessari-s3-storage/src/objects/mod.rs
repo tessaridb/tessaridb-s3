@@ -2,6 +2,8 @@
 
 mod entity;
 mod model;
+mod model_lock;
+mod model_tags;
 mod reader;
 mod repository;
 mod service;
@@ -14,7 +16,10 @@ pub use model::{
     NewObject, ObjectSummary, Part, Reclaimed, Removed, RemovedIf, Replicated, StoredObject,
     VersionKind, VersionRead, VersionRemoved, VersionsListed, WriteCondition, Written,
 };
+pub use model_lock::{Lock, LockOutcome, RetainUntil, VersionLock};
+pub use model_tags::TagsOutcome;
 pub use reader::ObjectReader;
 pub use service::ObjectService;
 pub use tessaridb::TessariObjects;
 pub use upload::{Upload, Uploaded};
+pub use version_id::NULL as NULL_VERSION_ID;

@@ -3,6 +3,7 @@
 use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
+use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
@@ -37,10 +38,25 @@ pub struct Bucket {
     pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
     /// Its replication configuration; `None` while none is set.
     pub replication: Option<tessari_s3_core::replication::Configuration>,
+    /// Its Object Lock; `None` while the lock is off — once on it stays on.
+    pub object_lock: Option<tessari_s3_core::object_lock::Configuration>,
+    /// Its tags by key; none while none are set.
+    pub tags: std::collections::BTreeMap<String, String>,
     /// Its media rules; `None` while none are set.
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
     /// Who must hold an object write before it is acknowledged.
     pub acknowledgement: Acknowledgement,
+}
+
+/// What turning a bucket's Object Lock on (or changing its default) ended in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockSet {
+    /// Set.
+    Done,
+    /// The bucket does not exist.
+    NoSuchBucket,
+    /// Its versioning is not enabled, which Object Lock needs.
+    NotVersioned,
 }
 
 /// Who must hold a bucket's object writes and removals before the client is told they succeeded.
@@ -127,6 +143,24 @@ impl TryFrom<BucketEntity> for Bucket {
                 .as_ref()
                 .map(super::replication::from_value)
                 .transpose()?,
+            object_lock: entity
+                .object_lock
+                .as_ref()
+                .map(super::object_lock::from_value)
+                .transpose()?,
+            tags: match &entity.tags {
+                Some(Value::Object(map)) => map
+                    .iter()
+                    .map(|(key, value)| match value {
+                        Value::String(text) => Ok((key.clone(), text.clone())),
+                        _ => Err(Error::Malformed {
+                            record: "buckets",
+                            reason: "tags",
+                        }),
+                    })
+                    .collect::<Result<_>>()?,
+                _ => std::collections::BTreeMap::new(),
+            },
             media: entity
                 .media
                 .as_ref()

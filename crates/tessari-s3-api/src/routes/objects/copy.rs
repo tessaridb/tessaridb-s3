@@ -64,6 +64,10 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             "a copy has no body for Content-MD5 or a checksum to describe",
         ));
     }
+    // A copy's bytes are checked against the source's stored checksum, so its retention needs no client digest.
+    if headers.lock.asked {
+        crate::routes::retention::lock_bucket(call).await?;
+    }
     let (source_bucket, source_key) = source::source_of(call.headers)?;
     let directive = |name: &str| {
         Directive::parse(source::text(call.headers, name)).ok_or_else(|| {
@@ -74,7 +78,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         })
     };
     let metadata = directive("x-amz-metadata-directive")?;
-    directive("x-amz-tagging-directive")?;
+    let tagging = directive("x-amz-tagging-directive")?;
     let bucket = call.bucket()?;
     if source_bucket == *bucket && source_key == *key && metadata == Directive::Copy {
         return Err(invalid(
@@ -105,14 +109,20 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         Directive::Copy => (object.headers, object.metadata),
         Directive::Replace => (headers.system, headers.metadata),
     };
+    let tags = match tagging {
+        Directive::Copy => object.tags,
+        Directive::Replace => headers.tags,
+    };
     let copied = NewObject {
         copied: true,
         size: object.size,
         etag: format!("\"{}\"", digests.md5_hex),
         headers: system,
         metadata: user,
+        tags,
         checksums: [(algorithm.name().to_owned(), value.clone())].into(),
         content,
+        lock: headers.lock.lock(),
     };
     if damaged {
         if let Content::Data(id) = copied.content {

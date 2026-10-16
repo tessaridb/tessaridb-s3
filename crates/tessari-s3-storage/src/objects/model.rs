@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use tessari_s3_types::Timestamp;
 
+use super::model_lock::Lock;
+
 /// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
@@ -45,12 +47,16 @@ pub struct NewObject {
     pub headers: BTreeMap<String, String>,
     /// User metadata, lowercase names without the `x-amz-meta-` prefix.
     pub metadata: BTreeMap<String, String>,
+    /// Its tags by key; none for most objects.
+    pub tags: BTreeMap<String, String>,
     /// Checksums by algorithm name (`CRC64NVME` …), base64.
     pub checksums: BTreeMap<String, String>,
     /// The object's bytes or the data file holding them.
     pub content: Content,
     /// Whether CopyObject made it — the change a notification names (`s3:ObjectCreated:Copy` rather than `Put`).
     pub copied: bool,
+    /// What Object Lock keeps the new version under (ADR-0016); nothing for a bucket without Object Lock.
+    pub lock: Lock,
 }
 
 /// A stored object.
@@ -66,6 +72,8 @@ pub struct StoredObject {
     pub headers: BTreeMap<String, String>,
     /// User metadata.
     pub metadata: BTreeMap<String, String>,
+    /// Its tags by key.
+    pub tags: BTreeMap<String, String>,
     /// Checksums by algorithm name.
     pub checksums: BTreeMap<String, String>,
     /// The bytes or the data file holding them.
@@ -227,7 +235,7 @@ pub enum VersionsListed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionRead {
     /// The version holds an object; its parts are read when it is a multipart one.
-    Object(StoredObject),
+    Object(Box<StoredObject>),
     /// The version is a delete marker, written then.
     Marker {
         /// When the marker was written.
@@ -255,6 +263,8 @@ pub enum VersionRemoved {
     Malformed,
     /// The bucket does not exist.
     NoSuchBucket,
+    /// Object Lock keeps it: a legal hold, or a retention that has not passed (GOVERNANCE without a bypass).
+    Locked,
 }
 
 /// What a replica write ended in.
