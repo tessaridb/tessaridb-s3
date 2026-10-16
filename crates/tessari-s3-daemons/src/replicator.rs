@@ -43,6 +43,14 @@ fn sealing_headers(sealing: &Sealing) -> Vec<(String, String)> {
     }
 }
 
+/// What sending a version came to.
+enum Sent {
+    /// The destination holds it, or nothing is left to send.
+    Sent,
+    /// No attempt could ever send it, for the reason given.
+    Unsendable(&'static str),
+}
+
 /// One stored piece of a version: its data id, its size, and the wrapped key it is sealed under, if any.
 type Piece = ([u8; 16], u64, Option<WrappedKey>);
 
@@ -66,9 +74,9 @@ impl Replicator {
         Self { storage, client }
     }
 
-    /// Sends `task`'s version; `Ok` once the destination holds it (or the version is gone and there is nothing to
-    /// send), `Err` with the reason otherwise.
-    async fn send(&self, task: &Task) -> std::result::Result<(), String> {
+    /// Sends `task`'s version; `Ok(Sent)` once the destination holds it (or the version is gone and there is nothing
+    /// to send), `Ok(Unsendable)` when no attempt ever could, `Err` with the reason otherwise.
+    async fn send(&self, task: &Task) -> std::result::Result<Sent, String> {
         let source = BucketName::new(&task.bucket).map_err(|error| error.to_string())?;
         let destination = BucketName::new(&task.destination).map_err(|error| error.to_string())?;
         let key = ObjectKey::new(&task.key).map_err(|error| error.to_string())?;
@@ -118,9 +126,15 @@ impl Replicator {
             {
                 VersionRead::Object(object) => *object,
                 // Removed by its id since it was queued: nothing is left to send.
-                VersionRead::Absent => return Ok(()),
+                VersionRead::Absent => return Ok(Sent::Sent),
                 other => return Err(format!("the version cannot be read: {other:?}")),
             };
+            // A replica would need the customer's key to be opened and sealed again, and that key is never kept.
+            if object.customer_seal().is_some() {
+                return Ok(Sent::Unsendable(
+                    "the version is sealed under a customer-provided key, which is never kept",
+                ));
+            }
             headers.push(("content-length".to_owned(), object.size.to_string()));
             for (name, value) in &object.headers {
                 headers.push((name.clone(), value.clone()));
@@ -171,7 +185,7 @@ impl Replicator {
         headers.push(("authorization".to_owned(), authorization));
         let url = format!("{}{path}", endpoint.trim_end_matches('/'));
         match self.client.send(method, &url, &headers, body).await? {
-            (status, _) if (200..300).contains(&status) => Ok(()),
+            (status, _) if (200..300).contains(&status) => Ok(Sent::Sent),
             (status, answer) => Err(format!("the destination answered {status}: {answer}")),
         }
     }
@@ -237,9 +251,19 @@ impl Daemon for Replicator {
             let (mut sent, mut retried) = (0_u64, 0_u64);
             for task in &tasks {
                 match self.send(task).await {
-                    Ok(()) => {
+                    Ok(Sent::Sent) => {
                         replication.completed(task).await.map_err(failed)?;
                         sent = sent.saturating_add(1);
+                    }
+                    Ok(Sent::Unsendable(reason)) => {
+                        tracing::warn!(
+                            bucket = %task.bucket,
+                            key = %task.key,
+                            version_id = %task.version_id,
+                            reason,
+                            "a version cannot be replicated"
+                        );
+                        replication.unsendable(task).await.map_err(failed)?;
                     }
                     Err(reason) => {
                         tracing::warn!(

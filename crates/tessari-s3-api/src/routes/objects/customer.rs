@@ -7,7 +7,7 @@ use base64::engine::general_purpose::STANDARD;
 use md5::{Digest, Md5};
 use subtle::ConstantTimeEq;
 use tessari_s3_storage::encryption::{CustomerKey, CustomerSeal};
-use tessari_s3_storage::objects::{Content, StoredObject};
+use tessari_s3_storage::objects::StoredObject;
 use tessari_s3_types::ErrorCode;
 use zeroize::Zeroizing;
 
@@ -162,17 +162,6 @@ pub(crate) fn key_required() -> Error {
     )
 }
 
-/// The seal of the customer's key `object` is sealed under: its data's, or its first sealed part's.
-pub(crate) fn customer_seal(object: &StoredObject) -> Option<&CustomerSeal> {
-    match &object.content {
-        Content::Data(_) => object.encryption.as_ref()?.customer.as_ref(),
-        Content::Parts(multipart) => multipart
-            .parts
-            .iter()
-            .find_map(|part| part.encryption.as_ref()?.customer.as_ref()),
-    }
-}
-
 /// Admits a read of `object` bringing `customer`'s key, or none, as [`admit_key`] admits it against the object's seal.
 ///
 /// # Errors
@@ -182,7 +171,7 @@ pub(crate) fn admit_read(
     object: &StoredObject,
     customer: Option<&Customer>,
 ) -> Result<()> {
-    admit_key(call, customer_seal(object), customer)
+    admit_key(call, object.customer_seal(), customer)
 }
 
 /// Admits a request bringing `customer`'s key, or none, to data sealed under `seal`, or under none: the key the seal

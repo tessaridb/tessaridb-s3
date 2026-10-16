@@ -77,6 +77,13 @@ pub(super) async fn download(
         Ok(None) => return Err(no_such_key()),
         Ok(Some(object)) => object,
     };
+    // The console holds no customer's key: an object sealed under one is refused before any byte is opened.
+    if object.customer_seal().is_some() {
+        return Err(ConsoleError::invalid(
+            "customer_key_required",
+            "the object is sealed under a customer-provided key, which the console never holds",
+        ));
+    }
     let last = object.size.saturating_sub(1);
     // The first block is read and verified here, so damage there is an error answer rather than a short body.
     let content = match &object.content {
@@ -87,7 +94,6 @@ pub(super) async fn download(
             *id,
             object.size,
             object.encryption.as_ref(),
-            // The console holds no customer's key: an object sealed under one is refused, not opened.
             None,
             0,
             last,

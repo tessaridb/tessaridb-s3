@@ -16,20 +16,20 @@ const KEY: &str = "x-amz-server-side-encryption-customer-key";
 const KEY_MD5: &str = "x-amz-server-side-encryption-customer-key-md5";
 
 /// The three headers that bring a customer's key.
-struct Customer {
+pub(crate) struct Customer {
     key: String,
     md5: String,
 }
 
 impl Customer {
-    fn of(key: &[u8]) -> Self {
+    pub(crate) fn of(key: &[u8]) -> Self {
         Self {
             key: STANDARD.encode(key),
             md5: STANDARD.encode(Md5::digest(key)),
         }
     }
 
-    fn headers(&self) -> Vec<(&str, &str)> {
+    pub(crate) fn headers(&self) -> Vec<(&str, &str)> {
         vec![
             (ALGORITHM, "AES256"),
             (KEY, self.key.as_str()),
@@ -43,10 +43,15 @@ fn header<'a>(seen: &'a Seen, name: &str) -> Option<&'a str> {
 }
 
 /// A bucket `name` whose default encryption allows customer keys, on a node whose keys are unsealed.
-async fn allowing(state: &tessari_s3_api::ApiState, name: &str) {
-    unseal(state).await;
+pub(crate) async fn allowing(state: &tessari_s3_api::ApiState, name: &str) {
     let created = call(state, "PUT", &format!("/{name}"), vec![], b"").await;
     assert_eq!(created.status, 200, "{}", created.body);
+    allow_customer_keys(state, name).await;
+}
+
+/// Lets the existing bucket `name` take customer keys, on a node whose keys are unsealed.
+pub(crate) async fn allow_customer_keys(state: &tessari_s3_api::ApiState, name: &str) {
+    unseal(state).await;
     let document = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
         <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes>\
         <EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
@@ -587,5 +592,43 @@ async fn a_copy_opens_its_source_and_seals_its_destination_each_under_the_key_it
     assert!(
         assembled.bytes == bytes,
         "a copied part opens under the upload's key"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_console_refuses_by_name_to_download_an_object_sealed_under_a_customer_key() {
+    let _why = IGNORED;
+    let (state, console) = crate::fresh_console().await;
+    let token = crate::console::sign_in(&console).await;
+    allowing(&state, "sealed").await;
+    let customer = Customer::of(&[7_u8; 32]);
+    let put = call_tls(
+        &state,
+        "PUT",
+        "/sealed/object",
+        vec![],
+        customer.headers(),
+        &body(),
+    )
+    .await;
+    assert_eq!(put.status, 200, "{}", put.body);
+
+    let path = "/api/v1/buckets/sealed/object/content?key=object&reason=support";
+    let download = crate::console::send(&console, "GET", path, Some(&token), None).await;
+    assert_eq!(
+        (download.status, download.code().as_deref()),
+        (400, Some("customer_key_required")),
+        "the console holds no customer's key and says so"
+    );
+    let actions =
+        crate::console::send(&console, "GET", "/api/v1/actions", Some(&token), None).await;
+    assert!(
+        !actions.json()["actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|action| action["operation"] == "download_object"),
+        "a download that did not happen is not recorded"
     );
 }

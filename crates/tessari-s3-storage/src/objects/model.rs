@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use tessari_s3_types::Timestamp;
 
 use super::model_lock::Lock;
-use crate::encryption::WrappedKey;
+use crate::encryption::{CustomerSeal, WrappedKey};
 
 /// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +89,20 @@ pub struct StoredObject {
     pub replication: Option<String>,
     /// The wrapped data key its bytes are sealed under; none for an object stored plain.
     pub encryption: Option<WrappedKey>,
+}
+
+impl StoredObject {
+    /// The seal of the customer's key it is sealed under: its data's, or its first sealed part's.
+    #[must_use]
+    pub fn customer_seal(&self) -> Option<&CustomerSeal> {
+        match &self.content {
+            Content::Data(_) => self.encryption.as_ref()?.customer.as_ref(),
+            Content::Parts(multipart) => multipart
+                .parts
+                .iter()
+                .find_map(|part| part.encryption.as_ref()?.customer.as_ref()),
+        }
+    }
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.

@@ -132,6 +132,23 @@ impl ReplicationService {
         self.repository.nack(&[task.position], delay).await
     }
 
+    /// `task`'s version can never be sent: stamped `FAILED` and settled at once rather than tried again.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn unsendable(&self, task: &Task) -> Result<()> {
+        self.repository
+            .stamp(
+                &task.bucket,
+                &task.key,
+                task.seq,
+                &task.version_id,
+                "FAILED",
+            )
+            .await?;
+        self.repository.ack(&[task.position]).await
+    }
+
     /// The replicators' backlog, in flight and given-up counts.
     ///
     /// # Errors

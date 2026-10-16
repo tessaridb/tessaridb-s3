@@ -2,6 +2,7 @@
 //! sealed when the original is; a plain original's rendition stays plain.
 
 use tessari_s3_daemons::{Daemon, ImageWorker, MediaPlanner};
+use tessari_s3_storage::media::TaskQueue;
 
 use crate::media::png;
 use crate::sse::{SSE, data_files, sse_header, unseal};
@@ -90,5 +91,68 @@ async fn a_rendition_of_a_sealed_original_is_sealed_and_of_a_plain_one_plain() {
             "{key}: the rendition's data file"
         );
     }
+    std::fs::remove_dir_all(dir).expect("cleanup");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_original_sealed_under_a_customer_key_is_given_no_rendition() {
+    let _why = IGNORED;
+    let (state, planter, dir) = fresh_with(scratch_dir()).await;
+    crate::sse_c::allowing(&state, "pictures").await;
+    planter
+        .run(
+            &format!(
+                "UPDATE {}.buckets:'pictures' SET media = [{{ id: 'photos', content_types: ['image/*'], \
+                 prefix: 'photos/', outputs: ['image/150/png'] }}];",
+                planter.global_database()
+            ),
+            Vec::new(),
+        )
+        .await
+        .expect("media rules set");
+    let image = png(600, 300);
+    let customer = crate::sse_c::Customer::of(&[7_u8; 32]);
+    let mut keyed = customer.headers();
+    keyed.push(("content-type", "image/png"));
+    let sealed = crate::call_tls(
+        &state,
+        "PUT",
+        "/pictures/photos/keyed.png",
+        vec![],
+        keyed,
+        &image,
+    )
+    .await;
+    assert_eq!(sealed.status, 200, "{}", sealed.body);
+    let plain = call_with(
+        &state,
+        "PUT",
+        "/pictures/photos/plain.png",
+        vec![],
+        vec![("content-type", "image/png")],
+        &image,
+    )
+    .await;
+    assert_eq!(plain.status, 200, "{}", plain.body);
+
+    let media = state.storage().media();
+    media.define().await.expect("group defined");
+    MediaPlanner::new(media.clone(), state.storage().objects().clone())
+        .run_once()
+        .await
+        .expect("planned");
+    let queued: Vec<String> = media
+        .claim(TaskQueue::Images, "probe", 10)
+        .await
+        .expect("claimed")
+        .into_iter()
+        .map(|task| task.rendition.key)
+        .collect();
+    assert_eq!(
+        queued,
+        vec!["photos/plain.png".to_owned()],
+        "no rendition can be made from bytes only the customer's key opens"
+    );
     std::fs::remove_dir_all(dir).expect("cleanup");
 }

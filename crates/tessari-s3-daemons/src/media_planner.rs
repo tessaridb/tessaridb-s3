@@ -45,6 +45,10 @@ impl MediaPlanner {
         else {
             return Ok(0);
         };
+        // A rendition would need the customer's key, which is never kept, and would be readable without it.
+        if object.customer_seal().is_some() {
+            return Ok(0);
+        }
         let content_type = object
             .headers
             .get("content-type")
