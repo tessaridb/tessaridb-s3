@@ -17,6 +17,7 @@ use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
 use crate::routes::objects::headers::read_integrity;
 use crate::routes::objects::source;
+use crate::routes::objects::sse::etag_for;
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -83,8 +84,8 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
     }
     quota::admit(call, bucket, None, length).await?;
     let stream = source::bytes(objects, &object, first, last).await?;
-    let uploaded = source::into_file(objects, stream, length, declared.encrypted).await?;
-    let etag = format!("\"{}\"", uploaded.digests.md5_hex);
+    let uploaded = source::into_file(objects, stream, length, declared.encryption.as_ref()).await?;
+    let etag = etag_for(&uploaded.digests.md5_hex, declared.encryption.as_ref())?;
     let part = NewPart {
         data: uploaded.id,
         size: uploaded.size,

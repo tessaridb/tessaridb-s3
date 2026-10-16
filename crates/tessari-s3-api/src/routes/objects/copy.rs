@@ -5,16 +5,17 @@
 //! against the source's before anything commits.
 
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
+use axum::http::{HeaderMap, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared, Digests};
 use tessari_s3_core::objects::copy::Directive;
-use tessari_s3_storage::encryption::WrappedKey;
+use tessari_s3_storage::encryption::{Sealing, WrappedKey};
 use tessari_s3_storage::objects::{Content, NewObject, ObjectService, StoredObject, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use super::headers::read_put_headers;
 use super::put::not_written;
+use super::sse::{answer_sse, etag_for};
 use super::{data, source};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{with_version, xml_response};
@@ -26,16 +27,17 @@ fn invalid(code: ErrorCode, message: &str) -> Error {
     Error::new(code, message)
 }
 
-/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008) — sealed under a key of its own when
-/// `sealed`, whatever the source was — and the wrapped key it is sealed under.
+/// The copy's bytes: a new data file, as PutObject stores every object (ADR-0008) — sealed under a data key of its own,
+/// wrapped by the key `sealing` names, when it names one, whatever the source was — and the wrapped key it is sealed
+/// under.
 async fn copy_bytes(
     objects: &ObjectService,
     object: &StoredObject,
-    sealed: bool,
+    sealing: Option<&Sealing>,
 ) -> Result<(Content, Digests, Option<WrappedKey>)> {
     let last = object.size.saturating_sub(1);
     let stream = source::bytes(objects, object, 0, last).await?;
-    let uploaded = source::into_file(objects, stream, object.size, sealed).await?;
+    let uploaded = source::into_file(objects, stream, object.size, sealing).await?;
     Ok((
         Content::Data(uploaded.id),
         uploaded.digests,
@@ -107,7 +109,8 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     }
     quota::admit(call, bucket, Some(key), object.size).await?;
     let algorithm = algorithm_for(call.headers, &object)?;
-    let (content, digests, encryption) = copy_bytes(objects, &object, headers.encrypted).await?;
+    let (content, digests, encryption) =
+        copy_bytes(objects, &object, headers.encryption.as_ref()).await?;
     let value = digests.value(algorithm).to_owned();
     // A whole-object value of the same algorithm must survive the copy; a composite one (`…-N`) covers part
     // digests and cannot be compared.
@@ -126,7 +129,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     let copied = NewObject {
         copied: true,
         size: object.size,
-        etag: format!("\"{}\"", digests.md5_hex),
+        etag: etag_for(&digests.md5_hex, headers.encryption.as_ref())?,
         headers: system,
         metadata: user,
         tags,
@@ -168,11 +171,8 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
                 ),
                 version.as_deref(),
             );
-            if copied.encryption.is_some() {
-                response.headers_mut().insert(
-                    "x-amz-server-side-encryption",
-                    HeaderValue::from_static("AES256"),
-                );
+            if let Some(sealing) = copied.encryption.as_ref().and_then(Sealing::of) {
+                answer_sse(response.headers_mut(), &sealing);
             }
             Ok(response)
         }

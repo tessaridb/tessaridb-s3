@@ -174,6 +174,7 @@ DEFINE FIELD IF NOT EXISTS sse_kek ON versions TYPE string;
 DEFINE FIELD IF NOT EXISTS sse_nonce ON versions TYPE bytes;
 DEFINE FIELD IF NOT EXISTS sse_key ON versions TYPE bytes;
 DEFINE FIELD IF NOT EXISTS sse ON uploads TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kms ON uploads TYPE string;
 DEFINE FIELD IF NOT EXISTS sse_alg ON parts TYPE string;
 DEFINE FIELD IF NOT EXISTS sse_kek ON parts TYPE string;
 DEFINE FIELD IF NOT EXISTS sse_nonce ON parts TYPE bytes;

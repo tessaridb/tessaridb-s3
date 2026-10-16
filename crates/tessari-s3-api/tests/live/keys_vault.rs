@@ -36,6 +36,7 @@ async fn two_nodes_unsealing_a_new_store_at_once_hold_one_key_and_a_wrong_passph
     let unsealed = KeyState::Unsealed {
         active: "server_1".to_owned(),
         keys: 1,
+        named: Vec::new(),
     };
     assert_eq!(first.expect("one unsealed"), unsealed);
     assert_eq!(second.expect("two unsealed"), unsealed);

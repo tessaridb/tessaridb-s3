@@ -216,6 +216,10 @@ async fn open_once(
     Ok(keys)
 }
 
+#[path = "tessaridb_create.rs"]
+mod create;
+use create::create_once;
+
 impl KeyVault for TessariKeys {
     async fn declared(&self) -> Result<bool> {
         let mut answers = self.pool.run("INFO FOR DATABASE;", Vec::new()).await?;
@@ -242,6 +246,16 @@ impl KeyVault for TessariKeys {
             }
         }
         Err(Error::KeysSealed)
+    }
+
+    async fn create(
+        &self,
+        passphrase: &Passphrase,
+        id: &str,
+        key: &Zeroizing<[u8; 32]>,
+    ) -> Result<()> {
+        let mut link = self.pool.vault_link(VAULT).await?;
+        create_once(&mut link, passphrase, id, key).await
     }
 }
 

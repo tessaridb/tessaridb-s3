@@ -19,4 +19,12 @@ pub(crate) trait KeyVault: Send + Sync {
         passphrase: &Passphrase,
         first: &Zeroizing<[u8; 32]>,
     ) -> impl Future<Output = Result<Vec<StoredKey>>> + Send;
+    /// Opens the declared vault with `passphrase` and stores `key` as record `id`, refusing an id that exists; the
+    /// vault is sealed again before this answers.
+    fn create(
+        &self,
+        passphrase: &Passphrase,
+        id: &str,
+        key: &Zeroizing<[u8; 32]>,
+    ) -> impl Future<Output = Result<()>> + Send;
 }

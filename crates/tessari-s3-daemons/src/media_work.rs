@@ -5,6 +5,7 @@ use std::future::Future;
 
 use tessari_s3_core::media::{ImageFormat, RENDITIONS};
 use tessari_s3_infrastructure::media_image::Encoding;
+use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_storage::media::{MediaService, Rendition, Task, TaskQueue};
 use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Written};
 use tessari_s3_types::{BucketName, ObjectKey};
@@ -37,13 +38,22 @@ pub(crate) async fn original(
         .map(|object| (bucket, object)))
 }
 
-/// Whether `object`'s bytes are sealed: a rendition made from them is sealed too, so no form of a sealed original
-/// lands in clear.
-pub(crate) fn sealed(object: &StoredObject) -> bool {
-    match &object.content {
-        Content::Data(_) => object.encryption.is_some(),
-        Content::Parts(multipart) => multipart.parts.iter().any(|part| part.encryption.is_some()),
-    }
+/// The key `object`'s bytes are sealed under, if any: a rendition made from them is sealed under the same key, so no
+/// form of a sealed original lands in clear. A key id this build does not know refuses rather than writing plain.
+pub(crate) fn sealed(object: &StoredObject) -> Result<Option<Sealing>, String> {
+    let wrapped = match &object.content {
+        Content::Data(_) => object.encryption.as_ref(),
+        Content::Parts(multipart) => multipart
+            .parts
+            .iter()
+            .find_map(|part| part.encryption.as_ref()),
+    };
+    wrapped
+        .map(|wrapped| {
+            Sealing::of(wrapped)
+                .ok_or_else(|| "the original names a key this build does not know".to_owned())
+        })
+        .transpose()
 }
 
 /// `<key>.renditions/<kind>-<size>.<ext>`.

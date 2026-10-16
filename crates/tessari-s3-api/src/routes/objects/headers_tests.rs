@@ -3,6 +3,8 @@ use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_storage::objects::WriteCondition;
 use tessari_s3_types::ErrorCode;
 
+use tessari_s3_storage::encryption::Sealing;
+
 use super::read_put_headers;
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -56,7 +58,7 @@ fn system_headers_and_metadata_are_kept_and_aws_chunked_is_removed() {
 #[test]
 fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
     assert_eq!(
-        refused(&[("x-amz-server-side-encryption", "aws:kms")]),
+        refused(&[("x-amz-server-side-encryption", "aws:kms:dsse")]),
         ErrorCode::NotImplemented
     );
     assert_eq!(
@@ -64,7 +66,8 @@ fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
             ("x-amz-server-side-encryption", "AES256"),
             ("x-amz-server-side-encryption-aws-kms-key-id", "k")
         ]),
-        ErrorCode::NotImplemented
+        ErrorCode::InvalidArgument,
+        "a key id belongs to aws:kms"
     );
     assert_eq!(
         refused(&[("x-amz-server-side-encryption-customer-algorithm", "AES256")]),
@@ -268,9 +271,13 @@ fn the_tagging_header_is_read_as_tags_or_refused_as_an_invalid_tag() {
 fn server_side_encryption_with_the_servers_keys_is_asked_for_by_name() {
     let asked =
         read_put_headers(&headers(&[("x-amz-server-side-encryption", "AES256")])).expect("reads");
-    assert!(asked.encrypted, "AES256 asks for the server's own keys");
+    assert_eq!(
+        asked.encryption,
+        Some(Sealing::Server),
+        "AES256 asks for the server's own keys"
+    );
     let plain = read_put_headers(&headers(&[])).expect("reads");
-    assert!(!plain.encrypted);
+    assert_eq!(plain.encryption, None);
     assert_eq!(
         refused(&[("x-amz-server-side-encryption", "rot13")]),
         ErrorCode::InvalidArgument

@@ -63,7 +63,7 @@ impl ImageWorker {
                 &target(rendition)?,
                 &made.bytes,
                 format.content_type(),
-                sealed(&object),
+                sealed(&object)?.as_ref(),
             )
             .await
             .map_err(|error| error.to_string())?;

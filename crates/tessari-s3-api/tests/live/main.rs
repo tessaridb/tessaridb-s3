@@ -84,6 +84,7 @@ mod signer;
 mod spaces;
 mod sse;
 mod sse_erasure;
+mod sse_kms;
 mod sse_media;
 mod sse_replication;
 mod tagging;

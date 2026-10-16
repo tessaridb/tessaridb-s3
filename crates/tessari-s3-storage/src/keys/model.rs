@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use zeroize::Zeroizing;
 
 use super::entity::StoredKey;
-use crate::encryption::KeyEncryptionKey;
+use crate::encryption::{KeyEncryptionKey, NAMED_KEY_PREFIX};
 use crate::{Error, Result};
 
 /// Fewest characters (code points) a keys passphrase has — NIST SP 800-63B-4 §3.1.1.2, a single-factor secret is at
@@ -75,6 +75,8 @@ pub enum KeyState {
         active: String,
         /// Every key held.
         keys: usize,
+        /// The names of the keys operators created, in order.
+        named: Vec<String>,
     },
 }
 
@@ -141,6 +143,12 @@ impl KeyRing {
         KeyState::Unsealed {
             active: self.active.id().to_owned(),
             keys: self.others.len().saturating_add(1),
+            named: self
+                .others
+                .keys()
+                .filter_map(|id| id.strip_prefix(NAMED_KEY_PREFIX))
+                .map(str::to_owned)
+                .collect(),
         }
     }
 }

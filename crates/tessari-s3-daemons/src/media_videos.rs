@@ -90,6 +90,7 @@ impl VideoWorker {
         }
         drop(file);
         let rendition = &task.rendition;
+        let sealing = sealed(object)?;
         let written = match rendition.output {
             Output::Video { size, format } => {
                 let encoder = match format {
@@ -109,7 +110,7 @@ impl VideoWorker {
                         &mut made,
                         length,
                         format.content_type(),
-                        sealed(object),
+                        sealing.as_ref(),
                     )
                     .await
             }
@@ -132,7 +133,7 @@ impl VideoWorker {
                         &target(rendition)?,
                         &made.bytes,
                         format.content_type(),
-                        sealed(object),
+                        sealing.as_ref(),
                     )
                     .await
             }

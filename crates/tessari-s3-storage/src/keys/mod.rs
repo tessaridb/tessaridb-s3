@@ -7,6 +7,7 @@ mod repository;
 mod service;
 mod tessaridb;
 
+pub(crate) use model::SERVER_KEY_PREFIX;
 pub use model::{KeyRing, KeyState, Passphrase};
 pub use service::KeyService;
 pub use tessaridb::TessariKeys;

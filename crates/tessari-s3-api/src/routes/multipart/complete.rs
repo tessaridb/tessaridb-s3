@@ -3,7 +3,7 @@
 //! bytes are copied — so a failure is an ordinary error response, never an error inside a 200.
 
 use axum::body::Body;
-use axum::http::{HeaderValue, Response, StatusCode};
+use axum::http::{Response, StatusCode};
 use quick_xml::Reader;
 use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
@@ -19,6 +19,7 @@ use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{with_version, xml_response};
 use crate::routes::objects::headers::read_put_headers;
+use crate::routes::objects::sse::answer_sse;
 use crate::routes::quota::Room;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -203,7 +204,7 @@ pub(crate) async fn complete(
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let headers = read_put_headers(call.headers)?;
-    if headers.encrypted {
+    if headers.encryption.is_some() {
         return Err(Error::new(
             ErrorCode::NotImplemented,
             "server-side encryption of a multipart upload is not implemented",
@@ -276,7 +277,7 @@ pub(crate) async fn complete(
         checksum: (algorithm, value),
         composite,
         version,
-        encrypted,
+        encryption,
     } = outcome
     else {
         return Err(refused(&outcome));
@@ -302,11 +303,8 @@ pub(crate) async fn complete(
         ),
         version.as_deref(),
     );
-    if encrypted {
-        response.headers_mut().insert(
-            "x-amz-server-side-encryption",
-            HeaderValue::from_static("AES256"),
-        );
+    if let Some(sealing) = &encryption {
+        answer_sse(response.headers_mut(), sealing);
     }
     Ok(response)
 }

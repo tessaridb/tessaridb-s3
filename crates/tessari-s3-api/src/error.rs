@@ -89,6 +89,10 @@ impl From<tessari_s3_storage::Error> for Error {
                 ErrorCode::ServiceUnavailable,
                 "the encryption keys are sealed on this node; an operator must unseal them",
             ),
+            Storage::UnknownKey { name } => Self::new(
+                ErrorCode::KmsNotFound,
+                format!("no KMS key named {name} exists on this server"),
+            ),
             Storage::OtherRegion { region } => Self::new(
                 ErrorCode::PermanentRedirect,
                 "the bucket you are attempting to access must be addressed using the specified endpoint",

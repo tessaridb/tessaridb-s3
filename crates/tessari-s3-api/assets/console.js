@@ -2202,7 +2202,8 @@
 
   // src/encryption-model.ts
   //! This node's encryption keys as the console sees them: not yet created,
-  //! sealed, or held — and then which key new objects are wrapped under.
+  //! sealed, or held — and then which key new objects are wrapped under, and
+  //! the keys operators created by name for `aws:kms`.
   function readKeys2(v) {
     if (!record(v)) {
       return null;
@@ -2211,8 +2212,9 @@
     if (state2 === "uninitialised" || state2 === "sealed") {
       return { state: state2 };
     }
-    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"])) {
-      return { state: state2, active: v["active"], keys: v["keys"] };
+    const named = list(v["named"], (name) => text(name) ? name : null);
+    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null) {
+      return { state: state2, active: v["active"], keys: v["keys"], named };
     }
     return null;
   }
@@ -2220,9 +2222,11 @@
   // src/encryption.ts
   //! The encryption keys of this node, for an operator: whether they are held,
   //! the form that unseals them with the keys passphrase (the first unseal
-  //! creates them), and sealing them again. Each node holds its own keys, so
-  //! this acts on the node serving the console. The server wants a recent
-  //! sign-in and records every attempt without the passphrase.
+  //! creates them), sealing them again, and the keys created by name that
+  //! objects can be sealed under with `aws:kms`. Each node holds its own keys,
+  //! so this acts on the node serving the console; other nodes hold a new named
+  //! key after their next unseal. The server wants a recent sign-in and records
+  //! every attempt without the passphrase.
   var BASE3 = "/encryption";
   function done4(screen, failure, said) {
     if (failure === null) {
@@ -2270,6 +2274,43 @@
     });
     return form;
   }
+  function namedKeys(keys2) {
+    if (keys2.length === 0) {
+      return el("p", {}, "No named keys yet. A request asking for ", mono("aws:kms"), " without a key id uses the key named ", mono("aws-s3"), ".");
+    }
+    return el("p", {}, "Named keys: ", ...keys2.flatMap((name, at2) => at2 === 0 ? [mono(name)] : [", ", mono(name)]), ".");
+  }
+  function createForm2(screen) {
+    const name = field("key-name", "Key name", { autocomplete: "off", required: "", pattern: "[a-z0-9-]{1,64}" }, "1 to 64 of a-z, 0-9 and -. Names are visible to anyone who can list the keys vault; keys are never replaced.");
+    const passphrase = field("key-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+    const why = field("key-reason", "Reason", { autocomplete: "off" }, "Kept in the action record.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "keys-create-title" },
+      el("p", { id: "keys-create-title" }, el("strong", {}, "Create a named key")),
+      name.row,
+      passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const reason = why.input.value.trim();
+      const answer = await call("POST", `${BASE3}/keys`, readKeys2, {
+        name: name.input.value.trim(),
+        passphrase: passphrase.input.value,
+        ...reason === "" ? {} : { reason }
+      });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, "The key is created and held on this node.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
   function sealButton(screen, region) {
     const button = el("button", { type: "button", class: "danger" }, "Seal…");
     button.addEventListener(
@@ -2305,7 +2346,7 @@
     const region = el("div", {});
     card.append(stateLine(keys2));
     if (keys2.state === "unsealed") {
-      card.append(el("div", { class: "actions" }, sealButton(screen, region)), region);
+      card.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen));
     } else {
       card.append(unsealForm(screen, keys2));
     }
@@ -3164,7 +3205,7 @@
   //! view; anyone else is told their key does not allow it. A new space takes a
   //! reason, which goes into the action record.
   var TITLE7 = "Spaces";
-  function createForm2(screen, opener) {
+  function createForm3(screen, opener) {
     const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
     const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     const said = el("div", { "aria-live": "polite" });
@@ -3225,7 +3266,7 @@
     fill(
       screen.main,
       head(TITLE7, `${answer.value.length.toLocaleString()} on this store`, opener),
-      createForm2(screen, opener),
+      createForm3(screen, opener),
       el(
         "section",
         { class: "card flush" },
@@ -3284,7 +3325,7 @@
     const input = el("input", { id, name: id, type: "checkbox" });
     return { row: el("label", { class: "check", for: id }, input, label), input };
   }
-  function createForm3(screen, opener) {
+  function createForm4(screen, opener) {
     const name = field("new-user", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique across the store.");
     const space2 = field("new-user-space", "Space", { spellcheck: "false", autocomplete: "off", required: "" });
     const role2 = el("select", { id: "new-user-role" }, el("option", { value: "member" }, "Member"), el("option", { value: "space_admin" }, "Space admin"));
@@ -3375,7 +3416,7 @@
     fill(
       screen.main,
       head(TITLE8, `${answer.value.length.toLocaleString()} you administer`, opener),
-      createForm3(screen, opener),
+      createForm4(screen, opener),
       el(
         "section",
         { class: "card flush" },

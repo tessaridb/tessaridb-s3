@@ -60,7 +60,8 @@ fn the_active_key_is_the_highest_numbered_server_key() {
         ring.state(),
         KeyState::Unsealed {
             active: "server_10".to_owned(),
-            keys: 4
+            keys: 4,
+            named: vec!["billing".to_owned()],
         }
     );
     assert!(!format!("{ring:?}").contains('['), "no key bytes printed");

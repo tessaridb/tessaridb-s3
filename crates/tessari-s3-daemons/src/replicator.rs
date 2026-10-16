@@ -12,7 +12,7 @@ use tessari_s3_core::authz::UserName;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_infrastructure::ReplicaClient;
 use tessari_s3_storage::Storage;
-use tessari_s3_storage::encryption::WrappedKey;
+use tessari_s3_storage::encryption::{Sealing, WrappedKey};
 use tessari_s3_storage::objects::{Content, VersionRead};
 use tessari_s3_storage::replication::Task;
 use tessari_s3_types::{BucketName, ObjectKey, SecretKey};
@@ -27,8 +27,21 @@ use body::blocks;
 /// The header a replica carries: the version id its source gave it.
 const REPLICA_VERSION: &str = "x-tessaridb-replica-version-id";
 
-/// The header that asks the destination to seal a replica whose source is sealed.
-const SEALED: (&str, &str) = ("x-amz-server-side-encryption", "AES256");
+/// The headers that ask the destination to seal a replica as its source is sealed: under the server's own key, or
+/// under the key of the same name.
+fn sealing_headers(sealing: &Sealing) -> Vec<(String, String)> {
+    let mode = "x-amz-server-side-encryption".to_owned();
+    match sealing {
+        Sealing::Server => vec![(mode, "AES256".to_owned())],
+        Sealing::Named(name) => vec![
+            (mode, "aws:kms".to_owned()),
+            (
+                "x-amz-server-side-encryption-aws-kms-key-id".to_owned(),
+                name.to_string(),
+            ),
+        ],
+    }
+}
 
 /// One stored piece of a version: its data id, its size, and the wrapped key it is sealed under, if any.
 type Piece = ([u8; 16], u64, Option<WrappedKey>);
@@ -128,9 +141,14 @@ impl Replicator {
                     .map(|part| (part.data, part.size, part.encryption.clone()))
                     .collect(),
             };
-            // A sealed source is sealed at the destination too, so a replica never lands in clear.
-            if pieces.iter().any(|(_, _, sealed)| sealed.is_some()) {
-                headers.push((SEALED.0.to_owned(), SEALED.1.to_owned()));
+            // A sealed source is sealed at the destination too, so a replica never lands in clear; a key id this
+            // build does not know is not sent plain.
+            if let Some((_, _, Some(wrapped))) =
+                pieces.iter().find(|(_, _, sealed)| sealed.is_some())
+            {
+                let sealing = Sealing::of(wrapped)
+                    .ok_or("the source names a key this build does not know")?;
+                headers.extend(sealing_headers(&sealing));
             }
             ("PUT", Some(blocks(objects.clone(), pieces)))
         };

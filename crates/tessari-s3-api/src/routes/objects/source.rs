@@ -11,6 +11,8 @@ use tessari_s3_core::objects::copy::{CopySource, CopySourceError};
 use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Uploaded};
 use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
 
+use tessari_s3_storage::encryption::Sealing;
+
 use super::{body, data};
 use crate::{Error, Result};
 
@@ -135,12 +137,11 @@ pub(crate) async fn into_file(
     objects: &ObjectService,
     mut stream: BoxStream<'static, std::io::Result<Bytes>>,
     length: u64,
-    sealed: bool,
+    sealing: Option<&Sealing>,
 ) -> Result<Uploaded> {
-    let mut upload = if sealed {
-        objects.upload_sealed(length).await?
-    } else {
-        objects.upload(length).await?
+    let mut upload = match sealing {
+        Some(sealing) => objects.upload_sealed(length, sealing).await?,
+        None => objects.upload(length).await?,
     };
     let id = upload.id();
     let mut written = Ok(());

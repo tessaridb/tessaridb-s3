@@ -15,7 +15,11 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::{Error, Result};
 
+mod sealing;
 pub(crate) mod stream;
+
+pub(crate) use sealing::NAMED_KEY_PREFIX;
+pub use sealing::{KeyName, Sealing};
 
 /// The algorithm every wrapped data key names; anything else does not open.
 pub const WRAP_ALGORITHM: &str = "xchacha20poly1305";

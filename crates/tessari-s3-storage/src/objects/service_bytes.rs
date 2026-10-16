@@ -9,6 +9,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::ObjectService;
+use crate::encryption::Sealing;
 use crate::objects::{
     Content, Lock, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
 };
@@ -92,23 +93,23 @@ impl ObjectService {
     }
 
     /// Writes `bytes` at `bucket/key` as an object of `content_type`, over whatever is there, with an MD5 ETag and the
-    /// default checksum as a PUT of the same bytes would have; sealed under a data key of its own when `sealed`. A
-    /// write that does not commit releases its file.
+    /// default checksum as a PUT of the same bytes would have; sealed under a data key of its own, wrapped by the key
+    /// `sealing` names, when it names one. A write that does not commit releases its file.
     ///
     /// # Errors
-    /// The drive's failure, or the metadata store's refusal or outage; [`Error::KeysSealed`] for a sealed write on a
-    /// node holding no encryption keys.
+    /// The drive's failure, or the metadata store's refusal or outage; [`Error::KeysSealed`] or
+    /// [`Error::UnknownKey`] for a sealed write this node cannot seal.
     pub async fn put_bytes(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
         bytes: &[u8],
         content_type: &str,
-        sealed: bool,
+        sealing: Option<&Sealing>,
     ) -> Result<Written> {
         let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         let mut source = bytes;
-        self.put_reader(bucket, key, &mut source, length, content_type, sealed)
+        self.put_reader(bucket, key, &mut source, length, content_type, sealing)
             .await
     }
 
@@ -124,12 +125,11 @@ impl ObjectService {
         source: &mut (impl AsyncRead + Unpin + Send),
         length: u64,
         content_type: &str,
-        sealed: bool,
+        sealing: Option<&Sealing>,
     ) -> Result<Written> {
-        let mut upload = if sealed {
-            self.upload_sealed(length).await?
-        } else {
-            self.upload(length).await?
+        let mut upload = match sealing {
+            Some(sealing) => self.upload_sealed(length, sealing).await?,
+            None => self.upload(length).await?,
         };
         let id = upload.id();
         let uploaded = match fill(&mut upload, source, length).await {

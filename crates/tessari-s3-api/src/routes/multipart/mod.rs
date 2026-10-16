@@ -17,6 +17,7 @@ use super::objects::headers::{read_integrity, read_put_headers};
 use super::objects::put::{check, declared_length};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, xml_response};
+use crate::routes::objects::sse::{answer_sse, etag_for};
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
@@ -110,7 +111,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         tags: headers.tags,
         checksum_algorithm,
         checksum_type,
-        encrypted: headers.encrypted,
+        encryption: headers.encryption.clone(),
     };
     let bucket = call.bucket()?;
     let Created::Created(id, initiated) = call
@@ -143,11 +144,8 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
             response.headers_mut().insert(name, value);
         }
     }
-    if upload.encrypted {
-        response.headers_mut().insert(
-            "x-amz-server-side-encryption",
-            HeaderValue::from_static("AES256"),
-        );
+    if let Some(sealing) = &upload.encryption {
+        answer_sse(response.headers_mut(), sealing);
     }
     Ok(response)
 }
@@ -175,7 +173,8 @@ pub(crate) async fn upload_part(
         return Err(no_such_upload());
     };
     quota::admit(call, bucket, None, length).await?;
-    let (uploaded, trailer) = data::receive(call, body, length, declared.encrypted).await?;
+    let (uploaded, trailer) =
+        data::receive(call, body, length, declared.encryption.as_ref()).await?;
     let algorithm = match check(&integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {
@@ -183,7 +182,7 @@ pub(crate) async fn upload_part(
             return Err(error);
         }
     };
-    let etag = format!("\"{}\"", uploaded.digests.md5_hex);
+    let etag = etag_for(&uploaded.digests.md5_hex, declared.encryption.as_ref())?;
     let part = NewPart {
         data: uploaded.id,
         size: uploaded.size,
@@ -210,11 +209,8 @@ pub(crate) async fn upload_part(
             if let Ok(value) = HeaderValue::from_str(&etag) {
                 response.headers_mut().insert("etag", value);
             }
-            if part.encryption.is_some() {
-                response.headers_mut().insert(
-                    "x-amz-server-side-encryption",
-                    HeaderValue::from_static("AES256"),
-                );
+            if let Some(sealing) = &declared.encryption {
+                answer_sse(response.headers_mut(), sealing);
             }
             if integrity.checksum.is_some()
                 && let Ok(value) = HeaderValue::from_str(uploaded.digests.value(algorithm))

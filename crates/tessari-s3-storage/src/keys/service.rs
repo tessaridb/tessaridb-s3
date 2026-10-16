@@ -8,6 +8,7 @@ use zeroize::Zeroizing;
 use super::model::{KeyRing, KeyState, Passphrase};
 use super::repository::KeyVault;
 use super::tessaridb::TessariKeys;
+use crate::encryption::KeyName;
 use crate::{Error, Result};
 
 /// The keys this node holds. Written only by an unseal or a seal; read on every encrypted read and write, and no
@@ -67,6 +68,22 @@ impl KeyService {
         let state = ring.state();
         *self.ring.write().unwrap_or_else(PoisonError::into_inner) = Some(ring);
         Ok(state)
+    }
+
+    /// Creates a key named `name` — 32 bytes from the platform's generator — in the keys vault, which `passphrase`
+    /// opens, then holds the keys again so this node can seal under it at once. Other nodes hold it after their next
+    /// unseal.
+    ///
+    /// # Errors
+    /// [`Error::KeyExists`] for a name in use, [`Error::KeysSealed`] before the vault exists (the first unseal creates
+    /// it), [`Error::WrongPassphrase`], [`Error::PassphraseThrottled`], [`Error::Randomness`], or the metadata store's.
+    pub async fn create_named(&self, passphrase: &Passphrase, name: &KeyName) -> Result<KeyState> {
+        let mut key = Zeroizing::new([0_u8; 32]);
+        getrandom::fill(key.as_mut_slice()).map_err(|_| Error::Randomness)?;
+        self.vault
+            .create(passphrase, &name.record_id(), &key)
+            .await?;
+        self.unseal(passphrase).await
     }
 
     /// Forgets the keys; encrypted objects cannot be read or written on this node until the next unseal.

@@ -9,9 +9,11 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use tessari_s3_constants::USER_METADATA_MAX;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
+use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_storage::objects::WriteCondition;
 use tessari_s3_types::ErrorCode;
 
+use super::sse::read_sse;
 use crate::{Error, Result};
 
 #[path = "headers_lock.rs"]
@@ -45,8 +47,8 @@ pub(crate) struct PutHeaders {
     pub(crate) condition: WriteCondition,
     pub(crate) tags: BTreeMap<String, String>,
     pub(crate) lock: LockAsked,
-    /// Whether the bytes are to be sealed under the server's own keys (`x-amz-server-side-encryption: AES256`).
-    pub(crate) encrypted: bool,
+    /// The key the bytes are to be sealed under, if any.
+    pub(crate) encryption: Option<Sealing>,
 }
 
 pub(super) fn not_implemented(what: &str) -> Error {
@@ -59,7 +61,7 @@ pub(super) fn not_implemented(what: &str) -> Error {
 /// Reads `headers` for a PutObject.
 ///
 /// # Errors
-/// `NotImplemented` for encryption under a KMS or a customer key, an Object Lock event hold, website redirects, appends and unsupported checksum
+/// `NotImplemented` for dual-layer KMS, an encryption context or a customer key, an Object Lock event hold, website redirects, appends and unsupported checksum
 /// algorithms; `InvalidTag` for a tagging header S3 refuses; `AccessControlListNotSupported`, `InvalidStorageClass`, `MetadataTooLarge`, `InvalidDigest`,
 /// `InvalidRequest` and `InvalidArgument` for the rest.
 pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
@@ -84,10 +86,6 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
             metadata.insert(meta.to_owned(), value.to_owned());
         } else if STORED.contains(&name) {
             system.insert(name.to_owned(), value.to_owned());
-        } else if name.starts_with("x-amz-server-side-encryption-") {
-            return Err(not_implemented(
-                "server-side encryption with a KMS key or a customer key",
-            ));
         } else if name == "x-amz-website-redirect-location" {
             return Err(not_implemented("a website redirect"));
         } else if name == "x-amz-write-offset-bytes" {
@@ -128,19 +126,7 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         *encoding = kept.join(", ");
     }
     system.retain(|_, value| !value.is_empty());
-    let encrypted = match text("x-amz-server-side-encryption") {
-        None => false,
-        Some("AES256") => true,
-        Some("aws:kms" | "aws:kms:dsse") => {
-            return Err(not_implemented("server-side encryption with a KMS key"));
-        }
-        Some(other) => {
-            return Err(Error::new(
-                ErrorCode::InvalidArgument,
-                format!("the server-side encryption {other} is not one S3 defines"),
-            ));
-        }
-    };
+    let encryption = read_sse(headers)?;
     let integrity = read_integrity(headers)?;
     let condition = match (text("if-none-match"), text("if-match")) {
         (None, None) => WriteCondition::None,
@@ -161,7 +147,7 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         condition,
         tags: crate::routes::tagging::header_tags(headers)?,
         lock: read_lock(headers)?,
-        encrypted,
+        encryption,
     })
 }
 

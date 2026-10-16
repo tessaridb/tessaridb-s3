@@ -12,6 +12,7 @@ use super::entity::complete_row;
 use super::model::{NewPart, NewUpload, OpenUpload, StoredPart};
 use super::repository::{MultipartRepository, PartRow, PendingBatch, UploadRecord};
 use crate::answers::{bucket_read, first_record, incarnation_of};
+use crate::encryption::{KeyName, Sealing};
 use crate::objects::entity::sealed_fields;
 use crate::{Error, Result};
 
@@ -161,7 +162,7 @@ impl MultipartRepository for TessariMultipart {
             .pool
             .run(
                 "SELECT bucket_name, key, incarnation, headers, metadata, tags, checksum_algorithm, checksum_type, \
-                 sse, initiated, position FROM ONLY uploads:$upload;",
+                 sse, sse_kms, initiated, position FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -191,7 +192,14 @@ impl MultipartRepository for TessariMultipart {
                 },
                 checksum_algorithm: optional("checksum_algorithm"),
                 checksum_type: optional("checksum_type"),
-                encrypted: optional("sse").as_deref() == Some("AES256"),
+                encryption: match (optional("sse").as_deref(), optional("sse_kms")) {
+                    (None, None) => None,
+                    (Some("AES256"), None) => Some(Sealing::Server),
+                    (Some("aws:kms"), Some(name)) => Some(Sealing::Named(
+                        KeyName::new(&name).ok_or_else(|| malformed("sse_kms"))?,
+                    )),
+                    _ => return Err(malformed("sse")),
+                },
             },
             opened: match fields.get("position") {
                 Some(Value::String(position)) => Some(OpenUpload {

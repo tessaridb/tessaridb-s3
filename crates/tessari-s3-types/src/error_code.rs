@@ -46,6 +46,8 @@ pub enum ErrorCode {
     InvalidTag,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
+    /// 400: the KMS key the request names does not exist.
+    KmsNotFound,
     /// 404: the bucket does not exist.
     NoSuchBucket,
     /// 400: the request body is longer than this operation accepts.
@@ -135,6 +137,7 @@ impl ErrorCode {
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
             Self::ServiceUnavailable => "ServiceUnavailable",
+            Self::KmsNotFound => "KMS.NotFoundException",
             Self::NoSuchBucket => "NoSuchBucket",
             Self::InvalidBucketState => "InvalidBucketState",
             Self::OperationAborted => "OperationAborted",
@@ -192,6 +195,7 @@ impl ErrorCode {
             | Self::InvalidTag => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
+            Self::KmsNotFound => 400,
             Self::NoSuchKey
             | Self::NoSuchUpload
             | Self::NoSuchVersion
@@ -266,6 +270,7 @@ mod tests {
             (ErrorCode::InvalidPartOrder, "InvalidPartOrder", 400),
             (ErrorCode::EntityTooSmall, "EntityTooSmall", 400),
             (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
+            (ErrorCode::KmsNotFound, "KMS.NotFoundException", 400),
             (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
             (
                 ErrorCode::MaxMessageLengthExceeded,

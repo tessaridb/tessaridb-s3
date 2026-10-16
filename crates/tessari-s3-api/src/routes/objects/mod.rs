@@ -9,6 +9,7 @@ pub(crate) mod put;
 mod read;
 mod replica;
 pub(crate) mod source;
+pub(crate) mod sse;
 
 use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode};

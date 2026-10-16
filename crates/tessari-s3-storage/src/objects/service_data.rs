@@ -8,7 +8,7 @@ use tessari_s3_constants::DATA_BLOCK_SIZE;
 use super::ObjectService;
 use crate::data::hex;
 use crate::encryption::stream::{Sealer, sealed_size};
-use crate::encryption::{DataKey, WrappedKey, unwrap, wrap};
+use crate::encryption::{DataKey, Sealing, WrappedKey, unwrap, wrap};
 use crate::objects::ObjectReader;
 use crate::objects::model::{HealBacklog, Healed, MoveBacklog, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
@@ -27,14 +27,23 @@ impl ObjectService {
     }
 
     /// As [`Self::upload`], every byte sealed under a data key drawn for this data id alone and wrapped under the
-    /// active encryption key; the finished upload carries the wrapped key. On a cluster member the shards are sealed
-    /// shards (format 4).
+    /// key `sealing` names — the server's active key, or a named one; the finished upload carries the wrapped key. On
+    /// a cluster member the shards are sealed shards (format 4).
     ///
     /// # Errors
-    /// [`Error::KeysSealed`] when this node holds no encryption keys; as [`Self::upload`]; [`Error::SealedLength`]
-    /// when `size` cannot be laid out in sealed blocks.
-    pub async fn upload_sealed(&self, size: u64) -> Result<Upload> {
+    /// [`Error::KeysSealed`] when this node holds no encryption keys, [`Error::UnknownKey`] for a name it does not
+    /// hold; as [`Self::upload`]; [`Error::SealedLength`] when `size` cannot be laid out in sealed blocks.
+    pub async fn upload_sealed(&self, size: u64, sealing: &Sealing) -> Result<Upload> {
         let ring = self.keys.ring()?;
+        let kek = match sealing {
+            Sealing::Server => ring.active(),
+            Sealing::Named(name) => {
+                ring.get(&name.record_id())
+                    .ok_or_else(|| Error::UnknownKey {
+                        name: name.to_string(),
+                    })?
+            }
+        };
         let id = *uuid::Uuid::new_v4().as_bytes();
         let stored_block = self.stored_block();
         let stored = sealed_size(size, stored_block).ok_or(Error::SealedLength {
@@ -42,7 +51,7 @@ impl ObjectService {
             received: 0,
         })?;
         let key = DataKey::generate()?;
-        let wrapped = wrap(ring.active(), &key, id)?;
+        let wrapped = wrap(kek, &key, id)?;
         let sealer = Sealer::new(key, id, size, stored_block)?;
         Ok(self.start(id, stored, true).await?.sealing(sealer, wrapped))
     }

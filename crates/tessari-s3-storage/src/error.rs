@@ -120,6 +120,18 @@ pub enum Error {
     /// This node holds no encryption keys: an operator has not unsealed them since it started.
     #[error("the encryption keys are sealed on this node")]
     KeysSealed,
+    /// A key was to be created under an id the keys vault already holds; keys are never replaced.
+    #[error("the keys vault already holds {id}")]
+    KeyExists {
+        /// The record id.
+        id: String,
+    },
+    /// An object was to be sealed under a named key this node does not hold.
+    #[error("no encryption key is named {name}")]
+    UnknownKey {
+        /// The name asked for.
+        name: String,
+    },
     /// A keys passphrase that cannot be used; the reason never quotes it.
     #[error("the keys passphrase is not usable: {reason}")]
     WeakPassphrase {
@@ -167,9 +179,9 @@ impl Error {
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }
             | Self::OtherRegion { .. } => ErrorCategory::Validation,
-            Self::Contended | Self::Held => ErrorCategory::Conflict,
+            Self::Contended | Self::Held | Self::KeyExists { .. } => ErrorCategory::Conflict,
             Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
-            Self::WeakPassphrase { .. } => ErrorCategory::Validation,
+            Self::WeakPassphrase { .. } | Self::UnknownKey { .. } => ErrorCategory::Validation,
             Self::WrongPassphrase => ErrorCategory::Unauthorized,
         }
     }

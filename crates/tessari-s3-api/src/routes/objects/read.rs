@@ -10,6 +10,7 @@ use tessari_s3_storage::objects::{Content, StoredObject, VersionRead};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
+use super::sse::{answer_sse, object_sealing};
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
@@ -243,10 +244,8 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     if let Some(status) = &object.replication {
         set(headers, "x-amz-replication-status", status);
     }
-    let sealed_parts = matches!(&object.content, Content::Parts(multipart)
-        if multipart.parts.iter().any(|part| part.encryption.is_some()));
-    if object.encryption.is_some() || sealed_parts {
-        set(headers, "x-amz-server-side-encryption", "AES256");
+    if let Some(sealing) = object_sealing(object) {
+        answer_sse(headers, &sealing);
     }
     if !object.tags.is_empty() {
         set(
