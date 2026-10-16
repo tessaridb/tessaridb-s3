@@ -84,6 +84,7 @@ mod signer;
 mod spaces;
 mod sse;
 mod sse_c;
+mod sse_c_custody;
 mod sse_default;
 mod sse_erasure;
 mod sse_kms;
