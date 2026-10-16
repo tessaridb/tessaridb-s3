@@ -289,3 +289,55 @@ async fn multipart_parts_and_copies_asked_to_be_encrypted_are_sealed_and_read_wh
     );
     std::fs::remove_dir_all(dir).expect("cleanup");
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn removing_the_newest_version_leaves_the_sealed_one_before_it_readable() {
+    let _why = IGNORED;
+    let (state, _, dir) = fresh_with(scratch_dir()).await;
+    assert_eq!(call(&state, "PUT", "/kept", vec![], b"").await.status, 200);
+    let versioning = b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
+    let enabled = call(
+        &state,
+        "PUT",
+        "/kept",
+        vec![("versioning", None)],
+        versioning,
+    )
+    .await;
+    assert_eq!(enabled.status, 200, "{}", enabled.body);
+    unseal(&state).await;
+    let first = body();
+    let older = call_with(&state, "PUT", "/kept/k", vec![], vec![SSE], &first).await;
+    assert_eq!(older.status, 200, "{}", older.body);
+    let newer = call_with(
+        &state,
+        "PUT",
+        "/kept/k",
+        vec![],
+        vec![SSE],
+        b"the newer version",
+    )
+    .await;
+    let newest = newer
+        .headers
+        .get("x-amz-version-id")
+        .and_then(|id| id.to_str().ok())
+        .expect("a version id")
+        .to_owned();
+    let removed = call(
+        &state,
+        "DELETE",
+        "/kept/k",
+        vec![("versionId", Some(newest.as_str()))],
+        b"",
+    )
+    .await;
+    assert_eq!(removed.status, 204, "{}", removed.body);
+
+    let got = call(&state, "GET", "/kept/k", vec![], b"").await;
+    assert_eq!(got.status, 200, "{}", got.body);
+    assert_eq!(got.bytes, first, "the older version reads back whole");
+    assert_eq!(sse_header(&got), Some(&b"AES256"[..]));
+    std::fs::remove_dir_all(dir).expect("cleanup");
+}
