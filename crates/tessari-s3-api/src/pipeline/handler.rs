@@ -160,6 +160,11 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
             .map(|bucket| bucket.as_str().to_owned());
         trail.key = addressed.key.as_ref().map(|key| key.as_str().to_owned());
     }
+    // A browser's form upload is authenticated by its own fields, and is a PutObject of the key it names.
+    if super::post_form::is_form_upload(&parts, &addressed) {
+        trail.operation = "PostObject";
+        return super::post_form::post(&state, &parts, &addressed, body, trail).await;
+    }
     // A browser's preflight carries no credentials: it is answered from the bucket's CORS rules alone.
     if parts.method == axum::http::Method::OPTIONS {
         trail.operation = "PreflightCors";
@@ -255,7 +260,7 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
 
 /// What a bucket policy's conditions read of this request: its transport, peer, time, how it was signed, the
 /// headers a write declares and, on a listing, its prefix, delimiter and page size.
-fn context(
+pub(super) fn context(
     state: &ApiState,
     parts: &axum::http::request::Parts,
     query: &[(String, Option<String>)],

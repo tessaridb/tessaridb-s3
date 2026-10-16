@@ -68,6 +68,10 @@ pub enum ErrorCode {
     AccessForbidden,
     /// 400: a CORS preflight without its Origin or requested method.
     BadRequest,
+    /// 400: a form upload whose body is not a well-formed multipart/form-data document.
+    MalformedPostRequest,
+    /// 400: a form upload's policy document cannot be read.
+    InvalidPolicyDocument,
     /// 404: the bucket carries no Block Public Access configuration.
     NoSuchPublicAccessBlockConfiguration,
     /// 400: the bucket would be created in another region than this server's.
@@ -168,6 +172,8 @@ impl ErrorCode {
             Self::NoSuchCorsConfiguration => "NoSuchCORSConfiguration",
             Self::AccessForbidden => "AccessForbidden",
             Self::BadRequest => "BadRequest",
+            Self::MalformedPostRequest => "MalformedPOSTRequest",
+            Self::InvalidPolicyDocument => "InvalidPolicyDocument",
             Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
@@ -248,7 +254,9 @@ impl ErrorCode {
             | Self::InvalidPartOrder
             | Self::EntityTooSmall
             | Self::AccessControlListNotSupported
-            | Self::BadRequest => 400,
+            | Self::BadRequest
+            | Self::MalformedPostRequest
+            | Self::InvalidPolicyDocument => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
             Self::SlowDown => 503,
@@ -330,6 +338,12 @@ mod tests {
             ),
             (ErrorCode::AccessForbidden, "AccessForbidden", 403),
             (ErrorCode::BadRequest, "BadRequest", 400),
+            (ErrorCode::MalformedPostRequest, "MalformedPOSTRequest", 400),
+            (
+                ErrorCode::InvalidPolicyDocument,
+                "InvalidPolicyDocument",
+                400,
+            ),
             (
                 ErrorCode::NoSuchPublicAccessBlockConfiguration,
                 "NoSuchPublicAccessBlockConfiguration",
