@@ -73,6 +73,13 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
     let Some(declared) = storage.multipart().find(bucket, key, id).await? else {
         return Err(no_such_upload());
     };
+    // A copied part arrives with no customer's key to seal it under.
+    if declared.customer.is_some() {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "copying a part into an upload sealed under a customer-provided key is not implemented",
+        ));
+    }
     let objects = storage.objects();
     let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
     let (first, last, length) = wanted(call, object.size)?;

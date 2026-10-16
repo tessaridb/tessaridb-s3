@@ -21,7 +21,7 @@ const VERIFY_INFO: &[u8] = b"tessaridb-s3/customer-verifier/v1";
 const VERIFY_LABEL: &[u8] = b"tessaridb-s3/customer-key";
 
 /// A customer's 256-bit key, as one request brought it. Never printed, never stored, zeroed when dropped.
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct CustomerKey([u8; 32]);
 
 impl CustomerKey {

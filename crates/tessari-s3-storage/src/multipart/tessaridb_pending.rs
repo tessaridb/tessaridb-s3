@@ -114,6 +114,12 @@ pub(super) async fn create(
             record.insert("sse_kms".to_owned(), Value::String(name.to_string()));
         }
     }
+    if let Some(seal) = &upload.customer {
+        record.extend(
+            crate::objects::entity::seal_fields(seal)
+                .map(|(field, value)| (field.to_owned(), value)),
+        );
+    }
     for (field, value) in [
         ("checksum_algorithm", &upload.checksum_algorithm),
         ("checksum_type", &upload.checksum_type),

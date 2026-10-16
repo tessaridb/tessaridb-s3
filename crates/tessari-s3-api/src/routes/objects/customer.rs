@@ -152,21 +152,34 @@ pub(crate) fn customer_seal(object: &StoredObject) -> Option<&CustomerSeal> {
     }
 }
 
-/// Admits a read of `object` bringing `customer`'s key, or none: the key it was sealed under, or none for an object
-/// sealed without one — compared through the seal's verifier, before any byte is opened.
+/// Admits a read of `object` bringing `customer`'s key, or none, as [`admit_key`] admits it against the object's seal.
 ///
 /// # Errors
-/// `InvalidRequest` for a key in the clear, a missing key, or a key for an object sealed without one;
-/// `AccessDenied` for another key.
+/// As [`admit_key`].
 pub(crate) fn admit_read(
     call: &Call<'_>,
     object: &StoredObject,
     customer: Option<&Customer>,
 ) -> Result<()> {
+    admit_key(call, customer_seal(object), customer)
+}
+
+/// Admits a request bringing `customer`'s key, or none, to data sealed under `seal`, or under none: the key the seal
+/// was made for, or none for data sealed without one — compared through the seal's verifier, before any byte is
+/// opened or written.
+///
+/// # Errors
+/// `InvalidRequest` for a key in the clear, a missing key, or a key for data sealed without one; `AccessDenied` for
+/// another key.
+pub(crate) fn admit_key(
+    call: &Call<'_>,
+    seal: Option<&CustomerSeal>,
+    customer: Option<&Customer>,
+) -> Result<()> {
     if customer.is_some() {
         over_tls(call)?;
     }
-    match (customer_seal(object), customer) {
+    match (seal, customer) {
         (None, None) => Ok(()),
         (Some(_), None) => Err(key_required()),
         (None, Some(_)) => Err(Error::new(

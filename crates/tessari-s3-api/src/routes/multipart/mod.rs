@@ -12,12 +12,13 @@ use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_storage::multipart::{Created, NewPart, NewUpload, PartWritten};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber, Timestamp, UploadId};
 
-use super::objects::data;
+use super::objects::customer::{admit, admit_key, answer_customer, read_customer};
+use super::objects::data::{self, Seal};
 use super::objects::headers::{read_integrity, read_put_headers};
 use super::objects::put::{check, declared_length};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, xml_response};
-use crate::routes::objects::sse::{answer_sse, etag_for};
+use crate::routes::objects::sse::{answer_sse, etag_for, opaque_etag};
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape, xml_text};
 use crate::{Error, Result};
@@ -96,12 +97,10 @@ fn key_text(key: &ObjectKey) -> Result<String> {
 /// `POST /{bucket}/{key}?uploads`.
 pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
-    if headers.customer.is_some() {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "a multipart upload sealed under a customer-provided key is not implemented",
-        ));
-    }
+    let customer = match &headers.customer {
+        Some(customer) => Some(admit(call, customer).await?),
+        None => None,
+    };
     // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
     // carried yet, and are refused rather than dropped.
     if headers.lock.asked {
@@ -117,8 +116,14 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         tags: headers.tags,
         checksum_algorithm,
         checksum_type,
-        encryption: crate::routes::objects::sse::requested_or_default(call, headers.encryption)
-            .await?,
+        // A customer's key replaces the bucket's default: every part is sealed under it alone.
+        encryption: match customer {
+            Some(_) => None,
+            None => {
+                crate::routes::objects::sse::requested_or_default(call, headers.encryption).await?
+            }
+        },
+        customer,
     };
     let bucket = call.bucket()?;
     let Created::Created(id, initiated) = call
@@ -154,6 +159,9 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
     if let Some(sealing) = &upload.encryption {
         answer_sse(response.headers_mut(), sealing);
     }
+    if let Some(customer) = &headers.customer {
+        answer_customer(response.headers_mut(), customer);
+    }
     Ok(response)
 }
 
@@ -179,9 +187,14 @@ pub(crate) async fn upload_part(
     let Some(declared) = storage.multipart().find(bucket, key, id).await? else {
         return Err(no_such_upload());
     };
+    let customer = read_customer(call.headers)?;
+    admit_key(call, declared.customer.as_ref(), customer.as_ref())?;
     quota::admit(call, bucket, None, length).await?;
-    let (uploaded, trailer) =
-        data::receive(call, body, length, declared.encryption.as_ref().into()).await?;
+    let seal = match (&declared.customer, &customer) {
+        (Some(seal), Some(customer)) => Seal::Customer(&customer.key, seal),
+        _ => declared.encryption.as_ref().into(),
+    };
+    let (uploaded, trailer) = data::receive(call, body, length, seal).await?;
     let algorithm = match check(&integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {
@@ -189,7 +202,11 @@ pub(crate) async fn upload_part(
             return Err(error);
         }
     };
-    let etag = etag_for(&uploaded.digests.md5_hex, declared.encryption.as_ref())?;
+    let etag = if declared.customer.is_some() {
+        opaque_etag()?
+    } else {
+        etag_for(&uploaded.digests.md5_hex, declared.encryption.as_ref())?
+    };
     let part = NewPart {
         data: uploaded.id,
         size: uploaded.size,
@@ -218,6 +235,9 @@ pub(crate) async fn upload_part(
             }
             if let Some(sealing) = &declared.encryption {
                 answer_sse(response.headers_mut(), sealing);
+            }
+            if let Some(customer) = &customer {
+                answer_customer(response.headers_mut(), customer);
             }
             if integrity.checksum.is_some()
                 && let Ok(value) = HeaderValue::from_str(uploaded.digests.value(algorithm))

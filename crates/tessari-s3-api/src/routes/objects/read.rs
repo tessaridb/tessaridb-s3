@@ -145,7 +145,14 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             Content::Parts(multipart) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
                 let parts = &multipart.parts;
-                body::send_parts(call.state.storage().objects(), parts, start, end).await?
+                body::send_parts(
+                    call.state.storage().objects(),
+                    parts,
+                    customer.as_ref().map(|customer| &customer.key),
+                    start,
+                    end,
+                )
+                .await?
             }
         }
     };

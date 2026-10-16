@@ -120,7 +120,7 @@ pub(crate) async fn bytes(
         }
         Content::Parts(multipart) => {
             let parts = &multipart.parts;
-            body::stream_parts(objects, parts, start, end).await?
+            body::stream_parts(objects, parts, None, start, end).await?
         }
     })
 }

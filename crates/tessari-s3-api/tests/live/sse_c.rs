@@ -6,6 +6,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use md5::{Digest, Md5};
 
+use crate::multipart::text;
 use crate::object_lock::refused;
 use crate::sse::{body, drive_holds, sse_header, unseal};
 use crate::{IGNORED, Seen, call, call_tls, call_with, fresh_with, scratch_dir};
@@ -312,5 +313,136 @@ async fn customer_key_headers_are_checked_before_anything_is_stored() {
         (404, Some("NoSuchKey")),
         "{}",
         nothing.body
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn every_part_of_a_customer_sealed_upload_must_bring_the_key_it_was_created_with() {
+    let _why = IGNORED;
+    let (state, _, dir) = fresh_with(scratch_dir()).await;
+    allowing(&state, "sealed").await;
+    let customer = Customer::of(&[7_u8; 32]);
+    let other = Customer::of(&[8_u8; 32]);
+    let path = "/sealed/large";
+    // Every part but the last holds at least 5 MiB.
+    let first = [body(), body()].concat();
+    let second = b"the last part may be small".to_vec();
+
+    let in_clear = call_with(
+        &state,
+        "POST",
+        path,
+        vec![("uploads", None)],
+        customer.headers(),
+        b"",
+    )
+    .await;
+    assert_eq!(
+        refused(&in_clear),
+        (400, Some("InvalidRequest")),
+        "{}",
+        in_clear.body
+    );
+    let created = call_tls(
+        &state,
+        "POST",
+        path,
+        vec![("uploads", None)],
+        customer.headers(),
+        b"",
+    )
+    .await;
+    assert_eq!(created.status, 200, "{}", created.body);
+    assert_eq!(header(&created, KEY_MD5), Some(customer.md5.as_str()));
+    let upload = text(&created.body, "UploadId").expect("an upload id");
+    let at = |number: &'static str| {
+        vec![
+            ("partNumber", Some(number)),
+            ("uploadId", Some(upload.as_str())),
+        ]
+    };
+
+    let keyless = call_tls(&state, "PUT", path, at("1"), vec![], &first).await;
+    assert_eq!(
+        refused(&keyless),
+        (400, Some("InvalidRequest")),
+        "{}",
+        keyless.body
+    );
+    let wrong = call_tls(&state, "PUT", path, at("1"), other.headers(), &first).await;
+    assert_eq!(
+        refused(&wrong),
+        (403, Some("AccessDenied")),
+        "{}",
+        wrong.body
+    );
+    let copied = call_tls(
+        &state,
+        "PUT",
+        path,
+        at("1"),
+        vec![("x-amz-copy-source", "/sealed/large")],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        refused(&copied),
+        (501, Some("NotImplemented")),
+        "a copied part would not be under the upload's key: {}",
+        copied.body
+    );
+    let one = call_tls(&state, "PUT", path, at("1"), customer.headers(), &first).await;
+    assert_eq!(one.status, 200, "{}", one.body);
+    assert_eq!(header(&one, KEY_MD5), Some(customer.md5.as_str()));
+    assert_ne!(
+        header(&one, "etag").map(str::to_owned),
+        Some(format!("\"{}\"", crate::multipart::md5_hex(&first))),
+        "a part's ETag does not tell its bytes either"
+    );
+    let two = call_tls(&state, "PUT", path, at("2"), customer.headers(), &second).await;
+    assert_eq!(two.status, 200, "{}", two.body);
+
+    let listed = crate::complete::document(&[
+        ("1", header(&one, "etag").expect("an ETag")),
+        ("2", header(&two, "etag").expect("an ETag")),
+    ]);
+    let done = call_tls(
+        &state,
+        "POST",
+        path,
+        vec![("uploadId", Some(upload.as_str()))],
+        vec![],
+        &listed,
+    )
+    .await;
+    assert_eq!(done.status, 200, "completing needs no key: {}", done.body);
+
+    let keyless_read = call_tls(&state, "GET", path, vec![], vec![], b"").await;
+    assert_eq!(
+        refused(&keyless_read),
+        (400, Some("InvalidRequest")),
+        "{}",
+        keyless_read.body
+    );
+    let read = call_tls(&state, "GET", path, vec![], customer.headers(), b"").await;
+    assert_eq!(read.status, 200, "{}", read.body);
+    assert!(
+        read.bytes == [first.as_slice(), second.as_slice()].concat(),
+        "every part opens under the key"
+    );
+    let mut across = customer.headers();
+    let end = first.len() + 4;
+    let range = format!("bytes={}-{end}", first.len() - 5);
+    across.push(("range", range.as_str()));
+    let slice = call_tls(&state, "GET", path, vec![], across, b"").await;
+    assert_eq!(slice.status, 206, "{}", slice.body);
+    assert!(
+        slice.bytes == [&first[first.len() - 5..], &second[..5]].concat(),
+        "a range across parts opens both"
+    );
+    assert!(
+        !drive_holds(&state, &dir, "sealed", "large", &first[..64]).await,
+        "the drive holds no plaintext"
     );
 }

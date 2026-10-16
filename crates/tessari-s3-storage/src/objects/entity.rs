@@ -87,10 +87,35 @@ pub(crate) fn sealed_fields(key: &WrappedKey) -> Vec<(&'static str, Value)> {
         ("sse_key", Value::Bytes(key.ciphertext.clone())),
     ];
     if let Some(seal) = &key.customer {
-        fields.push(("sse_c_salt", Value::Bytes(seal.salt.to_vec())));
-        fields.push(("sse_c_verifier", Value::Bytes(seal.verifier.to_vec())));
+        fields.extend(seal_fields(seal));
     }
     fields
+}
+
+/// The fields holding a customer's key's seal: its salt and its verifier.
+pub(crate) fn seal_fields(seal: &CustomerSeal) -> [(&'static str, Value); 2] {
+    [
+        ("sse_c_salt", Value::Bytes(seal.salt.to_vec())),
+        ("sse_c_verifier", Value::Bytes(seal.verifier.to_vec())),
+    ]
+}
+
+/// A record's customer seal: none when it carries neither field, refused when it carries one or a field that is not
+/// 32 bytes.
+pub(crate) fn customer_seal(fields: &Fields) -> Result<Option<CustomerSeal>> {
+    let field = |name| {
+        fields
+            .get(name)
+            .filter(|value| !matches!(value, Value::None))
+    };
+    match (field("sse_c_salt"), field("sse_c_verifier")) {
+        (None, None) => Ok(None),
+        (Some(salt), Some(verifier)) => Ok(Some(CustomerSeal {
+            salt: seal_part(salt).ok_or_else(|| malformed("a customer key's salt"))?,
+            verifier: seal_part(verifier).ok_or_else(|| malformed("a customer key's verifier"))?,
+        })),
+        _ => Err(malformed("a customer key's seal")),
+    }
 }
 
 /// A customer seal's 32-byte field.
@@ -121,15 +146,7 @@ pub(crate) fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
             Some(Value::Bytes(nonce)),
             Some(Value::Bytes(ciphertext)),
         ) => {
-            let customer = match (field("sse_c_salt"), field("sse_c_verifier")) {
-                (None, None) => None,
-                (Some(salt), Some(verifier)) => Some(CustomerSeal {
-                    salt: seal_part(salt).ok_or_else(|| malformed("a customer key's salt"))?,
-                    verifier: seal_part(verifier)
-                        .ok_or_else(|| malformed("a customer key's verifier"))?,
-                }),
-                _ => return Err(malformed("a customer key's seal")),
-            };
+            let customer = customer_seal(fields)?;
             // A key wrapped under a customer's key carries the seal it opens with, and only such a key does.
             if customer.is_some() != (kek_id == CUSTOMER_KEK_ID) {
                 return Err(malformed("a customer key's seal"));

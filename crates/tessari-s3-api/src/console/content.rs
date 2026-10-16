@@ -96,7 +96,7 @@ pub(super) async fn download(
         .map_err(|error| failed(&error))?,
         Content::Parts(multipart) => {
             let parts = &multipart.parts;
-            body::send_parts(objects, parts, 0, last)
+            body::send_parts(objects, parts, None, 0, last)
                 .await
                 .map_err(|error| failed(&error))?
         }

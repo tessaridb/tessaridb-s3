@@ -162,7 +162,7 @@ impl MultipartRepository for TessariMultipart {
             .pool
             .run(
                 "SELECT bucket_name, key, incarnation, headers, metadata, tags, checksum_algorithm, checksum_type, \
-                 sse, sse_kms, initiated, position FROM ONLY uploads:$upload;",
+                 sse, sse_kms, sse_c_salt, sse_c_verifier, initiated, position FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -200,6 +200,7 @@ impl MultipartRepository for TessariMultipart {
                     )),
                     _ => return Err(malformed("sse")),
                 },
+                customer: crate::objects::entity::customer_seal(&fields)?,
             },
             opened: match fields.get("position") {
                 Some(Value::String(position)) => Some(OpenUpload {

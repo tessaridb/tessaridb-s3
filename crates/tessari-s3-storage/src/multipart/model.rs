@@ -8,7 +8,7 @@ use tessari_s3_core::objects::upload_listing::UploadPage;
 use tessari_s3_types::{PartNumber, Timestamp, UploadId};
 
 use crate::encryption::Sealing;
-use crate::encryption::WrappedKey;
+use crate::encryption::{CustomerSeal, WrappedKey};
 use crate::objects::{WriteCondition, Written};
 
 /// What CreateMultipartUpload fixes for the object the upload will become.
@@ -26,6 +26,8 @@ pub struct NewUpload {
     pub checksum_type: Option<String>,
     /// The key every part is sealed under, as Create asked; none when the parts are plain.
     pub encryption: Option<Sealing>,
+    /// The seal of the customer's key every part must bring and is sealed under (SSE-C), never the key.
+    pub customer: Option<CustomerSeal>,
 }
 
 /// One uploaded part ready to commit: its bytes are already in data file `data`.

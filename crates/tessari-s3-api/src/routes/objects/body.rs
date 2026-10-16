@@ -70,17 +70,18 @@ pub(crate) async fn send(
 }
 
 /// The body for bytes `start..=end` of an object made of `parts`, in object order, each opened under its own data key
-/// when sealed. The first part's
+/// when sealed — with `customer`'s key when a customer's key wrapped it. The first part's
 /// first block is verified before this returns, as for one data file; each later part's file is opened when the body
 /// reaches it, and a failure there ends the body early.
 pub(crate) async fn send_parts(
     objects: &ObjectService,
     parts: &[Part],
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<Body> {
     Ok(Body::from_stream(
-        stream_parts(objects, parts, start, end).await?,
+        stream_parts(objects, parts, customer, start, end).await?,
     ))
 }
 
@@ -88,6 +89,7 @@ pub(crate) async fn send_parts(
 pub(super) async fn stream_parts(
     objects: &ObjectService,
     parts: &[Part],
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
@@ -107,23 +109,26 @@ pub(super) async fn stream_parts(
         part.data,
         part.size,
         part.encryption.as_ref(),
-        None,
+        customer,
         from,
         to,
     )
     .await?;
     let objects = objects.clone();
+    // Each later part is opened when the body reaches it, so it holds its own copy of the key.
+    let customer = customer.cloned();
     let rest: Vec<(Part, u64, u64)> = wanted.collect();
     let later = futures_util::stream::iter(rest)
         .then(move |(part, from, to)| {
             let objects = objects.clone();
+            let customer = customer.clone();
             async move {
                 blocks(
                     &objects,
                     part.data,
                     part.size,
                     part.encryption.as_ref(),
-                    None,
+                    customer.as_ref(),
                     from,
                     to,
                 )
