@@ -227,6 +227,7 @@ impl MultipartService {
             etag: assembled.etag.clone(),
             headers: declared.headers,
             metadata: declared.metadata,
+            tags: declared.tags,
             checksums: [(
                 checksum.algorithm().name().to_owned(),
                 assembled.checksum.clone(),

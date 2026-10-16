@@ -21,10 +21,12 @@ const fn malformed(reason: &'static str) -> Error {
 }
 
 /// The record a request addresses, as read.
-struct Addressed {
-    target: Vec<u8>,
-    version_id: String,
-    marker: bool,
+pub(super) struct Addressed {
+    pub(super) target: Vec<u8>,
+    pub(super) version_id: String,
+    pub(super) marker: bool,
+    /// Its tags, as stored.
+    pub(super) tags: Option<Value>,
     lock: VersionLock,
     /// Whether its retention has not passed, by the store's clock.
     retained: bool,
@@ -50,7 +52,7 @@ fn stored_lock(fields: &std::collections::BTreeMap<String, Value>) -> Result<Ver
 
 impl TessariObjects {
     /// The version `version` names (the current one when `None`); `Err(outcome)` when there is none to address.
-    async fn addressed(
+    pub(super) async fn addressed(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
@@ -89,7 +91,7 @@ impl TessariObjects {
         let answers = self
             .pool
             .run(
-                "SELECT version_id, marker, lock_mode, retain_until, legal_hold, \
+                "SELECT version_id, marker, tags, lock_mode, retain_until, legal_hold, \
                  (retain_until != NONE AND retain_until > time::now()) AS retained FROM ONLY versions:$target;",
                 vec![("target".to_owned(), Value::Bytes(target.clone()))],
             )
@@ -103,6 +105,7 @@ impl TessariObjects {
         Ok(Ok(Addressed {
             target,
             marker: fields.get("marker") == Some(&Value::Bool(true)),
+            tags: fields.get("tags").cloned(),
             lock: stored_lock(&fields)?,
             retained: fields.get("retained") == Some(&Value::Bool(true)),
             version_id,

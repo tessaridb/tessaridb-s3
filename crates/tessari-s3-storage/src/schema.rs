@@ -75,6 +75,7 @@ DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
 DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;
 DEFINE EVENT OR REPLACE object_lock_kept ON buckets FOR UPDATE \
 WHEN $before.object_lock != NONE AND ($after.object_lock = NONE OR $after.versioning != 'Enabled') \
 THEN THROW 'ObjectLockKept: a bucket with Object Lock keeps it, and keeps versioning enabled';
@@ -163,6 +164,9 @@ DEFINE FIELD IF NOT EXISTS lock_mode ON versions TYPE 'COMPLIANCE' | 'GOVERNANCE
 DEFINE FIELD IF NOT EXISTS retain_until ON versions TYPE datetime;
 DEFINE FIELD IF NOT EXISTS legal_hold ON versions TYPE bool;
 DEFINE FIELD IF NOT EXISTS lock_bypass ON versions TYPE bool;
+DEFINE FIELD IF NOT EXISTS tags ON versions TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
+DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
 DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \
 WHEN ($before.legal_hold ?? false) OR ($before.retain_until != NONE AND $before.retain_until > time::now() \
  AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false)) \

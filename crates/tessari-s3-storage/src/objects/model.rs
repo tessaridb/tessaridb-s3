@@ -47,6 +47,8 @@ pub struct NewObject {
     pub headers: BTreeMap<String, String>,
     /// User metadata, lowercase names without the `x-amz-meta-` prefix.
     pub metadata: BTreeMap<String, String>,
+    /// Its tags by key; none for most objects.
+    pub tags: BTreeMap<String, String>,
     /// Checksums by algorithm name (`CRC64NVME` …), base64.
     pub checksums: BTreeMap<String, String>,
     /// The object's bytes or the data file holding them.
@@ -70,6 +72,8 @@ pub struct StoredObject {
     pub headers: BTreeMap<String, String>,
     /// User metadata.
     pub metadata: BTreeMap<String, String>,
+    /// Its tags by key.
+    pub tags: BTreeMap<String, String>,
     /// Checksums by algorithm name.
     pub checksums: BTreeMap<String, String>,
     /// The bytes or the data file holding them.
@@ -231,7 +235,7 @@ pub enum VersionsListed {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VersionRead {
     /// The version holds an object; its parts are read when it is a multipart one.
-    Object(StoredObject),
+    Object(Box<StoredObject>),
     /// The version is a delete marker, written then.
     Marker {
         /// When the marker was written.

@@ -107,6 +107,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
     let upload = NewUpload {
         headers: headers.system,
         metadata: headers.metadata,
+        tags: headers.tags,
         checksum_algorithm,
         checksum_type,
     };

@@ -159,7 +159,7 @@ impl MultipartRepository for TessariMultipart {
         let answers = self
             .pool
             .run(
-                "SELECT bucket_name, key, incarnation, headers, metadata, checksum_algorithm, checksum_type, \
+                "SELECT bucket_name, key, incarnation, headers, metadata, tags, checksum_algorithm, checksum_type, \
                  initiated, position FROM ONLY uploads:$upload;",
                 parameters,
             )
@@ -184,6 +184,10 @@ impl MultipartRepository for TessariMultipart {
             declared: NewUpload {
                 headers: string_map(fields.get("headers"))?,
                 metadata: string_map(fields.get("metadata"))?,
+                tags: match fields.get("tags") {
+                    None | Some(Value::None) => BTreeMap::new(),
+                    tags => string_map(tags)?,
+                },
                 checksum_algorithm: optional("checksum_algorithm"),
                 checksum_type: optional("checksum_type"),
             },

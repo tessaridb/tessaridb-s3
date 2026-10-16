@@ -45,12 +45,12 @@ impl ObjectService {
                     at,
                 }) if incarnation == current => {
                     let Content::Parts(multipart) = &mut object.content else {
-                        return Ok(VersionRead::Object(*object));
+                        return Ok(VersionRead::Object(object));
                     };
                     if let Some(parts) = self.repository.version_parts(at, multipart.upload).await?
                     {
                         multipart.parts = parts;
-                        return Ok(VersionRead::Object(*object));
+                        return Ok(VersionRead::Object(object));
                     }
                 }
                 _ => return Ok(VersionRead::Absent),

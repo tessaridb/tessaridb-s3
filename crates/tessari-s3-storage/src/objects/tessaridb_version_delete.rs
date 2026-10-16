@@ -12,7 +12,7 @@ use crate::answers::{bucket_read, first_record};
 use crate::{Error, Result};
 
 /// A version's fields, as a read of it projects them.
-const FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, headers, metadata, checksums, data, \
+const FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, headers, metadata, tags, checksums, data, \
                       upload, parts, version_id, seq, marker";
 
 const fn malformed(reason: &'static str) -> Error {

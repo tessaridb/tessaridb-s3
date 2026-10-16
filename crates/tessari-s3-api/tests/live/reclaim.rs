@@ -80,6 +80,7 @@ async fn a_commit_that_lost_its_data_to_the_reclaimer_is_refused() {
         etag: format!("\"{}\"", uploaded.digests.md5_hex),
         headers: BTreeMap::new(),
         metadata: BTreeMap::new(),
+        tags: BTreeMap::new(),
         checksums: BTreeMap::new(),
         content: Content::Data(uploaded.id),
         lock: Lock::default(),

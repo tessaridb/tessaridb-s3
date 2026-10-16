@@ -66,6 +66,8 @@ pub(crate) fn record(
     ]
     .into_iter()
     .chain(content)
+    // Only a tagged object carries the field, so an untagged record is what it always was.
+    .chain((!object.tags.is_empty()).then(|| ("tags", strings(&object.tags))))
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
     Ok(Value::Object(fields))
@@ -138,6 +140,10 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
         modified: modified(fields)?,
         headers: read_strings(fields.get("headers"), "headers")?,
         metadata: read_strings(fields.get("metadata"), "metadata")?,
+        tags: match fields.get("tags") {
+            None | Some(Value::None) => BTreeMap::new(),
+            tags => read_strings(tags, "tags")?,
+        },
         checksums: read_strings(fields.get("checksums"), "checksums")?,
         content,
         version: match fields.get("version_id") {

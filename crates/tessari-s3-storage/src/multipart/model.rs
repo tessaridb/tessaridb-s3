@@ -16,6 +16,8 @@ pub struct NewUpload {
     pub headers: BTreeMap<String, String>,
     /// User metadata, lowercase names without the `x-amz-meta-` prefix.
     pub metadata: BTreeMap<String, String>,
+    /// The tags the object will carry.
+    pub tags: BTreeMap<String, String>,
     /// The checksum algorithm the object will carry (`CRC32` …), when the client declared one.
     pub checksum_algorithm: Option<String>,
     /// `COMPOSITE` or `FULL_OBJECT`, when the client declared one.

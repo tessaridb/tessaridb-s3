@@ -35,6 +35,8 @@ pub struct BucketEntity {
     pub object_lock: Option<Value>,
     /// The media rules as stored; absent while none are set.
     pub media: Option<Vec<Value>>,
+    /// The tags as stored; absent while none are set.
+    pub tags: Option<Value>,
     /// `local` when the bucket's writes are acknowledged by its region's majority alone; absent otherwise.
     pub acknowledge: Option<String>,
 }
@@ -97,6 +99,11 @@ impl BucketEntity {
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
             Some(_) => return Err(malformed("object_lock")),
         };
+        let tags = match fields.get("tags") {
+            None | Some(Value::None) => None,
+            Some(tags @ Value::Object(_)) => Some(tags.clone()),
+            Some(_) => return Err(malformed("tags")),
+        };
         let notify = match fields.get("notify") {
             None | Some(Value::None) => None,
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
@@ -132,6 +139,7 @@ impl BucketEntity {
             replication,
             object_lock,
             media,
+            tags,
             acknowledge,
         })
     }

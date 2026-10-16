@@ -31,6 +31,8 @@ mod version_list;
 mod version_lock;
 #[path = "tessaridb_version_read.rs"]
 mod version_read;
+#[path = "tessaridb_version_tags.rs"]
+mod version_tags;
 
 pub(crate) use version_read::Found;
 #[path = "tessaridb_versions.rs"]

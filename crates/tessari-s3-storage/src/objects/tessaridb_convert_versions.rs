@@ -17,7 +17,7 @@ const fn malformed(reason: &'static str) -> Error {
 }
 
 /// The fields of an object a version copies; `modified` stays the object's own.
-const FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, headers, metadata, checksums, data, upload, parts";
+const FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, headers, metadata, tags, checksums, data, upload, parts";
 
 /// An object record as the conversion walks it.
 pub(crate) struct Unconverted {

@@ -3,6 +3,7 @@
 use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
+use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::{BucketName, Timestamp};
 
 use super::entity::BucketEntity;
@@ -39,6 +40,8 @@ pub struct Bucket {
     pub replication: Option<tessari_s3_core::replication::Configuration>,
     /// Its Object Lock; `None` while the lock is off — once on it stays on.
     pub object_lock: Option<tessari_s3_core::object_lock::Configuration>,
+    /// Its tags by key; none while none are set.
+    pub tags: std::collections::BTreeMap<String, String>,
     /// Its media rules; `None` while none are set.
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
     /// Who must hold an object write before it is acknowledged.
@@ -145,6 +148,19 @@ impl TryFrom<BucketEntity> for Bucket {
                 .as_ref()
                 .map(super::object_lock::from_value)
                 .transpose()?,
+            tags: match &entity.tags {
+                Some(Value::Object(map)) => map
+                    .iter()
+                    .map(|(key, value)| match value {
+                        Value::String(text) => Ok((key.clone(), text.clone())),
+                        _ => Err(Error::Malformed {
+                            record: "buckets",
+                            reason: "tags",
+                        }),
+                    })
+                    .collect::<Result<_>>()?,
+                _ => std::collections::BTreeMap::new(),
+            },
             media: entity
                 .media
                 .as_ref()

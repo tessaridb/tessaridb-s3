@@ -16,8 +16,7 @@ use tessari_s3_storage::objects::{Removed, VersionRemoved};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use crate::pipeline::call::Call;
-use crate::pipeline::response::{empty_response, with_version, xml_response};
-use crate::xml::S3_NAMESPACE;
+use crate::pipeline::response::{empty_response, with_version};
 use crate::{Error, Result};
 
 pub(crate) use copy::copy;
@@ -112,35 +111,4 @@ fn no_such_bucket() -> Error {
         ErrorCode::NoSuchBucket,
         "the specified bucket does not exist",
     )
-}
-
-/// `GET /{bucket}/{key}?tagging`. Nothing writes a tag here — PutObject refuses `x-amz-tagging` and PutObjectTagging is
-/// not implemented — so an existing object's tag set is empty, and that is the answer.
-pub(crate) async fn tagging(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
-    if call.query.iter().any(|(name, _)| name == "versionId") {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "versionId is not implemented",
-        ));
-    }
-    match call
-        .state
-        .storage()
-        .objects()
-        .get(call.bucket()?, key)
-        .await?
-    {
-        Err(()) => Err(Error::new(
-            ErrorCode::NoSuchBucket,
-            "the specified bucket does not exist",
-        )),
-        Ok(None) => Err(Error::new(
-            ErrorCode::NoSuchKey,
-            "the specified key does not exist",
-        )),
-        Ok(Some(_)) => Ok(xml_response(
-            StatusCode::OK,
-            format!("<Tagging xmlns=\"{S3_NAMESPACE}\"><TagSet></TagSet></Tagging>"),
-        )),
-    }
 }

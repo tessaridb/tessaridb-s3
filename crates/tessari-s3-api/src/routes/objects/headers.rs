@@ -43,6 +43,7 @@ pub(crate) struct PutHeaders {
     pub(crate) metadata: BTreeMap<String, String>,
     pub(crate) integrity: Integrity,
     pub(crate) condition: WriteCondition,
+    pub(crate) tags: BTreeMap<String, String>,
     pub(crate) lock: LockAsked,
 }
 
@@ -56,8 +57,8 @@ pub(super) fn not_implemented(what: &str) -> Error {
 /// Reads `headers` for a PutObject.
 ///
 /// # Errors
-/// `NotImplemented` for tagging, encryption, an Object Lock event hold, website redirects, appends and unsupported checksum
-/// algorithms; `AccessControlListNotSupported`, `InvalidStorageClass`, `MetadataTooLarge`, `InvalidDigest`,
+/// `NotImplemented` for encryption, an Object Lock event hold, website redirects, appends and unsupported checksum
+/// algorithms; `InvalidTag` for a tagging header S3 refuses; `AccessControlListNotSupported`, `InvalidStorageClass`, `MetadataTooLarge`, `InvalidDigest`,
 /// `InvalidRequest` and `InvalidArgument` for the rest.
 pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
     let text = |name: &str| {
@@ -81,8 +82,6 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
             metadata.insert(meta.to_owned(), value.to_owned());
         } else if STORED.contains(&name) {
             system.insert(name.to_owned(), value.to_owned());
-        } else if name == "x-amz-tagging" {
-            return Err(not_implemented("object tagging"));
         } else if name.starts_with("x-amz-server-side-encryption") {
             return Err(not_implemented("server-side encryption"));
         } else if name == "x-amz-website-redirect-location" {
@@ -143,6 +142,7 @@ pub(crate) fn read_put_headers(headers: &HeaderMap) -> Result<PutHeaders> {
         metadata,
         integrity,
         condition,
+        tags: crate::routes::tagging::header_tags(headers)?,
         lock: read_lock(headers)?,
     })
 }

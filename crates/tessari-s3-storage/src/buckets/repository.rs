@@ -62,6 +62,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         configuration: Value,
     ) -> impl Future<Output = Result<bool>> + Send;
 
+    /// Replaces `name`'s tags, or removes them when `tags` is `None`.
+    fn set_tags(
+        &self,
+        name: &BucketName,
+        tags: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Sets `name`'s replication configuration, or removes it when `configuration` is `None`.
     fn set_replication(
         &self,

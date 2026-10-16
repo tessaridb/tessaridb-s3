@@ -29,6 +29,8 @@ mod list;
 mod lock;
 #[path = "service_replica.rs"]
 mod replica;
+#[path = "service_tags.rs"]
+mod tags;
 #[path = "service_version_list.rs"]
 mod version_list;
 #[path = "service_version_read.rs"]

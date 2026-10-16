@@ -56,10 +56,6 @@ fn system_headers_and_metadata_are_kept_and_aws_chunked_is_removed() {
 #[test]
 fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
     assert_eq!(
-        refused(&[("x-amz-tagging", "a=b")]),
-        ErrorCode::NotImplemented
-    );
-    assert_eq!(
         refused(&[("x-amz-server-side-encryption", "AES256")]),
         ErrorCode::NotImplemented
     );
@@ -227,5 +223,32 @@ fn object_lock_headers_ask_for_a_retention_and_a_hold_or_are_refused_as_invalid(
         &[("x-amz-object-lock-legal-hold", "MAYBE")],
     ] {
         assert_eq!(refused(pairs), ErrorCode::InvalidArgument, "{pairs:?}");
+    }
+}
+
+#[test]
+fn the_tagging_header_is_read_as_tags_or_refused_as_an_invalid_tag() {
+    let read = read_put_headers(&headers(&[("x-amz-tagging", "team=blue&tier=gold%20plus")]))
+        .expect("reads");
+    assert_eq!(
+        read.tags
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect::<Vec<_>>(),
+        [("team", "blue"), ("tier", "gold plus")]
+    );
+    assert!(
+        read_put_headers(&headers(&[]))
+            .expect("reads")
+            .tags
+            .is_empty()
+    );
+    let eleven: Vec<String> = (0..11).map(|n| format!("k{n}=v")).collect();
+    for header in [eleven.join("&").as_str(), "aws:x=1", "a=%Z1", "a=1&a=2"] {
+        assert_eq!(
+            refused(&[("x-amz-tagging", header)]),
+            ErrorCode::InvalidTag,
+            "{header}"
+        );
     }
 }

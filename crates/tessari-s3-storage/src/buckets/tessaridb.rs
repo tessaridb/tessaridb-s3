@@ -120,6 +120,15 @@ impl BucketRepository for TessariBuckets {
         Ok(single(answers)?.is_some())
     }
 
+    async fn set_tags(&self, name: &BucketName, tags: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("tags".to_owned(), tags.unwrap_or(Value::None)));
+        self.pool
+            .run("UPDATE buckets:$name SET tags = $tags;", parameters)
+            .await?;
+        Ok(())
+    }
+
     async fn set_replication(&self, name: &BucketName, configuration: Option<Value>) -> Result<()> {
         let mut parameters = name_param(name);
         let script = match configuration {

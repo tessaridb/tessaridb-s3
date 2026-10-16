@@ -161,6 +161,7 @@ async fn commit(
         etag: etag.clone(),
         headers: headers.system,
         metadata: headers.metadata,
+        tags: headers.tags,
         checksums: [(
             algorithm.name().to_owned(),
             digests.value(algorithm).to_owned(),

@@ -34,6 +34,7 @@ fn write(operation: Operation, method: &'static str, path: &'static str) -> Writ
 }
 
 const DELETE: &str = "<Delete><Object><Key>zzz</Key></Object></Delete>";
+const TAGGING: &str = "<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
 const RETENTION: &str = "<Retention><Mode>GOVERNANCE</Mode>\
 <RetainUntilDate>2999-01-01T00:00:00Z</RetainUntilDate></Retention>";
 
@@ -90,6 +91,15 @@ fn writes(upload: &str, first_part: &str, spare: &str) -> Vec<Write> {
             ..write(Operation::DeleteObjects, "POST", "/full")
         },
         write(Operation::DeleteObject, "DELETE", "/full/zzz"),
+        Write {
+            query: vec![("tagging", None)],
+            body: TAGGING.as_bytes().to_vec(),
+            ..write(Operation::PutObjectTagging, "PUT", "/full/a")
+        },
+        Write {
+            query: vec![("tagging", None)],
+            ..write(Operation::DeleteObjectTagging, "DELETE", "/full/a")
+        },
         // Retention needs a bucket with Object Lock, as full as `full`.
         Write {
             query: vec![("retention", None)],

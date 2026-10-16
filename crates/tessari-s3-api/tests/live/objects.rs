@@ -355,27 +355,13 @@ async fn an_object_from_an_earlier_life_of_the_bucket_is_invisible_and_replaceab
 
 #[tokio::test]
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn an_objects_tag_set_is_empty_because_nothing_can_write_one() {
+async fn an_untagged_objects_tag_set_is_empty_and_what_is_missing_is_named() {
     let _why = IGNORED;
     let (state, _) = fresh().await;
     bucket(&state, "tags").await;
     assert_eq!(
         call(&state, "PUT", "/tags/k", vec![], b"v").await.status,
         200
-    );
-    let tagged = call_with(
-        &state,
-        "PUT",
-        "/tags/t",
-        vec![],
-        vec![("x-amz-tagging", "a=b")],
-        b"v",
-    )
-    .await;
-    assert_eq!(
-        tagged.code.as_deref(),
-        Some("NotImplemented"),
-        "a tag cannot be written"
     );
     let tags = call(&state, "GET", "/tags/k", vec![("tagging", None)], b"").await;
     assert_eq!(tags.status, 200, "{}", tags.body);
@@ -405,8 +391,8 @@ async fn an_objects_tag_set_is_empty_because_nothing_can_write_one() {
     .await;
     assert_eq!(
         version.code.as_deref(),
-        Some("NotImplemented"),
-        "{}",
+        Some("InvalidArgument"),
+        "no version this server issues is spelled `1`: {}",
         version.body
     );
 }

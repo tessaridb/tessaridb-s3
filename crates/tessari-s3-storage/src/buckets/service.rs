@@ -3,6 +3,7 @@
 use tessari_s3_core::authz::{SpaceName, Visible};
 use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
+use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::BucketName;
 
 use super::model::{Acknowledgement, Bucket, LockSet};
@@ -191,6 +192,29 @@ impl BucketService {
         } else {
             Ok(LockSet::NotVersioned)
         }
+    }
+
+    /// Replaces `name`'s tags (already validated); an empty set removes them. `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_tags(
+        &self,
+        name: &BucketName,
+        tags: &std::collections::BTreeMap<String, String>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        let value = (!tags.is_empty()).then(|| {
+            Value::Object(
+                tags.iter()
+                    .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                    .collect(),
+            )
+        });
+        self.repository.set_tags(name, value).await?;
+        Ok(true)
     }
 
     /// Sets `name`'s replication configuration (already validated), or removes it with `None`; `false` when there is
