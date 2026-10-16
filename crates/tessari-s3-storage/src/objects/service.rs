@@ -30,6 +30,8 @@ mod list;
 mod lock;
 #[path = "service_replica.rs"]
 mod replica;
+#[path = "service_rewrap.rs"]
+mod rewrap;
 #[path = "service_sealed.rs"]
 mod sealed;
 #[path = "service_tags.rs"]

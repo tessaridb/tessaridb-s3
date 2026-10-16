@@ -23,7 +23,7 @@ use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
     Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, Mover, NotifyWorker,
-    Reclaimer, Replicator, UploadReaper, UsageScanner, VideoWorker, run,
+    Reclaimer, Replicator, Rewrapper, UploadReaper, UsageScanner, VideoWorker, run,
 };
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::media::TaskQueue;
@@ -201,6 +201,9 @@ async fn main() -> anyhow::Result<()> {
         );
         daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
     }
+    // After a rotation, each node re-wraps what is still under an older server key it holds.
+    let rewrapper = Rewrapper::new(storage.objects().clone());
+    daemons.spawn(run(Arc::new(rewrapper), stop_rx.clone()));
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),

@@ -137,6 +137,19 @@ impl KeyRing {
         }
     }
 
+    /// The server keys numbered below the active one: their data keys are re-wrapped under the active key. A key
+    /// numbered above it — created by a rotation on another node since this one's unseal — is never among them.
+    #[must_use]
+    pub fn behind(&self) -> Vec<&KeyEncryptionKey> {
+        let Some(active) = server_number(self.active.id()) else {
+            return Vec::new();
+        };
+        self.others
+            .values()
+            .filter(|key| server_number(key.id()).is_some_and(|number| number < active))
+            .collect()
+    }
+
     /// What the ring says about this node.
     #[must_use]
     pub fn state(&self) -> KeyState {

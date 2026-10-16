@@ -368,3 +368,139 @@ async fn root_rotates_the_server_key_under_the_passphrase_and_the_act_is_recorde
         .collect();
     assert_eq!(outcomes, ["rotated", "wrong_passphrase"], "newest first");
 }
+
+const DESTROY: &str = "/api/v1/encryption/destroy";
+
+fn destroying(key: &str, passphrase: &str) -> String {
+    format!(r#"{{"passphrase":"{passphrase}","key":"{key}","reason":"rotation done"}}"#)
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_old_server_key_is_destroyed_only_when_no_record_names_it() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let body = format!(r#"{{"passphrase":"{RIGHT}","reason":"start"}}"#);
+    assert_eq!(
+        send(&console, "POST", UNSEAL, Some(&root), Some(&body))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        crate::call(&state, "PUT", "/old", vec![], b"").await.status,
+        200
+    );
+    let bytes = crate::sse::body();
+    let put = crate::call_with(
+        &state,
+        "PUT",
+        "/old/a",
+        vec![],
+        vec![crate::sse::SSE],
+        &bytes,
+    )
+    .await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    assert_eq!(
+        send(&console, "POST", ROTATE, Some(&root), Some(&body))
+            .await
+            .status,
+        200
+    );
+    let behind = |cookie: String| {
+        let console = console.clone();
+        async move {
+            send(&console, "GET", STATE, Some(&cookie), None)
+                .await
+                .json()["behind"]
+                .clone()
+        }
+    };
+    let before = behind(root.clone()).await;
+    assert_eq!(before[0]["id"], "server_1", "{before}");
+    assert!(
+        before[0]["remaining"].as_u64().is_some_and(|left| left > 0),
+        "{before}"
+    );
+
+    let in_use = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", RIGHT)),
+    )
+    .await;
+    assert_eq!(
+        (in_use.status, in_use.code().as_deref()),
+        (409, Some("key_in_use"))
+    );
+    let active = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_2", RIGHT)),
+    )
+    .await;
+    assert_eq!(
+        (active.status, active.code().as_deref()),
+        (409, Some("key_active"))
+    );
+
+    let swept = tessari_s3_daemons::Rewrapper::new(state.storage().objects().clone());
+    tessari_s3_daemons::Daemon::run_once(&swept)
+        .await
+        .expect("a pass");
+    assert_eq!(behind(root.clone()).await[0]["remaining"], 0);
+    let wrong = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", "not the keys passphrase at all")),
+    )
+    .await;
+    assert_eq!(
+        (wrong.status, wrong.code().as_deref()),
+        (400, Some("wrong_passphrase"))
+    );
+    let destroyed = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", RIGHT)),
+    )
+    .await;
+    assert_eq!(destroyed.status, 200);
+    assert_eq!(
+        (
+            destroyed.json()["active"].clone(),
+            destroyed.json()["keys"].clone()
+        ),
+        (Value::from("server_2"), Value::from(1))
+    );
+    assert_eq!(behind(root.clone()).await, Value::Array(Vec::new()));
+    let read = crate::call(&state, "GET", "/old/a", vec![], b"").await;
+    assert!(
+        read.bytes == bytes,
+        "the object opens under the key it was re-wrapped under"
+    );
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let outcomes: Vec<String> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| action["operation"] == "destroy_server_key server_1")
+        .map(|action| action["outcome"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        outcomes,
+        ["destroyed", "wrong_passphrase", "in_use"],
+        "newest first"
+    );
+}

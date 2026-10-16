@@ -34,4 +34,8 @@ pub(crate) trait KeyVault: Send + Sync {
         passphrase: &Passphrase,
         key: &Zeroizing<[u8; 32]>,
     ) -> impl Future<Output = Result<String>> + Send;
+    /// Opens the declared vault with `passphrase` and removes record `id`; the vault is sealed again before this
+    /// answers.
+    fn destroy(&self, passphrase: &Passphrase, id: &str)
+    -> impl Future<Output = Result<()>> + Send;
 }

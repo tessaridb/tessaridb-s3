@@ -2345,6 +2345,12 @@
   //! This node's encryption keys as the console sees them: not yet created,
   //! sealed, or held — and then which key new objects are wrapped under, and
   //! the keys operators created by name for `aws:kms`.
+  function readBehind(v) {
+    if (record(v) && text(v["id"]) && count(v["remaining"])) {
+      return { id: v["id"], remaining: v["remaining"] };
+    }
+    return null;
+  }
   function readKeys2(v) {
     if (!record(v)) {
       return null;
@@ -2354,8 +2360,9 @@
       return { state: state2 };
     }
     const named = list(v["named"], (name) => text(name) ? name : null);
-    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null) {
-      return { state: state2, active: v["active"], keys: v["keys"], named };
+    const behind = list(v["behind"], readBehind);
+    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null && behind !== null) {
+      return { state: state2, active: v["active"], keys: v["keys"], named, behind };
     }
     return null;
   }
@@ -2481,6 +2488,40 @@
     });
     return form;
   }
+  function destroyForm(screen, key) {
+    const passphrase = field(`destroy-${key.id}-passphrase`, "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+    const why = field(`destroy-${key.id}-reason`, "Reason", { autocomplete: "off" }, "Kept in the action record.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm card-part", novalidate: "" },
+      el("p", {}, "No record names ", mono(key.id), " any more. Destroying it removes it from the keys vault; backups taken before still hold it until they expire."),
+      passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "danger" }, `Destroy ${key.id}`)),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const reason = why.input.value.trim();
+      const answer = await call("POST", `${BASE3}/destroy`, readKeys2, {
+        key: key.id,
+        passphrase: passphrase.input.value,
+        ...reason === "" ? {} : { reason }
+      });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, `${key.id} is destroyed.`);
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function olderKeys(screen, behind) {
+    return behind.map(
+      (key) => key.remaining === 0 ? destroyForm(screen, key) : el("p", {}, mono(key.id), ` still wraps ${key.remaining.toLocaleString()} data keys; the re-wrap moves them to the active key.`)
+    );
+  }
   function sealButton(screen, region) {
     const button = el("button", { type: "button", class: "danger" }, "Seal…");
     button.addEventListener(
@@ -2516,7 +2557,7 @@
     const region = el("div", {});
     card.append(stateLine(keys2));
     if (keys2.state === "unsealed") {
-      card.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen), rotateForm(screen, keys2));
+      card.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen), rotateForm(screen, keys2), ...olderKeys(screen, keys2.behind));
     } else {
       card.append(unsealForm(screen, keys2));
     }

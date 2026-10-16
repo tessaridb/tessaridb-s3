@@ -129,6 +129,12 @@ pub enum Error {
         /// The record id.
         id: String,
     },
+    /// The key new data keys are wrapped under was to be destroyed; only an older server key can be.
+    #[error("{id} is the active key")]
+    KeyActive {
+        /// The record id.
+        id: String,
+    },
     /// An object was to be sealed under a named key this node does not hold.
     #[error("no encryption key is named {name}")]
     UnknownKey {
@@ -182,7 +188,9 @@ impl Error {
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }
             | Self::OtherRegion { .. } => ErrorCategory::Validation,
-            Self::Contended | Self::Held | Self::KeyExists { .. } => ErrorCategory::Conflict,
+            Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
+                ErrorCategory::Conflict
+            }
             Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
             Self::WeakPassphrase { .. } | Self::UnknownKey { .. } => ErrorCategory::Validation,
             Self::WrongPassphrase => ErrorCategory::Unauthorized,

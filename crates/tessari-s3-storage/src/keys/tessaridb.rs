@@ -218,7 +218,7 @@ async fn open_once(
 
 #[path = "tessaridb_create.rs"]
 mod create;
-use create::{create_once, rotate_once};
+use create::{create_once, destroy_once, rotate_once};
 
 impl KeyVault for TessariKeys {
     async fn declared(&self) -> Result<bool> {
@@ -268,6 +268,11 @@ impl KeyVault for TessariKeys {
     async fn rotate(&self, passphrase: &Passphrase, key: &Zeroizing<[u8; 32]>) -> Result<String> {
         let mut link = self.pool.vault_link(VAULT).await?;
         rotate_once(&mut link, passphrase, key).await
+    }
+
+    async fn destroy(&self, passphrase: &Passphrase, id: &str) -> Result<()> {
+        let mut link = self.pool.vault_link(VAULT).await?;
+        destroy_once(&mut link, passphrase, id).await
     }
 }
 

@@ -9,7 +9,7 @@
 import { call } from "./api.ts";
 import { confirmation } from "./confirm.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
-import { readKeys, type Keys } from "./encryption-model.ts";
+import { readKeys, type Behind, type Keys } from "./encryption-model.ts";
 import { refusal, type Failure, type Screen } from "./screen.ts";
 
 const BASE = "/encryption";
@@ -134,6 +134,44 @@ function rotateForm(screen: Screen, keys: Keys & { state: "unsealed" }): HTMLEle
   return form;
 }
 
+function destroyForm(screen: Screen, key: Behind): HTMLElement {
+  const passphrase = field(`destroy-${key.id}-passphrase`, "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+  const why = field(`destroy-${key.id}-reason`, "Reason", { autocomplete: "off" }, "Kept in the action record.");
+  const said = el("div", { "aria-live": "polite" });
+  const form = el(
+    "form",
+    { class: "confirm card-part", novalidate: "" },
+    el("p", {}, "No record names ", mono(key.id), " any more. Destroying it removes it from the keys vault; backups taken before still hold it until they expire."),
+    passphrase.row,
+    why.row,
+    el("div", { class: "actions" }, el("button", { type: "submit", class: "danger" }, `Destroy ${key.id}`)),
+    said,
+  );
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const reason = why.input.value.trim();
+    const answer = await call("POST", `${BASE}/destroy`, readKeys, {
+      key: key.id,
+      passphrase: passphrase.input.value,
+      ...(reason === "" ? {} : { reason }),
+    });
+    passphrase.input.value = "";
+    const failure = done(screen, answer.ok ? null : answer, `${key.id} is destroyed.`);
+    if (failure !== null) {
+      fill(said, refusal(failure));
+    }
+  });
+  return form;
+}
+
+function olderKeys(screen: Screen, behind: readonly Behind[]): HTMLElement[] {
+  return behind.map((key) =>
+    key.remaining === 0
+      ? destroyForm(screen, key)
+      : el("p", {}, mono(key.id), ` still wraps ${key.remaining.toLocaleString()} data keys; the re-wrap moves them to the active key.`),
+  );
+}
+
 function sealButton(screen: Screen, region: HTMLElement): HTMLElement {
   const button = el("button", { type: "button", class: "danger" }, "Seal…");
   button.addEventListener("click", () =>
@@ -170,7 +208,7 @@ export async function encryptionCard(screen: Screen): Promise<HTMLElement | null
   const region = el("div", {});
   card.append(stateLine(keys));
   if (keys.state === "unsealed") {
-    card.append(namedKeys(keys.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm(screen), rotateForm(screen, keys));
+    card.append(namedKeys(keys.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm(screen), rotateForm(screen, keys), ...olderKeys(screen, keys.behind));
   } else {
     card.append(unsealForm(screen, keys));
   }

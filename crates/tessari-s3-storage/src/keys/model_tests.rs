@@ -77,3 +77,22 @@ fn a_ring_with_no_server_key_is_refused() {
         assert!(matches!(KeyRing::new(keys), Err(Error::Unsealable)));
     }
 }
+
+#[test]
+fn only_server_keys_below_the_active_one_are_behind_it() {
+    let ring = KeyRing::new(vec![
+        stored("server_1", 1),
+        stored("server_3", 3),
+        stored("server_2", 2),
+        stored("kms_aws-s3", 9),
+    ])
+    .expect("a ring");
+    assert_eq!(ring.active().id(), "server_3");
+    let mut behind: Vec<&str> = ring.behind().into_iter().map(|key| key.id()).collect();
+    behind.sort_unstable();
+    assert_eq!(
+        behind,
+        ["server_1", "server_2"],
+        "named keys are never re-wrapped from"
+    );
+}

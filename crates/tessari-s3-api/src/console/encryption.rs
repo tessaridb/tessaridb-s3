@@ -1,6 +1,5 @@
-//! The encryption keys of this node: `GET /api/v1/encryption`, `POST …/unseal`, `POST …/seal`, `POST …/rotate`, which
-//! makes a new server key the one new data keys are wrapped under, and `POST …/keys`, which creates a key objects can
-//! be sealed under by name (`aws:kms`). Root only; changing
+//! The encryption keys of this node: `GET /api/v1/encryption`, `POST …/unseal`, `POST …/seal`, and `POST …/keys`,
+//! which creates a key objects can be sealed under by name (`aws:kms`); rotation is in `encryption_rotation`. Root only; changing
 //! anything needs a fresh sign-in. Each node holds its own keys, so an unseal here unseals this node alone. Every
 //! attempt is recorded with how it ended — never with the passphrase, which is dropped once the vault has it.
 
@@ -36,6 +35,14 @@ pub(super) struct KeysView {
     keys: Option<usize>,
     /// The names of the keys operators created, when unsealed.
     named: Vec<String>,
+    /// The older server keys this node holds, each with how many records still name it; filled by the state read.
+    pub(super) behind: Vec<BehindView>,
+}
+
+#[derive(Serialize)]
+pub(super) struct BehindView {
+    id: String,
+    remaining: u64,
 }
 
 impl From<KeyState> for KeysView {
@@ -46,12 +53,14 @@ impl From<KeyState> for KeysView {
                 active: None,
                 keys: None,
                 named: Vec::new(),
+                behind: Vec::new(),
             },
             KeyState::Sealed => Self {
                 state: "sealed",
                 active: None,
                 keys: None,
                 named: Vec::new(),
+                behind: Vec::new(),
             },
             KeyState::Unsealed {
                 active,
@@ -62,6 +71,7 @@ impl From<KeyState> for KeysView {
                 active: Some(active),
                 keys: Some(keys),
                 named,
+                behind: Vec::new(),
             },
         }
     }
@@ -69,8 +79,8 @@ impl From<KeyState> for KeysView {
 
 #[derive(Deserialize)]
 pub(super) struct UnsealRequest {
-    passphrase: String,
-    reason: Option<String>,
+    pub(super) passphrase: String,
+    pub(super) reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -85,7 +95,7 @@ pub(super) struct SealRequest {
     reason: Option<String>,
 }
 
-async fn recorded(
+pub(super) async fn recorded(
     state: &ConsoleState,
     session: &Session,
     operation: &str,
@@ -110,7 +120,18 @@ pub(super) async fn state(
     Extension(principal): Extension<Principal>,
 ) -> Result<Json<KeysView>, ConsoleError> {
     allow(&principal, &Action::Operate)?;
-    Ok(Json(state.storage().keys().state().await?.into()))
+    let storage = state.storage();
+    let mut view: KeysView = storage.keys().state().await?.into();
+    if let Ok(ring) = storage.keys().ring() {
+        for key in ring.behind() {
+            view.behind.push(BehindView {
+                id: key.id().to_owned(),
+                remaining: storage.objects().remaining(key.id()).await?,
+            });
+        }
+        view.behind.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+    Ok(Json(view))
 }
 
 pub(super) async fn unseal(
@@ -143,7 +164,7 @@ pub(super) async fn unseal(
 }
 
 /// What a refused passphrase is answered with, and recorded as.
-fn refused_passphrase(error: Error) -> (&'static str, ConsoleError) {
+pub(super) fn refused_passphrase(error: Error) -> (&'static str, ConsoleError) {
     match error {
         Error::WeakPassphrase { reason } => (
             "weak_passphrase",
@@ -216,44 +237,6 @@ pub(super) async fn create(
         outcome,
     )
     .await?;
-    answer
-}
-
-/// Rotates the server key: the next one is created and new data keys are wrapped under it on this node at once;
-/// every older key still opens what it sealed. The passphrase opens the keys vault for the one write and is dropped.
-pub(super) async fn rotate(
-    State(state): State<ConsoleState>,
-    Extension(session): Extension<Session>,
-    Extension(principal): Extension<Principal>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<Json<KeysView>, ConsoleError> {
-    recently_authenticated(&state, &session)?;
-    allow(&principal, &Action::Operate)?;
-    let UnsealRequest {
-        passphrase,
-        reason: given,
-    } = json(&headers, &body, "expected passphrase and reason")?;
-    let why = reason(given, false)?;
-    let rotated = match Passphrase::new(Zeroizing::new(passphrase)) {
-        Ok(passphrase) => state.storage().keys().rotate(&passphrase).await,
-        Err(error) => Err(error),
-    };
-    let (outcome, answer) = match rotated {
-        Ok(keys) => ("rotated", Ok(Json(keys.into()))),
-        Err(Error::KeyExists { .. }) => (
-            "raced",
-            Err(ConsoleError::conflict(
-                "rotation_raced",
-                "another rotation took this key's number; reload and look again",
-            )),
-        ),
-        Err(error) => {
-            let (outcome, refused) = refused_passphrase(error);
-            (outcome, Err(refused))
-        }
-    };
-    recorded(&state, &session, "rotate_server_key", why, outcome).await?;
     answer
 }
 

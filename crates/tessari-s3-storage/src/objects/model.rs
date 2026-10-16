@@ -150,6 +150,15 @@ pub struct Reclaimed {
     pub orphans: usize,
 }
 
+/// What one re-wrap pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Rewrapped {
+    /// Records under an older server key that were looked at.
+    pub examined: usize,
+    /// Of those, the ones whose data key is now wrapped under the active key; the rest changed meanwhile.
+    pub rewrapped: usize,
+}
+
 /// What one healing pass did.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Healed {

@@ -55,6 +55,29 @@ pub(super) async fn rotate_once(
     answer
 }
 
+/// Removes record `id` from the live vault on one connection: unseal, delete, seal. Copies of the vault taken before
+/// (snapshots, logs) still hold it; only their expiry removes it from them.
+pub(super) async fn destroy_once(
+    link: &mut VaultLink,
+    passphrase: &Passphrase,
+    id: &str,
+) -> Result<()> {
+    if !declared_on(link).await? {
+        return Err(Error::KeysSealed);
+    }
+    unseal(link, passphrase).await?;
+    let answer = link
+        .run(
+            "DELETE s3_keys:$id;",
+            vec![("id".to_owned(), Value::String(id.to_owned()))],
+        )
+        .await
+        .map(|_| ())
+        .map_err(Error::from);
+    seal_after(link).await;
+    answer
+}
+
 /// Creates record `id` holding `key` in the unsealed vault; an id that exists is [`Error::KeyExists`].
 async fn store(link: &mut VaultLink, id: &str, key: &Zeroizing<[u8; 32]>) -> Result<()> {
     let created = link

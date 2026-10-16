@@ -1,7 +1,7 @@
 //! Every number with a meaning in TessariDB S3, typed and documented with its unit and its reason.
 
 mod keys;
-pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS};
+pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_INTERVAL_SECS};
 mod replication;
 pub use replication::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_CONNECT_TIMEOUT_SECS, REPLICATION_DELIVERIES,

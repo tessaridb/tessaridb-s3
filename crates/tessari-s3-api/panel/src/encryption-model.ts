@@ -12,7 +12,18 @@ export type Keys =
       readonly active: string;
       readonly keys: number;
       readonly named: readonly string[];
+      readonly behind: readonly Behind[];
     };
+
+/** An older server key this node holds, and how many records still name it. */
+export type Behind = { readonly id: string; readonly remaining: number };
+
+function readBehind(v: unknown): Behind | null {
+  if (record(v) && text(v["id"]) && count(v["remaining"])) {
+    return { id: v["id"], remaining: v["remaining"] };
+  }
+  return null;
+}
 
 export function readKeys(v: unknown): Keys | null {
   if (!record(v)) {
@@ -23,8 +34,9 @@ export function readKeys(v: unknown): Keys | null {
     return { state };
   }
   const named = list(v["named"], (name) => (text(name) ? name : null));
-  if (state === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null) {
-    return { state, active: v["active"], keys: v["keys"], named };
+  const behind = list(v["behind"], readBehind);
+  if (state === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null && behind !== null) {
+    return { state, active: v["active"], keys: v["keys"], named, behind };
   }
   return null;
 }

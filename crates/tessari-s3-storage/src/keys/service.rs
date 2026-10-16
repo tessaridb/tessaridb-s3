@@ -119,6 +119,28 @@ impl KeyService {
         self.unseal(passphrase).await
     }
 
+    /// Destroys the older server key `id` — removes it from the keys vault, which `passphrase` opens — and holds the
+    /// keys again without it. The caller has made sure no record still names it: a data key wrapped under it would
+    /// never open again.
+    ///
+    /// # Errors
+    /// [`Error::KeyActive`] for the key new data keys are wrapped under, [`Error::UnknownKey`] for an id that is not
+    /// an older server key this node holds, [`Error::KeysSealed`], [`Error::WrongPassphrase`],
+    /// [`Error::PassphraseThrottled`], or the metadata store's.
+    pub async fn destroy(&self, passphrase: &Passphrase, id: &str) -> Result<KeyState> {
+        let ring = self.ring()?;
+        if ring.active().id() == id {
+            return Err(Error::KeyActive { id: id.to_owned() });
+        }
+        if !ring.behind().iter().any(|key| key.id() == id) {
+            return Err(Error::UnknownKey {
+                name: id.to_owned(),
+            });
+        }
+        self.vault.destroy(passphrase, id).await?;
+        self.unseal(passphrase).await
+    }
+
     /// Forgets the keys; encrypted objects cannot be read or written on this node until the next unseal.
     pub fn seal(&self) {
         *self.ring.write().unwrap_or_else(PoisonError::into_inner) = None;

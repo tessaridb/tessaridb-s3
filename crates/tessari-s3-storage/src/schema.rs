@@ -188,6 +188,9 @@ DEFINE FIELD IF NOT EXISTS sse_nonce ON parts TYPE bytes;
 DEFINE FIELD IF NOT EXISTS sse_key ON parts TYPE bytes;
 DEFINE FIELD IF NOT EXISTS sse_c_salt ON parts TYPE bytes;
 DEFINE FIELD IF NOT EXISTS sse_c_verifier ON parts TYPE bytes;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON versions FIELDS sse_kek;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON objects FIELDS sse_kek;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON parts FIELDS sse_kek;
 DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
 DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \
