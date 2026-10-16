@@ -15,6 +15,8 @@ mod encryption;
 mod encryption_rotation;
 mod error;
 mod grants;
+mod group_changes;
+mod groups;
 mod guard;
 mod identity;
 mod input;
@@ -326,6 +328,22 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route(
             "/api/v1/users/{user}/grants/{bucket}",
             put(grants::set).delete(grants::remove),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups",
+            get(groups::list).post(groups::create),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}",
+            get(groups::detail).delete(groups::delete),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}/members/{user}",
+            put(group_changes::add_member).delete(group_changes::remove_member),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}/grants/{bucket}",
+            put(group_changes::set_grant).delete(group_changes::remove_grant),
         )
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), guard::require_session));

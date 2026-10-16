@@ -57,6 +57,24 @@ impl UserName {
     }
 }
 
+/// A group's name, unique within its space; the same rule as a user's name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GroupName(String);
+
+impl GroupName {
+    /// The group called `name`; names are 1-63 lowercase letters, digits and inner hyphens.
+    #[must_use]
+    pub fn new(name: &str) -> Option<Self> {
+        is_node_name(name).then(|| Self(name.to_owned()))
+    }
+
+    /// The name as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A user's role inside their space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -73,6 +91,17 @@ pub struct Access {
     pub read: bool,
     /// Writing and deleting objects.
     pub write: bool,
+}
+
+impl Access {
+    /// What either grant allows: a user's own grant on a bucket joined with those of their groups.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            read: self.read || other.read,
+            write: self.write || other.write,
+        }
+    }
 }
 
 /// A signed-in user as the evaluator sees them: resolved from the store, never from the request.

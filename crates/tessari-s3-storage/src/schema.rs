@@ -54,6 +54,9 @@ use crate::Result;
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
 /// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
+/// `groups:<space>/<name>` is a set of a space's users (`group_members:<space>/<name>/<user>`) whose grants
+/// (`group_grants:<space>/<name>/<bucket>`) each member receives; a membership or grant is written in the transaction
+/// that touches its group (`touched`), so it conflicts with the group's removal instead of outliving it.
 /// `key_issues:<token>` remembers which key a console form's token issued, so a repeated submission answers that key;
 /// the store drops it once its window has passed.
 /// `oidc_logins:<state>` holds a console sign-in sent to the identity provider until its callback takes it (the store
@@ -103,6 +106,15 @@ ALTER TABLE key_issues SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS grants (\
  user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS groups (space_name string REQUIRED, name string REQUIRED, created datetime REQUIRED);
+DEFINE FIELD IF NOT EXISTS touched ON groups TYPE datetime;
+DEFINE INDEX IF NOT EXISTS by_group_space ON groups FIELDS space_name;
+DEFINE TABLE IF NOT EXISTS group_members (group_id string REQUIRED, user_name string REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_member_group ON group_members FIELDS group_id;
+DEFINE INDEX IF NOT EXISTS by_member_user ON group_members FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS group_grants (\
+ group_id string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_group_grant ON group_grants FIELDS group_id;
 DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string REQUIRED);
 ALTER TABLE oidc_logins SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);

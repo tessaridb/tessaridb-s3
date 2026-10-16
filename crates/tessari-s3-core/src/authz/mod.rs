@@ -9,8 +9,8 @@ pub mod policy;
 
 pub use decide::{Asked, Decision, Denied, authorize, authorize_asked};
 pub use model::{
-    Access, Action, BucketResource, Principal, Role, SpaceName, UploadPrincipal, UserName,
-    UserPrincipal, UserResource, Visible,
+    Access, Action, BucketResource, GroupName, Principal, Role, SpaceName, UploadPrincipal,
+    UserName, UserPrincipal, UserResource, Visible,
 };
 pub use operations::{Need, Required, required, required_naming_version};
 

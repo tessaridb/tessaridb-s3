@@ -16,6 +16,7 @@ use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
+use crate::groups::{GroupService, TessariGroups};
 use crate::identities::{IdentityService, TessariIdentities};
 use crate::keys::{KeyService, TessariKeys};
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
@@ -46,6 +47,7 @@ pub struct Storage {
     usage: UsageService,
     spaces: SpaceService,
     users: UserService,
+    groups: GroupService,
     identities: IdentityService,
     /// Shared by every clone: an unseal on this node is seen by all of them.
     keys: Arc<KeyService>,
@@ -71,6 +73,7 @@ impl Storage {
             Arc::clone(&keys),
         );
         let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
+        let groups = GroupService::new(TessariGroups::new(pool.clone()));
         Ok(Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone(), regional.clone())),
             multipart: MultipartService::new(
@@ -81,7 +84,12 @@ impl Storage {
             members: MembershipService::new(TessariMembers::new(regional.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
             usage: UsageService::new(TessariUsage::new(regional.clone())),
-            users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
+            users: UserService::new(
+                TessariUsers::new(pool.clone()),
+                spaces.clone(),
+                groups.clone(),
+            ),
+            groups,
             identities: IdentityService::new(TessariIdentities::new(pool.clone())),
             keys,
             spaces,
@@ -276,6 +284,12 @@ impl Storage {
     #[must_use]
     pub const fn users(&self) -> &UserService {
         &self.users
+    }
+
+    /// The groups of each space and what they grant their members.
+    #[must_use]
+    pub const fn groups(&self) -> &GroupService {
+        &self.groups
     }
 
     /// Console sign-ins in flight to the identity provider, and which user each provider identity is.

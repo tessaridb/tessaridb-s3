@@ -12,7 +12,7 @@ use crate::access::user_with_key;
 use crate::{IGNORED, call_as, live_config, prepared, test_node};
 
 /// A state whose clock starts at the real time and moves only when the test says.
-async fn state_with_clock() -> (ApiState, Arc<AtomicI64>) {
+pub(crate) async fn state_with_clock() -> (ApiState, Arc<AtomicI64>) {
     let config = live_config(test_node(), None, &crate::scratch_dir());
     let storage = prepared(&config).await;
     let start = ApiState::system_clock()();
