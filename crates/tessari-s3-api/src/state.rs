@@ -1,13 +1,14 @@
 //! What every request handler shares: the signing region, the endpoint domains, the root credential, the cache of
-//! resolved user keys, the clock and the node's metrics.
+//! resolved user keys, the clock, the node's metrics and where requests queue their access-log records.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
 use tessari_s3_observability::Metrics;
 use tessari_s3_storage::Storage;
+use tessari_s3_storage::audit::AccessRecord;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
 use crate::principals::{Principals, principal_of, resolve_user_key};
@@ -43,6 +44,7 @@ struct Inner {
     principals: Principals,
     notify_targets: Vec<String>,
     metrics: Arc<Metrics>,
+    audit: OnceLock<tokio::sync::mpsc::Sender<AccessRecord>>,
 }
 
 impl ApiState {
@@ -78,6 +80,7 @@ impl ApiState {
                     .map(|target| target.id.clone())
                     .collect(),
                 metrics: Arc::new(Metrics::new()),
+                audit: OnceLock::new(),
             }),
         }
     }
@@ -145,6 +148,24 @@ impl ApiState {
     #[must_use]
     pub fn metrics(&self) -> &Arc<Metrics> {
         &self.inner.metrics
+    }
+
+    /// Starts the access log: requests from now on queue a record, up to `capacity` waiting, for the writer this
+    /// answers to append. `None` when it was started already.
+    #[must_use]
+    pub fn audit_writer(&self, capacity: usize) -> Option<crate::AuditWriter> {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+        self.inner.audit.set(sender).ok()?;
+        Some(crate::AuditWriter::new(
+            receiver,
+            self.inner.storage.audit(),
+            Arc::clone(&self.inner.metrics),
+        ))
+    }
+
+    /// Where requests queue their access-log records, when the access log is started.
+    pub(crate) fn audit(&self) -> Option<&tokio::sync::mpsc::Sender<AccessRecord>> {
+        self.inner.audit.get()
     }
 
     /// The storage services.

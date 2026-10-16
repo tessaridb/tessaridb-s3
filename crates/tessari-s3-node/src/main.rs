@@ -215,6 +215,9 @@ async fn main() -> anyhow::Result<()> {
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
     let state = ApiState::new(&config, ApiState::system_clock(), storage);
     let metrics = metrics::surface(&config, &state, stop_rx.clone()).await?;
+    if let Some(writer) = metrics::access_log(&config, &state, stop_rx.clone()) {
+        daemons.spawn(writer);
+    }
     let tls = config
         .tls
         .as_ref()

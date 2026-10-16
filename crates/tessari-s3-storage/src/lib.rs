@@ -2,6 +2,7 @@
 
 pub mod actions;
 mod answers;
+pub mod audit;
 mod backoff;
 pub mod buckets;
 pub mod cluster;

@@ -11,6 +11,7 @@ mod handler;
 mod overload;
 mod query;
 pub(crate) mod response;
+mod trail;
 
 pub use handler::handle;
 pub use overload::refused;

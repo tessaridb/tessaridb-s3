@@ -169,3 +169,18 @@ async fn a_backlog_the_metadata_store_cannot_answer_is_reported_down() {
     );
     assert!(!text.contains("s3_replication_backlog{"), "{text}");
 }
+
+#[tokio::test]
+async fn a_full_access_log_queue_drops_the_record_and_still_serves_the_request() {
+    let served = state(NOW, 64);
+    // Started and never run: the one place in its queue stays taken.
+    let _writer = served.audit_writer(1).expect("the access log starts once");
+    assert!(served.audit_writer(1).is_none(), "and only once");
+    for _ in 0..2 {
+        let seen = send(served.clone(), request("GET", "/bucket/key", &host())).await;
+        assert_eq!(seen.code.as_deref(), Some("AccessDenied"));
+    }
+    let text = scrape(served).await;
+    assert!(text.contains("s3_audit_dropped_total 1\n"), "{text}");
+    assert!(text.contains("s3_audit_written_total 0\n"), "{text}");
+}

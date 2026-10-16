@@ -2,8 +2,7 @@
 
 mod keys;
 pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_INTERVAL_SECS};
-mod metrics;
-pub use metrics::{METRICS_BACKLOG_COUNT_MAX, METRICS_COLLECT_SECS};
+pub mod observability;
 mod replication;
 pub use replication::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_CONNECT_TIMEOUT_SECS, REPLICATION_DELIVERIES,

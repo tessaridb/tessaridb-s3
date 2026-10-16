@@ -13,6 +13,7 @@ pub mod media_image;
 pub mod media_video;
 mod meta_config;
 mod notify_config;
+mod observability_config;
 pub mod oidc;
 mod oidc_config;
 mod oidc_http;

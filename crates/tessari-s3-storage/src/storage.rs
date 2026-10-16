@@ -11,6 +11,7 @@ use tessari_s3_types::IamKey;
 
 use crate::Result;
 use crate::actions::{ActionService, TessariActions};
+use crate::audit::{AuditService, TessariAudit};
 use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
@@ -206,6 +207,12 @@ impl Storage {
             self.objects.clone(),
             self.multipart.clone(),
         )
+    }
+
+    /// The region's access log: one record per S3 request.
+    #[must_use]
+    pub fn audit(&self) -> AuditService {
+        AuditService::new(TessariAudit::new(self.regional.clone()))
     }
 
     /// Delivery of bucket event notifications to the operator's declared destinations.

@@ -10,6 +10,7 @@ mod access;
 mod access_crossing;
 mod access_probe;
 mod access_window;
+mod audit;
 #[path = "../wire/authority.rs"]
 mod authority;
 mod buckets;
@@ -457,7 +458,7 @@ fn signed(
 }
 
 /// Sends `request` through the S3 router and reads the whole answer.
-async fn send(state: &ApiState, request: Request<Body>) -> Seen {
+pub(crate) async fn send(state: &ApiState, request: Request<Body>) -> Seen {
     let response = router(state.clone())
         .oneshot(request)
         .await

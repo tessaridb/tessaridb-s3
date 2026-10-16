@@ -18,6 +18,7 @@ use super::call::Call;
 use super::fence::writable;
 use super::query::decode_query;
 use super::response::{error_response, new_request_id, with_request_id};
+use super::trail::{Answered, Trail, client, log};
 use crate::state::ApiState;
 use crate::{Error, Result, routes};
 
@@ -30,8 +31,14 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
     let resource = request.uri().path().to_owned();
     let method = request.method().clone();
     let sent = content_length(request.headers());
-    let mut operation = "Unknown";
-    let (response, code) = match serve(state.clone(), request, &mut operation).await {
+    let at_secs = state.now();
+    let mut trail = Trail::new(&state);
+    let client = if trail.logged {
+        client(request.extensions())
+    } else {
+        None
+    };
+    let (response, code) = match serve(state.clone(), request, &mut trail).await {
         Ok(response) => {
             tracing::info!(request_id = %request_id, method = %method, status = response.status().as_u16(), "served");
             (with_request_id(response, &request_id), "None")
@@ -53,13 +60,32 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
     // A streamed body has no exact size; its length is the header it was answered with.
     let answered =
         content_length(response.headers()).max(response.body().size_hint().exact().unwrap_or(0));
+    let elapsed = arrived.elapsed();
+    let bytes = sent.max(answered);
+    let status = response.status().as_u16();
     state.metrics().served(&Served {
-        operation,
-        status: response.status().as_u16(),
+        operation: trail.operation,
+        status,
         code,
-        bytes: sent.max(answered),
-        seconds: arrived.elapsed().as_secs_f64(),
+        bytes,
+        seconds: elapsed.as_secs_f64(),
     });
+    if trail.logged {
+        log(
+            &state,
+            trail,
+            Answered {
+                request_id,
+                at_secs,
+                method: method.to_string(),
+                client,
+                status,
+                code,
+                bytes,
+                millis: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+            },
+        );
+    }
     response
 }
 
@@ -72,13 +98,9 @@ fn content_length(headers: &axum::http::HeaderMap) -> u64 {
         .unwrap_or(0)
 }
 
-/// The pipeline up to and including the operation; `operation` is set to the operation's name once dispatch has
-/// named it.
-async fn serve(
-    state: ApiState,
-    request: Request,
-    operation: &mut &'static str,
-) -> Result<Response<Body>> {
+/// The pipeline up to and including the operation; `trail` learns the operation once dispatch has named it, and the
+/// bucket, key and signer while the access log is on.
+async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<Response<Body>> {
     let (parts, body) = request.into_parts();
     let method = Method::parse(parts.method.as_str()).ok_or_else(|| {
         Error::new(
@@ -105,6 +127,13 @@ async fn serve(
     let raw_path = parts.uri.path();
     let raw_query = parts.uri.query().unwrap_or("");
     let addressed = resolve(host, raw_path, state.domains())?;
+    if trail.logged {
+        trail.bucket = addressed
+            .bucket
+            .as_ref()
+            .map(|bucket| bucket.as_str().to_owned());
+        trail.key = addressed.key.as_ref().map(|key| key.as_str().to_owned());
+    }
     let query = decode_query(raw_query)?;
     let query_refs: Vec<(&str, Option<&str>)> = query
         .iter()
@@ -117,7 +146,7 @@ async fn serve(
         query: &query_refs,
         header_names: &header_names,
     })?;
-    *operation = spec.name;
+    trail.operation = spec.name;
     let signed = SignedRequest {
         method: parts.method.as_str(),
         raw_path,
@@ -125,6 +154,9 @@ async fn serve(
         headers: &headers,
     };
     let (verified, principal) = authenticate(&state, &signed).await?;
+    if trail.logged {
+        trail.principal = Some(verified.access_key().to_owned());
+    }
     if !is_implemented(spec.operation) {
         return Err(Error::new(
             ErrorCode::NotImplemented,

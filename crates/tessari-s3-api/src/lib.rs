@@ -1,5 +1,6 @@
 //! The S3 HTTP surface: request parsing, operation dispatch, authentication, and the error envelope.
 
+mod audit;
 mod console;
 mod error;
 mod internal;
@@ -11,6 +12,7 @@ mod serve;
 mod state;
 mod xml;
 
+pub use audit::AuditWriter;
 pub use console::{ConsoleState, console_router, serve_console};
 pub use error::{Error, Result};
 pub use internal::{Admit, InternalState, PeerCertificate, internal_router, serve_internal};

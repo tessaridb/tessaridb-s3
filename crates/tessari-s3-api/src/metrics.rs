@@ -11,7 +11,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
-use tessari_s3_constants::{METRICS_BACKLOG_COUNT_MAX, METRICS_COLLECT_SECS};
+use tessari_s3_constants::observability::{METRICS_BACKLOG_COUNT_MAX, METRICS_COLLECT_SECS};
 use tokio::time::timeout;
 
 use crate::ApiState;

@@ -37,6 +37,9 @@ pub struct Metrics {
     replication_in_flight: Family<Unlabelled, Gauge>,
     replication_failed: Family<Unlabelled, Gauge>,
     collect_up: Family<SourceLabels, Gauge>,
+    audit_written: Counter,
+    audit_dropped: Counter,
+    audit_failed: Counter,
 }
 
 impl Default for Metrics {
@@ -120,6 +123,22 @@ impl Metrics {
             "Whether the last scrape could read a source (1) or not (0); a source not read keeps its last values",
             collect_up.clone(),
         );
+        let [audit_written, audit_dropped, audit_failed] = [
+            ("audit_written", "Access-log records appended"),
+            (
+                "audit_dropped",
+                "Access-log records not queued because the writer's queue was full; the requests were served",
+            ),
+            (
+                "audit_failed",
+                "Access-log records whose append failed after every retry",
+            ),
+        ]
+        .map(|(name, help)| {
+            let counter = Counter::default();
+            registry.register(name, help, counter.clone());
+            counter
+        });
         Self {
             registry,
             requests,
@@ -133,6 +152,9 @@ impl Metrics {
             replication_in_flight,
             replication_failed,
             collect_up,
+            audit_written,
+            audit_dropped,
+            audit_failed,
         }
     }
 
@@ -202,6 +224,21 @@ impl Metrics {
         self.collect_up
             .get_or_create(&SourceLabels { source })
             .set(i64::from(read));
+    }
+
+    /// Counts `records` appended to the access log.
+    pub fn audit_written(&self, records: u64) {
+        self.audit_written.inc_by(records);
+    }
+
+    /// Counts one access-log record the full queue turned away.
+    pub fn audit_dropped(&self) {
+        self.audit_dropped.inc();
+    }
+
+    /// Counts `records` whose append failed for good.
+    pub fn audit_failed(&self, records: u64) {
+        self.audit_failed.inc_by(records);
     }
 
     /// The metrics in Prometheus text.
