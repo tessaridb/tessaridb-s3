@@ -46,7 +46,7 @@ pub enum Deleted {
 /// Bucket operations.
 #[derive(Clone)]
 pub struct BucketService {
-    repository: TessariBuckets,
+    pub(super) repository: TessariBuckets,
 }
 
 impl BucketService {

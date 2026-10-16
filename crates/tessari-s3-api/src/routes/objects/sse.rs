@@ -9,6 +9,7 @@ use tessari_s3_types::ErrorCode;
 
 use super::headers::not_implemented;
 use crate::error::{Error, Result};
+use crate::pipeline::call::Call;
 
 const MODE: &str = "x-amz-server-side-encryption";
 const KEY_ID: &str = "x-amz-server-side-encryption-aws-kms-key-id";
@@ -18,7 +19,7 @@ pub(crate) const DEFAULT_KEY: &str = "aws-s3";
 
 /// The key a request's `aws-kms-key-id` names: the name itself, `alias/<name>`, or a KMS key or alias ARN ending in
 /// one of those.
-fn key_named(id: &str) -> Result<KeyName> {
+pub(crate) fn key_named(id: &str) -> Result<KeyName> {
     let tail = id
         .strip_prefix("arn:aws:kms:")
         .and_then(|arn| {
@@ -83,6 +84,24 @@ pub(crate) fn read_sse(headers: &HeaderMap) -> Result<Option<Sealing>> {
             format!("the server-side encryption {other} is not one S3 defines"),
         )),
     }
+}
+
+/// What a write is sealed under: what the request asked for, or else its bucket's default encryption — read only
+/// when the request asked for none.
+///
+/// # Errors
+/// The metadata store's refusal or outage.
+pub(crate) async fn requested_or_default(
+    call: &Call<'_>,
+    requested: Option<Sealing>,
+) -> Result<Option<Sealing>> {
+    if requested.is_some() {
+        return Ok(requested);
+    }
+    let bucket = call.state.storage().buckets().get(call.bucket()?).await?;
+    Ok(bucket
+        .and_then(|bucket| bucket.encryption)
+        .map(|encryption| encryption.sealing))
 }
 
 /// Sets the response headers that say how an object is sealed.

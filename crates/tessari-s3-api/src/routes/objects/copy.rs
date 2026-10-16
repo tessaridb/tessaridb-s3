@@ -109,8 +109,8 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     }
     quota::admit(call, bucket, Some(key), object.size).await?;
     let algorithm = algorithm_for(call.headers, &object)?;
-    let (content, digests, encryption) =
-        copy_bytes(objects, &object, headers.encryption.as_ref()).await?;
+    let sealing = super::sse::requested_or_default(call, headers.encryption.clone()).await?;
+    let (content, digests, encryption) = copy_bytes(objects, &object, sealing.as_ref()).await?;
     let value = digests.value(algorithm).to_owned();
     // A whole-object value of the same algorithm must survive the copy; a composite one (`…-N`) covers part
     // digests and cannot be compared.
@@ -129,7 +129,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     let copied = NewObject {
         copied: true,
         size: object.size,
-        etag: etag_for(&digests.md5_hex, headers.encryption.as_ref())?,
+        etag: etag_for(&digests.md5_hex, sealing.as_ref())?,
         headers: system,
         metadata: user,
         tags,

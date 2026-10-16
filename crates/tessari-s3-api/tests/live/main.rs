@@ -83,6 +83,7 @@ mod replication_tasks;
 mod signer;
 mod spaces;
 mod sse;
+mod sse_default;
 mod sse_erasure;
 mod sse_kms;
 mod sse_media;

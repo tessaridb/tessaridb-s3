@@ -59,6 +59,8 @@ const RETENTION_BODY: &[u8] = b"<Retention><Mode>GOVERNANCE</Mode>\
 const HOLD_BODY: &[u8] = b"<LegalHold><Status>ON</Status></LegalHold>";
 const TAGGING_BODY: &[u8] =
     b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
+const ENCRYPTION_BODY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
+    <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
 const COMPLETE_BODY: &[u8] =
     b"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"x\"</ETag></Part></CompleteMultipartUpload>";
@@ -93,6 +95,27 @@ fn table(upload: &str) -> Vec<Probe> {
                 &[("versioning", None)],
             )
         },
+        Probe {
+            body: ENCRYPTION_BODY,
+            ..probe(
+                Operation::PutBucketEncryption,
+                "PUT",
+                "/ann-photos",
+                &[("encryption", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketEncryption,
+            "GET",
+            "/ann-photos",
+            &[("encryption", None)],
+        ),
+        probe(
+            Operation::DeleteBucketEncryption,
+            "DELETE",
+            "/ann-photos",
+            &[("encryption", None)],
+        ),
         Probe {
             body: LIFECYCLE_BODY,
             ..probe(

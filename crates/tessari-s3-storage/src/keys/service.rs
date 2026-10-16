@@ -8,7 +8,7 @@ use zeroize::Zeroizing;
 use super::model::{KeyRing, KeyState, Passphrase};
 use super::repository::KeyVault;
 use super::tessaridb::TessariKeys;
-use crate::encryption::KeyName;
+use crate::encryption::{KeyName, Sealing};
 use crate::{Error, Result};
 
 /// The keys this node holds. Written only by an unseal or a seal; read on every encrypted read and write, and no
@@ -38,6 +38,24 @@ impl KeyService {
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
             .ok_or(Error::KeysSealed)
+    }
+
+    /// Refuses `sealing` unless this node can seal under it now: the server's key, or the named key it holds.
+    ///
+    /// # Errors
+    /// [`Error::KeysSealed`] when this node holds no keys; [`Error::UnknownKey`] for a name it does not hold.
+    pub fn check(&self, sealing: &Sealing) -> Result<()> {
+        let ring = self.ring()?;
+        match sealing {
+            Sealing::Server => Ok(()),
+            Sealing::Named(name) => {
+                ring.get(&name.record_id())
+                    .map(|_| ())
+                    .ok_or_else(|| Error::UnknownKey {
+                        name: name.to_string(),
+                    })
+            }
+        }
     }
 
     /// Whether this node can encrypt, and if not whether the vault exists yet.

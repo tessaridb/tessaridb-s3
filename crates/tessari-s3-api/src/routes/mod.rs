@@ -10,6 +10,7 @@ use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
 pub mod buckets;
+mod encryption;
 mod lifecycle;
 pub mod listing;
 pub mod multipart;
@@ -41,6 +42,8 @@ pub(crate) async fn route(
         Operation::HeadBucket
             | Operation::DeleteBucket
             | Operation::GetBucketVersioning
+            | Operation::GetBucketEncryption
+            | Operation::DeleteBucketEncryption
             | Operation::GetBucketLifecycleConfiguration
             | Operation::DeleteBucketLifecycle
             | Operation::GetBucketNotificationConfiguration
@@ -60,6 +63,9 @@ pub(crate) async fn route(
         Operation::GetBucketLocation => buckets::location(call).await,
         Operation::GetBucketVersioning => versioning::get(call).await,
         Operation::PutBucketVersioning => versioning::put(call, body).await,
+        Operation::GetBucketEncryption => encryption::get(call).await,
+        Operation::PutBucketEncryption => encryption::put(call, body).await,
+        Operation::DeleteBucketEncryption => encryption::delete(call).await,
         Operation::GetBucketLifecycleConfiguration => lifecycle::get(call).await,
         Operation::PutBucketLifecycleConfiguration => lifecycle::put(call, body).await,
         Operation::DeleteBucketLifecycle => lifecycle::delete(call).await,

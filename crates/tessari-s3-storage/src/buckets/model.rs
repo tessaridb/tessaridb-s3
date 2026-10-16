@@ -46,6 +46,17 @@ pub struct Bucket {
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
     /// Who must hold an object write before it is acknowledged.
     pub acknowledgement: Acknowledgement,
+    /// How a write that asks for no encryption is sealed; `None` while the bucket has no default.
+    pub encryption: Option<BucketEncryption>,
+}
+
+/// A bucket's default encryption: the key a write that names none is sealed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BucketEncryption {
+    /// The server's key, or a named one.
+    pub sealing: crate::encryption::Sealing,
+    /// Whether the configuration asked for an S3 Bucket Key; recorded and answered back.
+    pub bucket_key: bool,
 }
 
 /// What turning a bucket's Object Lock on (or changing its default) ended in.
@@ -165,6 +176,11 @@ impl TryFrom<BucketEntity> for Bucket {
                 .media
                 .as_ref()
                 .map(|rules| super::media::from_values(rules))
+                .transpose()?,
+            encryption: entity
+                .encryption
+                .as_ref()
+                .map(super::encryption::from_value)
                 .transpose()?,
             acknowledgement: match entity.acknowledge.as_deref() {
                 None => Acknowledgement::Majority,

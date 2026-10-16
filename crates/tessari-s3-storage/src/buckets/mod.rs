@@ -1,5 +1,6 @@
 //! The `buckets` domain: bucket records in TessariDB.
 
+mod encryption;
 mod entity;
 mod lifecycle;
 mod media;
@@ -9,9 +10,10 @@ pub(crate) mod object_lock;
 pub(crate) mod replication;
 mod repository;
 mod service;
+mod service_encryption;
 mod tessaridb;
 
 pub(crate) use model::LOCAL;
-pub use model::{Acknowledgement, Bucket, LockSet};
+pub use model::{Acknowledgement, Bucket, BucketEncryption, LockSet};
 pub use service::{AcknowledgementSet, BucketService, Created, Deleted};
 pub use tessaridb::TessariBuckets;

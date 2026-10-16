@@ -62,6 +62,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         configuration: Value,
     ) -> impl Future<Output = Result<bool>> + Send;
 
+    /// Sets `name`'s default encryption, or removes it when `encryption` is `None`.
+    fn set_encryption(
+        &self,
+        name: &BucketName,
+        encryption: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Replaces `name`'s tags, or removes them when `tags` is `None`.
     fn set_tags(
         &self,

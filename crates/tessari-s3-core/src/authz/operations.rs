@@ -65,6 +65,8 @@ pub const fn required(operation: Operation) -> Option<Required> {
         Operation::CreateBucket => on(Need::CreateBucket),
         Operation::DeleteBucket => on(Need::DeleteBucket),
         Operation::PutBucketVersioning
+        | Operation::PutBucketEncryption
+        | Operation::DeleteBucketEncryption
         | Operation::PutBucketLifecycleConfiguration
         | Operation::PutBucketNotificationConfiguration
         | Operation::PutBucketReplication
@@ -78,6 +80,7 @@ pub const fn required(operation: Operation) -> Option<Required> {
         Operation::HeadBucket
         | Operation::GetBucketLocation
         | Operation::GetBucketVersioning
+        | Operation::GetBucketEncryption
         | Operation::GetBucketLifecycleConfiguration
         | Operation::GetBucketNotificationConfiguration
         | Operation::GetBucketReplication

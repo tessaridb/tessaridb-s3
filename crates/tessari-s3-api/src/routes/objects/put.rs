@@ -123,8 +123,8 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
     }
     quota::admit(call, call.bucket()?, Some(key), length).await?;
     let objects = call.state.storage().objects();
-    let (uploaded, trailer) =
-        data::receive(call, body, length, headers.encryption.as_ref()).await?;
+    let encryption = super::sse::requested_or_default(call, headers.encryption.clone()).await?;
+    let (uploaded, trailer) = data::receive(call, body, length, encryption.as_ref()).await?;
     let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {

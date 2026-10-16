@@ -111,7 +111,8 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         tags: headers.tags,
         checksum_algorithm,
         checksum_type,
-        encryption: headers.encryption.clone(),
+        encryption: crate::routes::objects::sse::requested_or_default(call, headers.encryption)
+            .await?,
     };
     let bucket = call.bucket()?;
     let Created::Created(id, initiated) = call
