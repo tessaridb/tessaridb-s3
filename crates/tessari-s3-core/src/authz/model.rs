@@ -135,6 +135,38 @@ pub struct UploadPrincipal {
     pub key: String,
 }
 
+/// Temporary credentials a user was issued through the identity provider: the user's authority and nothing more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPrincipal {
+    /// The user, as the principal every decision of the session is taken for.
+    as_user: Box<Principal>,
+}
+
+impl SessionPrincipal {
+    /// A session of `user`, resolved afresh like any user: disabling them or taking a grant binds the session too.
+    #[must_use]
+    pub fn new(user: UserPrincipal) -> Self {
+        Self {
+            as_user: Box::new(Principal::User(user)),
+        }
+    }
+
+    /// The user the session acts as.
+    #[must_use]
+    pub fn as_user(&self) -> &Principal {
+        &self.as_user
+    }
+
+    /// The user, as a creator or a space is named for.
+    #[must_use]
+    pub fn user(&self) -> Option<&UserPrincipal> {
+        match self.as_user.as_ref() {
+            Principal::User(user) => Some(user),
+            _ => None,
+        }
+    }
+}
+
 /// Who is asking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Principal {
@@ -144,6 +176,8 @@ pub enum Principal {
     User(UserPrincipal),
     /// A one-key upload credential.
     Upload(UploadPrincipal),
+    /// Temporary credentials from the identity provider.
+    Session(SessionPrincipal),
     /// A request that carried no credentials: reaches only what a bucket policy grants everyone.
     Anonymous,
 }
@@ -166,6 +200,7 @@ impl Principal {
                     .collect(),
             },
             Self::Root => Visible::All,
+            Self::Session(session) => session.as_user().visible(),
             // A one-key credential lists nothing: no user is called "", and it is granted no bucket.
             Self::Upload(upload) => Visible::Reachable {
                 space: upload.parent.space.clone(),

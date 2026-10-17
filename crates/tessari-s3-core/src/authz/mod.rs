@@ -9,8 +9,8 @@ pub mod policy;
 
 pub use decide::{Asked, Decision, Denied, authorize, authorize_asked};
 pub use model::{
-    Access, Action, BucketResource, GroupName, Principal, Role, SpaceName, UploadPrincipal,
-    UserName, UserPrincipal, UserResource, Visible,
+    Access, Action, BucketResource, GroupName, Principal, Role, SessionPrincipal, SpaceName,
+    UploadPrincipal, UserName, UserPrincipal, UserResource, Visible,
 };
 pub use operations::{Need, Required, required, required_naming_version};
 
@@ -20,5 +20,7 @@ mod asked_tests;
 mod decide_tests;
 #[cfg(test)]
 mod operations_tests;
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 mod upload_tests;

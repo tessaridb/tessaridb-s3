@@ -6,7 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, RefusalClass, Value
 use tessari_s3_types::BucketName;
 
 use super::entity::{AccessKeyEntity, GrantEntity, IssueEntity, KeyListedEntity, UserEntity};
-use super::model::{IssueToken, KeyScope, NewUser, role_text};
+use super::model::{IssueToken, KeyScope, NewSession, NewUser, role_text};
 use super::repository::{Inserted, UserRepository};
 use super::sealer::Sealed;
 use crate::answers::{all_records, first_record};
@@ -172,6 +172,40 @@ impl UserRepository for TessariUsers {
         }
     }
 
+    async fn insert_session_key(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        session: &NewSession,
+    ) -> Result<bool> {
+        let mut parameters = key_parameters(id, user, sealed);
+        parameters.extend([
+            (
+                "session_hash".to_owned(),
+                Value::Bytes(session.token_digest.to_vec()),
+            ),
+            text("session_issuer", &session.issuer),
+            text("session_subject", &session.subject),
+            (
+                "expires".to_owned(),
+                Value::Datetime {
+                    seconds: session.expires,
+                    nanos: 0,
+                },
+            ),
+        ]);
+        let script = "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+             kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
+             session_hash: $session_hash, session_issuer: $session_issuer, session_subject: $session_subject, \
+             expires: $expires } EXPIRE $expires;";
+        match self.pool.run(script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     async fn insert_key_once(
         &self,
         id: &str,
@@ -218,7 +252,7 @@ impl UserRepository for TessariUsers {
 
     async fn keys_of(&self, user: &UserName, limit: usize) -> Result<Vec<KeyListedEntity>> {
         // The projection names no secret, so a listing never fetches one.
-        let script = "SELECT disabled, created, scope_bucket, scope_key, expires FROM access_keys \
+        let script = "SELECT disabled, created, scope_bucket, scope_key, expires, session_issuer FROM access_keys \
              WHERE user_name = $user LIMIT $limit USING INDEX by_key_user;";
         let parameters = vec![
             text("user", user.as_str()),

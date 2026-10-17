@@ -84,7 +84,9 @@ async fn authenticate(
     };
     let credential = required(fields, "x-amz-credential")?;
     let access_key = credential.split('/').next().unwrap_or_default();
-    let known = state.credential_for(access_key).await?;
+    let known = state
+        .credential_for(access_key, field(fields, "x-amz-security-token"))
+        .await?;
     let verified = verify_post(
         encoded,
         required(fields, "x-amz-algorithm")?,

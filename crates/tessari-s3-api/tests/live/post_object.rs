@@ -22,14 +22,14 @@ type Case = (
 );
 
 const BOUNDARY: &str = "----form0boundary7";
-const DATE: &str = "20261013T000000Z";
+pub(crate) const DATE: &str = "20261013T000000Z";
 
 fn header<'a>(seen: &'a Seen, name: &str) -> Option<&'a str> {
     seen.headers.get(name).and_then(|value| value.to_str().ok())
 }
 
 /// The policy in its encoded form, its conditions as JSON list items.
-fn policy(conditions: &str) -> String {
+pub(crate) fn policy(conditions: &str) -> String {
     base64::engine::general_purpose::STANDARD.encode(format!(
         r#"{{"expiration":"2099-01-01T00:00:00Z","conditions":[{conditions}]}}"#
     ))
@@ -66,7 +66,12 @@ fn signing_conditions(state: &tessari_s3_api::ApiState) -> String {
     )
 }
 
-fn form(fields: &[(String, String)], filename: &str, file: &[u8], ending: &str) -> Vec<u8> {
+pub(crate) fn form(
+    fields: &[(String, String)],
+    filename: &str,
+    file: &[u8],
+    ending: &str,
+) -> Vec<u8> {
     let mut body = Vec::new();
     for (name, value) in fields {
         body.extend_from_slice(
@@ -87,11 +92,11 @@ fn form(fields: &[(String, String)], filename: &str, file: &[u8], ending: &str) 
     body
 }
 
-fn closing() -> String {
+pub(crate) fn closing() -> String {
     format!("\r\n--{BOUNDARY}--\r\n")
 }
 
-async fn post(state: &tessari_s3_api::ApiState, bucket: &str, body: Vec<u8>) -> Seen {
+pub(crate) async fn post(state: &tessari_s3_api::ApiState, bucket: &str, body: Vec<u8>) -> Seen {
     let request = Request::builder()
         .method("POST")
         .uri(format!("/{bucket}"))

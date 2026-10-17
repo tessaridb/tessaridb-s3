@@ -64,8 +64,10 @@ pub fn authorize_asked(principal: &Principal, action: &Action, asked: &Asked<'_>
 }
 
 fn decide(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> Decision {
-    if matches!(principal, Principal::Root) {
-        return Decision::Allow;
+    match principal {
+        Principal::Root => return Decision::Allow,
+        Principal::Session(session) => return decide(session.as_user(), action, asked),
+        _ => {}
     }
     let Some((bucket, stored)) = action
         .bucket()
@@ -114,6 +116,7 @@ fn requester(principal: &Principal) -> Requester<'_> {
             space: &upload.parent.space,
             name: &upload.parent.name,
         },
+        Principal::Session(session) => requester(session.as_user()),
         Principal::Root | Principal::Anonymous => Requester::Anonymous,
     }
 }
@@ -124,6 +127,7 @@ fn identity(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -
         Principal::Root => return Decision::Allow,
         Principal::User(user) => user,
         Principal::Upload(upload) => return within_scope(upload, action, asked),
+        Principal::Session(session) => return identity(session.as_user(), action, asked),
         Principal::Anonymous => return Decision::Deny(Denied::NoGrant),
     };
     // Nobody manages their own user — not even an operator: a self-grant is refused by the system, never by policy.

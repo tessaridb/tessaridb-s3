@@ -175,7 +175,8 @@ pub(super) async fn capabilities(
     let administer = match &principal {
         Principal::Root => true,
         Principal::User(user) => may(&Action::ManageSpace(user.space.clone())),
-        Principal::Upload(_) | Principal::Anonymous => false,
+        // A session's key never signs in here; named for the match.
+        Principal::Upload(_) | Principal::Session(_) | Principal::Anonymous => false,
     };
     Json(Capabilities {
         // A person signed in through the identity provider holds no key; until the page names them its own way, this

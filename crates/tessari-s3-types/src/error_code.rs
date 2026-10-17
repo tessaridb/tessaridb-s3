@@ -68,6 +68,10 @@ pub enum ErrorCode {
     AccessForbidden,
     /// 400: a CORS preflight without its Origin or requested method.
     BadRequest,
+    /// 400: the session token of temporary credentials has expired.
+    ExpiredToken,
+    /// 400: the session token is missing, malformed, or not this credential's.
+    InvalidToken,
     /// 400: a form upload whose body is not a well-formed multipart/form-data document.
     MalformedPostRequest,
     /// 400: a form upload's policy document cannot be read.
@@ -172,6 +176,8 @@ impl ErrorCode {
             Self::NoSuchCorsConfiguration => "NoSuchCORSConfiguration",
             Self::AccessForbidden => "AccessForbidden",
             Self::BadRequest => "BadRequest",
+            Self::ExpiredToken => "ExpiredToken",
+            Self::InvalidToken => "InvalidToken",
             Self::MalformedPostRequest => "MalformedPOSTRequest",
             Self::InvalidPolicyDocument => "InvalidPolicyDocument",
             Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
@@ -255,6 +261,8 @@ impl ErrorCode {
             | Self::EntityTooSmall
             | Self::AccessControlListNotSupported
             | Self::BadRequest
+            | Self::ExpiredToken
+            | Self::InvalidToken
             | Self::MalformedPostRequest
             | Self::InvalidPolicyDocument => 400,
             Self::MethodNotAllowed => 405,
@@ -338,6 +346,8 @@ mod tests {
             ),
             (ErrorCode::AccessForbidden, "AccessForbidden", 403),
             (ErrorCode::BadRequest, "BadRequest", 400),
+            (ErrorCode::ExpiredToken, "ExpiredToken", 400),
+            (ErrorCode::InvalidToken, "InvalidToken", 400),
             (ErrorCode::MalformedPostRequest, "MalformedPOSTRequest", 400),
             (
                 ErrorCode::InvalidPolicyDocument,

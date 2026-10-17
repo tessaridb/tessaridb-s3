@@ -154,13 +154,15 @@ impl ConsoleState {
         let live = resolve_user_key(
             &self.inner.principals,
             self.inner.storage.users(),
+            self.inner.storage.identities(),
             key_id,
             self.now(),
         )
         .await?;
-        // A one-key upload credential signs nothing in here: it is for uploading its key over S3 and nothing else.
+        // A one-key upload credential signs nothing in here: it is for uploading its key over S3 and nothing else; nor
+        // do temporary credentials — a person signs in through the identity provider instead.
         Ok(live
-            .filter(|live| live.scope.is_none())
+            .filter(|live| live.scope.is_none() && live.session.is_none())
             .map(|live| (Principal::User(live.principal), live.secret)))
     }
 

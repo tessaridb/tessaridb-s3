@@ -27,6 +27,8 @@ const KEK_ID_LABEL: &[u8] = b"tessaridb-s3/iam-key-id/v1\0";
 const AAD_LABEL: &[u8] = b"tessaridb-s3/access-key/v1\0";
 /// Precedes a one-key credential's scope in its associated data; a full key's associated data ends before it.
 const SCOPE_LABEL: &[u8] = b"\0upload\0";
+/// Precedes a session credential's expiry, token digest and identity in its associated data.
+const SESSION_LABEL: &[u8] = b"\0session\0";
 /// XChaCha20's nonce length.
 const NONCE_LEN: usize = 24;
 
@@ -55,6 +57,22 @@ pub(crate) struct Binding<'a> {
     pub space: &'a str,
     /// What a one-key credential may write, from the record's own fields; `None` for a full key.
     pub scope: Option<ScopeBinding<'a>>,
+    /// A session credential's expiry, token and identity, from the record's own fields; `None` for any other key.
+    pub session: Option<SessionBinding<'a>>,
+}
+
+/// A session credential as bound into its associated data, so a record whose expiry was moved, whose token digest was
+/// replaced or whose identity was changed does not open.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SessionBinding<'a> {
+    /// When it expires, in seconds since the epoch.
+    pub expires: i64,
+    /// The SHA-256 digest of its session token.
+    pub token_digest: &'a [u8; 32],
+    /// The identity provider's issuer it was issued through.
+    pub issuer: &'a str,
+    /// The provider's subject it was issued to.
+    pub subject: &'a str,
 }
 
 /// A one-key credential's scope as bound into its associated data, so a record whose scope was stripped or widened
@@ -120,6 +138,19 @@ impl Sealer {
             aad.extend_from_slice(scope.expires.to_string().as_bytes());
             aad.push(0);
             aad.extend_from_slice(scope.key.as_bytes());
+        }
+        // An issuer URL holds no NUL and the digest is hex, so the subject — which may hold anything — goes last.
+        if let Some(session) = binding.session {
+            aad.extend_from_slice(SESSION_LABEL);
+            aad.extend_from_slice(session.expires.to_string().as_bytes());
+            aad.push(0);
+            for byte in session.token_digest {
+                aad.extend_from_slice(format!("{byte:02x}").as_bytes());
+            }
+            aad.push(0);
+            aad.extend_from_slice(session.issuer.as_bytes());
+            aad.push(0);
+            aad.extend_from_slice(session.subject.as_bytes());
         }
         aad
     }

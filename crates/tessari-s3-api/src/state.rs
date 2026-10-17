@@ -3,6 +3,7 @@
 
 use std::sync::{Arc, OnceLock};
 
+use tessari_s3_core::auth::{session_token_expiry, session_token_matches};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
@@ -174,35 +175,74 @@ impl ApiState {
         &self.inner.storage
     }
 
-    /// Who signs with `access_key` and the secret to verify the signature with: the root credential from
-    /// configuration, a user's key from the store through the principal cache.
+    /// Who signs with `access_key`, presenting session token `token` when the request carried one, and the secret
+    /// to verify the signature with: the root credential from configuration, a user's key from the store through the
+    /// principal cache. Temporary credentials stand only with their own session token and until they expire; any
+    /// other credential refuses a token, since nothing could check it.
     ///
     /// # Errors
-    /// `InvalidAccessKeyId` when no credential has that key or it or its user is disabled; the store's failure,
-    /// which serves nothing cached in its place.
-    pub(crate) async fn credential_for(&self, access_key: &str) -> Result<Credential> {
+    /// `InvalidAccessKeyId` when no credential has that key or it or its user is disabled; `InvalidToken` for a
+    /// token missing, wrong or presented with a long-term key; `ExpiredToken` for temporary credentials past their
+    /// expiry; the store's failure, which serves nothing cached in its place.
+    pub(crate) async fn credential_for(
+        &self,
+        access_key: &str,
+        token: Option<&str>,
+    ) -> Result<Credential> {
+        let now = self.now();
+        let invalid_token = || {
+            Error::new(
+                ErrorCode::InvalidToken,
+                "the security token is not valid for this access key",
+            )
+        };
+        let expired = || Error::new(ErrorCode::ExpiredToken, "the security token has expired");
         if access_key == self.inner.root_access_key {
-            return Ok(Credential {
-                principal: Principal::Root,
-                secret: self.inner.root_secret_key.clone(),
-            });
+            return match token {
+                Some(_) => Err(invalid_token()),
+                None => Ok(Credential {
+                    principal: Principal::Root,
+                    secret: self.inner.root_secret_key.clone(),
+                }),
+            };
         }
         let live = resolve_user_key(
             &self.inner.principals,
             self.inner.storage.users(),
+            self.inner.storage.identities(),
             access_key,
-            self.now(),
+            now,
         )
         .await?;
-        live.and_then(|live| {
-            let secret = live.secret.clone();
-            principal_of(live, self.now()).map(|principal| Credential { principal, secret })
-        })
-        .ok_or_else(|| {
-            Error::new(
-                ErrorCode::InvalidAccessKeyId,
-                "the access key does not exist",
-            )
-        })
+        let Some(live) = live else {
+            // The store drops temporary credentials when they expire; their token still names when that was.
+            return Err(match token.and_then(session_token_expiry) {
+                Some(expiry) if expiry <= now => expired(),
+                _ => Error::new(
+                    ErrorCode::InvalidAccessKeyId,
+                    "the access key does not exist",
+                ),
+            });
+        };
+        match (&live.session, token) {
+            (Some(session), Some(presented))
+                if session_token_matches(presented, &session.token_digest) => {}
+            (Some(_), _) | (None, Some(_)) => return Err(invalid_token()),
+            (None, None) => {}
+        }
+        let secret = live.secret.clone();
+        let session = live.session.is_some();
+        principal_of(live, now)
+            .map(|principal| Credential { principal, secret })
+            .ok_or_else(|| {
+                if session {
+                    expired()
+                } else {
+                    Error::new(
+                        ErrorCode::InvalidAccessKeyId,
+                        "the access key does not exist",
+                    )
+                }
+            })
     }
 }

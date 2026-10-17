@@ -85,6 +85,7 @@ mod replication;
 mod replication_regions;
 mod replication_send;
 mod replication_tasks;
+mod sessions;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,

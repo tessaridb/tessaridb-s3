@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use tessari_s3_core::authz::{Principal, Role, SpaceName, UserPrincipal};
-use tessari_s3_storage::users::KeyScope;
+use tessari_s3_core::authz::{Principal, Role, SessionPrincipal, SpaceName, UserPrincipal};
+use tessari_s3_storage::users::{KeyScope, SessionScope};
 use tessari_s3_types::{BucketName, ObjectKey, SecretKey};
 
 use super::{Fetched, Live, Principals, WINDOW_SECS, principal_of};
@@ -38,11 +38,12 @@ async fn resolve(
 }
 
 fn live() -> Fetched {
-    Fetched::Live {
+    Fetched::Live(Box::new(Live {
         principal: ann(),
         secret: SecretKey::new("s".repeat(40)),
         scope: None,
-    }
+        session: None,
+    }))
 }
 
 #[tokio::test]
@@ -115,6 +116,7 @@ fn scoped(expires: i64) -> Live {
             key: ObjectKey::new("in/a.jpg").expect("a key"),
             expires,
         }),
+        session: None,
     }
 }
 
@@ -137,6 +139,32 @@ fn a_full_key_is_its_user_whatever_the_time() {
         principal: ann(),
         secret: SecretKey::new("s".repeat(40)),
         scope: None,
+        session: None,
     };
     assert_eq!(principal_of(full, i64::MAX), Some(Principal::User(ann())));
+}
+
+fn session(expires: i64) -> Live {
+    Live {
+        principal: ann(),
+        secret: SecretKey::new("s".repeat(40)),
+        scope: None,
+        session: Some(SessionScope {
+            expires,
+            token_digest: [3; 32],
+            issuer: "https://id.example.com".to_owned(),
+            subject: "248289761001".to_owned(),
+            issued: 100,
+        }),
+    }
+}
+
+#[test]
+fn temporary_credentials_are_a_session_of_their_user_until_they_expire() {
+    assert_eq!(
+        principal_of(session(200), 199),
+        Some(Principal::Session(SessionPrincipal::new(ann())))
+    );
+    assert_eq!(principal_of(session(200), 200), None, "at their expiry");
+    assert_eq!(principal_of(session(200), 201), None, "after it");
 }

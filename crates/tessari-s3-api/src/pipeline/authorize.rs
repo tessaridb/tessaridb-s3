@@ -97,6 +97,7 @@ fn home(principal: &Principal) -> Option<tessari_s3_core::authz::SpaceName> {
     match principal {
         Principal::User(user) => Some(user.space.clone()),
         Principal::Upload(upload) => Some(upload.parent.space.clone()),
+        Principal::Session(session) => home(session.as_user()),
         Principal::Root | Principal::Anonymous => None,
     }
 }

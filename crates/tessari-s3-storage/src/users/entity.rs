@@ -48,8 +48,14 @@ pub struct AccessKeyEntity {
     pub scope_bucket: Option<String>,
     /// A one-key credential's key.
     pub scope_key: Option<String>,
-    /// A one-key credential's expiry: seconds and nanoseconds since the epoch.
+    /// A one-key credential's or a session's expiry: seconds and nanoseconds since the epoch.
     pub expires: Option<(i64, u32)>,
+    /// A session's token digest; absent on every other key, as are the two below.
+    pub session_hash: Option<Vec<u8>>,
+    /// A session's identity-provider issuer.
+    pub session_issuer: Option<String>,
+    /// A session's identity-provider subject.
+    pub session_subject: Option<String>,
 }
 
 /// One access key as a listing reads it: never the secret, which the listing does not fetch.
@@ -65,8 +71,10 @@ pub struct KeyListedEntity {
     pub scope_bucket: Option<String>,
     /// A one-key credential's key.
     pub scope_key: Option<String>,
-    /// A one-key credential's expiry: seconds and nanoseconds since the epoch.
+    /// A one-key credential's or a session's expiry: seconds and nanoseconds since the epoch.
     pub expires: Option<(i64, u32)>,
+    /// A session's identity-provider issuer; absent on every other key.
+    pub session_issuer: Option<String>,
 }
 
 /// What a key-issue token recorded: whom it issued a key to, and which key.
@@ -150,6 +158,13 @@ impl<'a> Fields<'a> {
         }
     }
 
+    fn optional_bytes(&self, field: &'static str) -> Result<Option<Vec<u8>>> {
+        match self.fields.get(field) {
+            None | Some(Value::None) => Ok(None),
+            Some(_) => self.bytes(field).map(Some),
+        }
+    }
+
     fn optional_instant(&self, field: &'static str) -> Result<Option<(i64, u32)>> {
         match self.fields.get(field) {
             None | Some(Value::None) => Ok(None),
@@ -196,6 +211,9 @@ impl AccessKeyEntity {
             scope_bucket: fields.optional_text("scope_bucket")?,
             scope_key: fields.optional_text("scope_key")?,
             expires: fields.optional_instant("expires")?,
+            session_hash: fields.optional_bytes("session_hash")?,
+            session_issuer: fields.optional_text("session_issuer")?,
+            session_subject: fields.optional_text("session_subject")?,
         })
     }
 }
@@ -218,6 +236,7 @@ impl KeyListedEntity {
             scope_bucket: fields.optional_text("scope_bucket")?,
             scope_key: fields.optional_text("scope_key")?,
             expires: fields.optional_instant("expires")?,
+            session_issuer: fields.optional_text("session_issuer")?,
         })
     }
 }

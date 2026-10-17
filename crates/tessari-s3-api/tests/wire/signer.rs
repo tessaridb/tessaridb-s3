@@ -114,3 +114,53 @@ pub(crate) fn sign_with_body(
     ));
     (target, headers)
 }
+
+/// A presigned request target (`path?query` carrying the signature) valid for `expires_secs`, signing `host` only;
+/// `request.headers` is not used, and any query the request carries — a session token included — is signed with it.
+#[allow(
+    dead_code,
+    reason = "the live tests presign; the wire tests use the published vector"
+)]
+pub(crate) fn presign(request: &Unsigned<'_>, expires_secs: u32) -> String {
+    let date = &request.amz_date[..8];
+    let scope = format!("{date}/{}/s3/aws4_request", request.region);
+    let credential = format!("{}/{scope}", request.access_key);
+    let expires = expires_secs.to_string();
+    let mut query: Vec<(String, String)> = request
+        .query
+        .iter()
+        .map(|(name, value)| (encode(name), encode(value.unwrap_or(""))))
+        .chain(
+            [
+                ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
+                ("X-Amz-Credential", credential.as_str()),
+                ("X-Amz-Date", request.amz_date),
+                ("X-Amz-Expires", expires.as_str()),
+                ("X-Amz-SignedHeaders", "host"),
+            ]
+            .into_iter()
+            .map(|(name, value)| (encode(name), encode(value))),
+        )
+        .collect();
+    query.sort();
+    let canonical_query: Vec<String> = query.iter().map(|(n, v)| format!("{n}={v}")).collect();
+    let canonical_query = canonical_query.join("&");
+    let canonical_request = format!(
+        "{}\n{}\n{canonical_query}\nhost:{}\n\nhost\nUNSIGNED-PAYLOAD",
+        request.method, request.path, request.host
+    );
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{scope}\n{}",
+        request.amz_date,
+        hex(&Sha256::digest(canonical_request.as_bytes()))
+    );
+    let mut key = hmac(format!("AWS4{}", request.secret).as_bytes(), date);
+    for part in [request.region, "s3", "aws4_request"] {
+        key = hmac(&key, part);
+    }
+    let signature = hex(&hmac(&key, &string_to_sign));
+    format!(
+        "{}?{canonical_query}&X-Amz-Signature={signature}",
+        request.path
+    )
+}

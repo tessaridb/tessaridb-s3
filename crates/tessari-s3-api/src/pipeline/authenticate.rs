@@ -18,7 +18,8 @@ use crate::{Error, Result};
 ///
 /// # Errors
 /// `InvalidArgument` for two authentication forms at once,
-/// `InvalidAccessKeyId` for an unknown or disabled key, and the SigV4 refusals.
+/// `InvalidAccessKeyId` for an unknown or disabled key, `InvalidToken` / `ExpiredToken` for a session token that does
+/// not stand, and the SigV4 refusals.
 pub async fn authenticate(
     state: &ApiState,
     request: &SignedRequest<'_>,
@@ -46,9 +47,15 @@ fn refused(error: AuthError) -> (Option<AuthRefusal>, Error) {
     (Some(reason(&error)), error.into())
 }
 
-/// A credential lookup's failure: an unknown key is a refusal, the store's outage is not.
+/// A credential lookup's failure: an unknown key or a session token that does not stand is a refusal, the store's
+/// outage is not.
 fn unresolved(error: Error) -> (Option<AuthRefusal>, Error) {
-    let refusal = (error.code == ErrorCode::InvalidAccessKeyId).then_some(AuthRefusal::UnknownKey);
+    let refusal = match error.code {
+        ErrorCode::InvalidAccessKeyId => Some(AuthRefusal::UnknownKey),
+        ErrorCode::ExpiredToken => Some(AuthRefusal::Expired),
+        ErrorCode::InvalidToken => Some(AuthRefusal::Malformed),
+        _ => None,
+    };
     (refusal, error)
 }
 
@@ -78,18 +85,9 @@ async fn verify(
             ))
         }
         (Some(value), None) => {
-            if request.header("x-amz-security-token").is_some() {
-                return Err((
-                    Some(AuthRefusal::Malformed),
-                    Error::new(
-                        ErrorCode::InvalidArgument,
-                        "temporary credentials are not supported",
-                    ),
-                ));
-            }
             let parsed = AuthorizationHeader::parse(value).map_err(refused)?;
             let credential = state
-                .credential_for(parsed.access_key())
+                .credential_for(parsed.access_key(), request.header("x-amz-security-token"))
                 .await
                 .map_err(unresolved)?;
             let verified = verify_header(request, &parsed, &credential.secret, state.region(), now)
@@ -98,7 +96,7 @@ async fn verify(
         }
         (None, Some(query)) => {
             let credential = state
-                .credential_for(query.access_key())
+                .credential_for(query.access_key(), query.security_token())
                 .await
                 .map_err(unresolved)?;
             let verified =

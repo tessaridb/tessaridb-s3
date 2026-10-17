@@ -126,6 +126,11 @@ pub(super) async fn create(
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
         // Refused before it creates anything; named for the match, never for the bucket.
         Principal::Upload(upload) => (upload.parent.space.clone(), None),
+        Principal::Session(session) => session
+            .user()
+            .map_or((SpaceName::default_space(), None), |user| {
+                (user.space.clone(), Some(user.name.as_str()))
+            }),
         Principal::Anonymous => (SpaceName::default_space(), None),
     };
     allow(&principal, &Action::CreateBucket(space.clone()))?;

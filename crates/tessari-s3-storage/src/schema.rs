@@ -54,6 +54,8 @@ use crate::Result;
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
 /// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
+/// Temporary credentials from the identity provider are access keys with `expires`, `session_hash` (the digest of
+/// their session token), `session_issuer` and `session_subject`.
 /// `groups:<space>/<name>` is a set of a space's users (`group_members:<space>/<name>/<user>`) whose grants
 /// (`group_grants:<space>/<name>/<bucket>`) each member receives; a membership or grant is written in the transaction
 /// that touches its group (`touched`), so it conflicts with the group's removal instead of outliving it.
@@ -100,6 +102,9 @@ DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
 DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
+DEFINE FIELD IF NOT EXISTS session_hash ON access_keys TYPE bytes;
+DEFINE FIELD IF NOT EXISTS session_issuer ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS session_subject ON access_keys TYPE string;
 ALTER TABLE access_keys SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
 ALTER TABLE key_issues SET EXPIRE;
