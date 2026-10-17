@@ -3,6 +3,27 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.2.0-beta — 2026-10-17
+
+Metadata on TessariDB `0.34.2-beta`.
+
+- Server-side encryption: SSE-S3 (`AES256`) and named keys (`aws:kms`) on PutObject, CopyObject, multipart uploads
+  and part copies; bucket default encryption; SSE-C over TLS, the customer's key never stored. Keys sit in a vault
+  of their own, sealed until a passphrase opens them. Rotating the server key re-wraps every data key in the
+  background; an older key is destroyed once nothing names it. Replicas and erasure shards stay sealed.
+- The S3 API over TLS (`TESSARIDB_S3_TLS_CERT` / `_KEY`).
+- Metrics: `GET /metrics` in Prometheus text — requests, durations, refusals, policy denials, backlogs, cluster
+  members. Every request is recorded in the region's access log.
+- Bucket policies: Get/Put/DeleteBucketPolicy, GetBucketPolicyStatus, enforced on every path; Get/Put/
+  DeletePublicAccessBlock. CORS: Get/Put/DeleteBucketCors and preflights. Browser form uploads (`POST /{bucket}`).
+- Temporary credentials: `AssumeRoleWithWebIdentity` for a person the console's identity provider vouches for,
+  signed with `x-amz-security-token`, narrowed by an optional session policy.
+- Groups: a space's named sets of users; a bucket granted to a group reaches every member.
+- Console: encryption keys (unseal, seal, rotate, destroy), bucket default encryption, groups.
+
+Upgrading: Block Public Access is on for every bucket that set none, so anonymous reads a policy granted stop until
+the bucket's setting is relaxed. An object sealed by this release cannot be read by `0.1.0-beta`.
+
 ## 0.1.0-beta — 2026-10-16
 
 Metadata on TessariDB `0.34.2-beta`.
