@@ -13,6 +13,7 @@
 )]
 mod signer;
 
+mod acknowledge;
 mod disk;
 mod docker;
 mod faults;
