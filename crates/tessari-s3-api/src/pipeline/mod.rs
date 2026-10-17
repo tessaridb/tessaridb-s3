@@ -12,6 +12,7 @@ mod overload;
 mod post_form;
 mod query;
 pub(crate) mod response;
+pub(crate) mod sts;
 mod trail;
 
 pub use handler::handle;

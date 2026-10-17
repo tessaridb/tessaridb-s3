@@ -19,6 +19,7 @@ mod oidc_config;
 mod oidc_http;
 mod oidc_logout;
 mod oidc_verify;
+mod oidc_web_identity;
 pub mod peer;
 mod replica_client;
 pub mod tessaridb;

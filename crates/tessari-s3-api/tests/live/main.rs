@@ -102,6 +102,7 @@ mod sse_kms;
 mod sse_media;
 mod sse_replication;
 mod sse_rotation;
+mod sts;
 mod tagging;
 mod tagging_carried;
 mod upload_keys;

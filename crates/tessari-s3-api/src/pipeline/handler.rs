@@ -41,7 +41,7 @@ pub async fn handle(State(state): State<ApiState>, request: Request) -> Response
         None
     };
     let browser = cross_origin(&state, &request);
-    let (mut response, code) = match serve(state.clone(), request, &mut trail).await {
+    let (mut response, code) = match serve(state.clone(), request, &mut trail, &request_id).await {
         Ok(response) => {
             tracing::info!(request_id = %request_id, method = %method, status = response.status().as_u16(), "served");
             (with_request_id(response, &request_id), "None")
@@ -132,7 +132,12 @@ fn content_length(headers: &axum::http::HeaderMap) -> u64 {
 
 /// The pipeline up to and including the operation; `trail` learns the operation once dispatch has named it, and the
 /// bucket, key and signer while the access log is on.
-async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<Response<Body>> {
+async fn serve(
+    state: ApiState,
+    request: Request,
+    trail: &mut Trail,
+    request_id: &str,
+) -> Result<Response<Body>> {
     let (parts, body) = request.into_parts();
     let mut headers = Vec::with_capacity(parts.headers.len());
     for (name, value) in &parts.headers {
@@ -159,6 +164,11 @@ async fn serve(state: ApiState, request: Request, trail: &mut Trail) -> Result<R
             .as_ref()
             .map(|bucket| bucket.as_str().to_owned());
         trail.key = addressed.key.as_ref().map(|key| key.as_str().to_owned());
+    }
+    // Temporary credentials are asked for in the STS protocol, which answers its refusals itself.
+    if super::sts::is_sts(&parts, &addressed) {
+        trail.operation = "AssumeRoleWithWebIdentity";
+        return Ok(super::sts::serve(&state, &parts, body, request_id).await);
     }
     // A browser's form upload is authenticated by its own fields, and is a PutObject of the key it names.
     if super::post_form::is_form_upload(&parts, &addressed) {

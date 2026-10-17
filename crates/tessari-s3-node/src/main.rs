@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use std::sync::Arc;
 use tessari_s3_api::{ApiState, serve_s3};
+use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
+use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_infrastructure::tls::listener_config;
 use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
@@ -214,6 +216,13 @@ async fn main() -> anyhow::Result<()> {
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
     let state = ApiState::new(&config, ApiState::system_clock(), storage);
+    // People the console's identity provider vouches for may ask the S3 surface for temporary credentials.
+    if let Some(console) = &config.console
+        && let Some(settings) = &console.oidc
+    {
+        let client = OidcClient::new(settings, CONSOLE_OIDC_REFRESH_MIN_SECS)?;
+        state.accept_web_identity(client, console.sign_ins_per_minute);
+    }
     let metrics = metrics::surface(&config, &state, stop_rx.clone()).await?;
     if let Some(writer) = metrics::access_log(&config, &state, stop_rx.clone()) {
         daemons.spawn(writer);

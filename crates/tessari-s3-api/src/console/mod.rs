@@ -22,7 +22,7 @@ mod identity;
 mod input;
 mod keys;
 mod layout;
-mod limits;
+pub(crate) mod limits;
 mod logout;
 mod media;
 mod media_failed;

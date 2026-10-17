@@ -26,6 +26,7 @@ use crate::oidc_http::ProviderHttp;
 pub use crate::oidc_logout::LoggedOut;
 use crate::oidc_verify::verify;
 pub use crate::oidc_verify::{ALLOWED_ALGORITHMS, OidcError};
+pub use crate::oidc_web_identity::WebIdentity;
 
 type Client = CoreClient<
     EndpointSet,

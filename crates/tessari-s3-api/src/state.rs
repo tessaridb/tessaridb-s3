@@ -7,11 +7,13 @@ use tessari_s3_core::auth::{session_token_expiry, session_token_matches};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_observability::Metrics;
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::audit::AccessRecord;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
+use crate::pipeline::sts::WebIdentityIssuer;
 use crate::principals::{Principals, principal_of, resolve_user_key};
 use crate::{Error, Result};
 
@@ -46,6 +48,7 @@ struct Inner {
     notify_targets: Vec<String>,
     metrics: Arc<Metrics>,
     audit: OnceLock<tokio::sync::mpsc::Sender<AccessRecord>>,
+    web_identity: OnceLock<WebIdentityIssuer>,
 }
 
 impl ApiState {
@@ -82,6 +85,7 @@ impl ApiState {
                     .collect(),
                 metrics: Arc::new(Metrics::new()),
                 audit: OnceLock::new(),
+                web_identity: OnceLock::new(),
             }),
         }
     }
@@ -167,6 +171,20 @@ impl ApiState {
     /// Where requests queue their access-log records, when the access log is started.
     pub(crate) fn audit(&self) -> Option<&tokio::sync::mpsc::Sender<AccessRecord>> {
         self.inner.audit.get()
+    }
+
+    /// Issues temporary credentials to people `client`'s provider vouches for, at most `per_minute` requests per
+    /// client address; `false` when it was set already.
+    pub fn accept_web_identity(&self, client: OidcClient, per_minute: usize) -> bool {
+        self.inner
+            .web_identity
+            .set(WebIdentityIssuer::new(client, per_minute))
+            .is_ok()
+    }
+
+    /// Where web identity tokens are checked, when temporary credentials are issued.
+    pub(crate) fn web_identity(&self) -> Option<&WebIdentityIssuer> {
+        self.inner.web_identity.get()
     }
 
     /// The storage services.
