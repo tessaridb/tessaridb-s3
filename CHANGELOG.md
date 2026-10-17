@@ -3,6 +3,15 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.2.1-beta — 2026-10-17
+
+Metadata on TessariDB `0.36.0`, which runs on its own storage engine, TessariKV.
+
+Upgrading: a metadata store written by TessariDB `0.35.3` or earlier is refused by `0.36.0` and left untouched. Stop
+the S3 server and the database, take a snapshot with the old image (`tessaridb <store> --backup <file>`), restore it into an empty
+directory with `0.36.0` (`tessaridb <new-store> --restore <file>`), point the database at the new directory, then start
+`0.2.1-beta`. Object bytes on the drives are not touched. Keep the old store until the new one has been read back.
+
 ## 0.2.0-beta — 2026-10-17
 
 Metadata on TessariDB `0.34.2-beta`.
