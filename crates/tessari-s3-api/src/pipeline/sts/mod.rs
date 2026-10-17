@@ -57,6 +57,13 @@ fn rejected(message: &str) -> StsError {
     StsError::new(StatusCode::FORBIDDEN, "IDPRejectedClaim", message)
 }
 
+/// A failure of this server's own (the store, the clock, randomness), logged with its cause and answered as
+/// `InternalFailure`.
+fn failed(error: impl std::fmt::Display) -> StsError {
+    tracing::warn!(error = %error, "temporary credentials could not be issued");
+    internal()
+}
+
 fn internal() -> StsError {
     StsError::new(
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -165,13 +172,13 @@ async fn assume(
         .identities()
         .user_for(&identity.issuer, &identity.subject)
         .await
-        .map_err(|_| internal())?
+        .map_err(failed)?
         .ok_or_else(|| rejected("the identity is not linked to a user"))?;
     let holder = storage
         .users()
         .get(&user)
         .await
-        .map_err(|_| internal())?
+        .map_err(failed)?
         .filter(|holder| !holder.disabled)
         .ok_or_else(|| rejected("the user is disabled"))?;
     let role = format!(
@@ -191,7 +198,7 @@ async fn assume(
         .checked_add(asked.duration_secs)
         .ok_or_else(internal)?;
     let mut random = [0_u8; 32];
-    getrandom::fill(&mut random).map_err(|_| internal())?;
+    getrandom::fill(&mut random).map_err(failed)?;
     let session_token = compose_session_token(expires, &random);
     let issued = storage
         .users()
@@ -206,7 +213,7 @@ async fn assume(
             },
         )
         .await
-        .map_err(|_| internal())?
+        .map_err(failed)?
         .ok_or_else(|| rejected("the user is disabled"))?;
     let expiration = Timestamp {
         seconds: expires,
