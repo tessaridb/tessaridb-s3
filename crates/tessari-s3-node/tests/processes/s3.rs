@@ -373,10 +373,13 @@ pub fn shard_files(dir: &Path) -> usize {
         .sum()
 }
 
+/// The records of `table` in the default region's database, where the nodes keep their membership and heal queue.
 pub async fn count(pool: &MetaPool, table: &str) -> usize {
     // The table name is this test's own literal, never a value from outside.
     let script = format!("SELECT * FROM {table};");
     match pool
+        .regional(tessari_s3_constants::DEFAULT_REGION)
+        .expect("the default region's database")
         .run(&script, Vec::new())
         .await
         .expect("read")
