@@ -40,6 +40,11 @@ async fn a_space_admin_manages_its_groups_and_a_member_reads_through_one() {
     )
     .await;
     assert_eq!(created.status, 201, "{:?}", created.json());
+    assert_eq!(
+        created.json()["name"],
+        serde_json::Value::from("readers"),
+        "a create answers what it made, as every console create does"
+    );
     let again = send(
         &console,
         "POST",

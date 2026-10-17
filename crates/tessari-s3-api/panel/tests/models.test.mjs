@@ -63,8 +63,10 @@ test("an issued key carries its id and its secret, both as text", () => {
 });
 
 test("the session says what the key may do, each as a yes or no", () => {
-  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false, issue_upload_keys: true };
+  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false, issue_upload_keys: true, space: "alpha" };
   assert.deepEqual(readCapabilities(may), may);
+  assert.deepEqual(readCapabilities({ ...may, space: null }), { ...may, space: null }, "root belongs to no space");
+  assert.equal(readCapabilities({ ...may, space: 7 }), null);
   assert.equal(readCapabilities({ ...may, operate: "no" }), null);
   const { issue_upload_keys: _gone, ...older } = may;
   assert.equal(readCapabilities(older), null, "every capability is always sent");

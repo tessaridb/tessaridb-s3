@@ -117,6 +117,12 @@ pub(super) async fn detail(
     }))
 }
 
+/// What a create answers: the group it made, as every console create answers what it made.
+#[derive(Serialize)]
+struct CreatedView {
+    name: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Create {
@@ -159,7 +165,13 @@ pub(super) async fn create(
     )
     .await?;
     if created {
-        Ok(StatusCode::CREATED.into_response())
+        Ok((
+            StatusCode::CREATED,
+            Json(CreatedView {
+                name: name.as_str().to_owned(),
+            }),
+        )
+            .into_response())
     } else {
         Err(ConsoleError::conflict(
             "group_exists",

@@ -54,16 +54,16 @@
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
       return null;
     }
-    const members = v["members"] === null ? null : list(v["members"], member);
+    const members2 = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
     const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"]) ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] } : void 0;
     const sent = v["replication"];
     const replication = sent === null ? null : record(sent) && count(sent["backlog"]) && count(sent["in_flight"]) && count(sent["failed"]) ? { backlog: sent["backlog"], in_flight: sent["in_flight"], failed: sent["failed"] } : void 0;
     const space2 = drive(v["drive"]);
-    if (v["members"] !== null && members === null || heal === void 0 || replication === void 0 || space2 === void 0) {
+    if (v["members"] !== null && members2 === null || heal === void 0 || replication === void 0 || space2 === void 0) {
       return null;
     }
-    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, replication, drive: space2 };
+    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members: members2, heal_backlog: heal, replication, drive: space2 };
   }
   var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] } : null;
   function readUsage(v) {
@@ -186,12 +186,13 @@
     return key !== null && record(v) && text(v["expires"]) ? { ...key, expires: v["expires"] } : null;
   }
   function readCapabilities(v) {
-    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) ? {
+    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) && textOrNull(v["space"]) ? {
       access_key_id: v["access_key_id"],
       operate: v["operate"],
       administer: v["administer"],
       view_cluster: v["view_cluster"],
-      issue_upload_keys: v["issue_upload_keys"]
+      issue_upload_keys: v["issue_upload_keys"],
+      space: v["space"]
     } : null;
   }
   var names = (value) => list(value, (entry) => text(entry) ? entry : null);
@@ -207,11 +208,11 @@
     if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
       return null;
     }
-    const members = v["members"] === null ? null : list(v["members"], member);
+    const members2 = v["members"] === null ? null : list(v["members"], member);
     const placed = layout(v["layout"]);
     const backlog = v["heal_backlog"];
     const addresses = names(v["metadata"]["addresses"]);
-    if (v["members"] !== null && members === null || placed === void 0 || addresses === null) {
+    if (v["members"] !== null && members2 === null || placed === void 0 || addresses === null) {
       return null;
     }
     if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
@@ -224,7 +225,7 @@
     return {
       node: v["node"],
       erasure: v["erasure"],
-      members,
+      members: members2,
       layout: placed,
       heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
       moving: { listed: moving2["listed"], more: moving2["more"] },
@@ -343,7 +344,7 @@
       }
       return input;
     });
-    const group = el(
+    const group3 = el(
       "div",
       { class: "segmented", role: "radiogroup", "aria-label": label },
       ...inputs.flatMap((input) => [input, el("label", { for: input.id }, input.value)])
@@ -354,7 +355,7 @@
         input.checked = input.value === value;
       }
     };
-    return { group, chosen, choose };
+    return { group: group3, chosen, choose };
   }
   function table(caption, head2, rows) {
     return el(
@@ -432,6 +433,10 @@
         return "#/users";
       case "spaces":
         return "#/spaces";
+      case "groups":
+        return route.space === null ? "#/groups" : `#/groups/${encodeURIComponent(route.space)}`;
+      case "group":
+        return `#/groups/${encodeURIComponent(route.space)}/${encodeURIComponent(route.group)}`;
       case "cluster":
         return "#/cluster";
       case "renditions":
@@ -470,6 +475,13 @@
       }
       if (path2 === "/spaces") {
         return { kind: "spaces" };
+      }
+      if (path2 === "/groups" || path2.startsWith("/groups/")) {
+        const [space2 = "", group3 = ""] = path2.slice("/groups/".length).split("/").map(decodeURIComponent);
+        if (space2 === "") {
+          return { kind: "groups", space: null };
+        }
+        return group3 === "" ? { kind: "groups", space: space2 } : { kind: "group", space: space2, group: group3 };
       }
       if (path2 === "/cluster") {
         return { kind: "cluster" };
@@ -663,6 +675,7 @@
     users: [ring(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6", "M16 4.5a3.5 3.5 0 0 1 0 7", "M18 14c2 .6 3 2.8 3 6"],
     chevron: ["M9.5 6l6 6-6 6"],
     node: [box(3, 4, 18, 7, 2), box(3, 13, 18, 7, 2), "M7 7.5h.01", "M7 16.5h.01"],
+    group: [ring(12, 8, 2.5), ring(6, 10, 2), ring(18, 10, 2), "M7.5 19c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5", "M2.5 18c0-2 1.5-3.5 3.5-3.5", "M21.5 18c0-2-1.5-3.5-3.5-3.5"],
     members: [ring(6, 7, 2.5), ring(18, 7, 2.5), ring(12, 18, 2.5), "M8.5 7h7", "M7.3 9.2l3.4 6.6", "M16.7 9.2l-3.4 6.6"],
     layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
     pulse: ["M3 12h4l3-7 4 14 3-7h4"],
@@ -1259,7 +1272,7 @@
     const read = el("input", { id: `${id}-read`, type: "checkbox", checked: "" });
     const write = el("input", { id: `${id}-write`, type: "checkbox" });
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-    const grant = el("button", { type: "submit", class: "primary" }, "Grant");
+    const grant2 = el("button", { type: "submit", class: "primary" }, "Grant");
     const remove = el("button", { type: "button", class: "danger" }, "Remove grant");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -1270,7 +1283,7 @@
       bucket2.row,
       el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write")),
       reason.row,
-      el("div", { class: "actions" }, grant, remove, cancel),
+      el("div", { class: "actions" }, grant2, remove, cancel),
       said
     );
     const close = open(line, form);
@@ -1893,8 +1906,8 @@
     );
     return button;
   }
-  function memberRows(screen, members, region) {
-    if (members.length === 0) {
+  function memberRows(screen, members2, region) {
+    if (members2.length === 0) {
       return empty("No node has been admitted yet.");
     }
     const operate = screen.may?.operate === true;
@@ -1902,7 +1915,7 @@
     return table(
       "Cluster admission",
       head2,
-      members.map(
+      members2.map(
         (member2) => row(
           mono(member2.node),
           stateChip(member2),
@@ -2007,16 +2020,16 @@
   async function admissionCard(screen) {
     const answer = await call("GET", BASE, readMembers);
     const region = el("div", {});
-    const card = el("section", { class: "card" }, el("h2", {}, "Admission"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Admission"));
     if (answer.ok) {
-      card.append(memberRows(screen, answer.value, region), region);
+      card2.append(memberRows(screen, answer.value, region), region);
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(admitForm(screen), tokenForm(screen));
+      card2.append(admitForm(screen), tokenForm(screen));
     }
-    return card;
+    return card2;
   }
 
   // src/layout-model.ts
@@ -2144,18 +2157,18 @@
   }
   async function stagingCard(screen) {
     const answer = await call("GET", STAGED, readStaged);
-    const card = el("section", { class: "card" }, el("h2", {}, "Layout change"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Layout change"));
     if (answer.ok) {
-      card.append(stagedPart(screen, answer.value));
+      card2.append(stagedPart(screen, answer.value));
     } else if (answer.code === "nothing_staged") {
-      card.append(el("p", { class: "muted" }, "Nothing is staged."));
+      card2.append(el("p", { class: "muted" }, "Nothing is staged."));
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(stageForm(screen));
+      card2.append(stageForm(screen));
     }
-    return card;
+    return card2;
   }
 
   // src/regions-model.ts
@@ -2300,16 +2313,16 @@
   async function regionsCard(screen) {
     const answer = await call("GET", BASE2, readRegions);
     const area = el("div", {});
-    const card = el("section", { class: "card" }, el("h2", {}, "Regions"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Regions"));
     if (answer.ok) {
-      card.append(regionRows(screen, answer.value, area), area);
+      card2.append(regionRows(screen, answer.value, area), area);
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(failOverForm(screen, area));
+      card2.append(failOverForm(screen, area));
     }
-    return card;
+    return card2;
   }
 
   // src/meter.ts
@@ -2547,21 +2560,21 @@
     if (screen.may?.operate !== true) {
       return null;
     }
-    const card = el("section", { class: "card" }, el("h2", {}, "Encryption keys"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Encryption keys"));
     const answer = await call("GET", BASE3, readKeys2);
     if (!answer.ok) {
-      card.append(refusal(answer));
-      return card;
+      card2.append(refusal(answer));
+      return card2;
     }
     const keys2 = answer.value;
     const region = el("div", {});
-    card.append(stateLine(keys2));
+    card2.append(stateLine(keys2));
     if (keys2.state === "unsealed") {
-      card.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen), rotateForm(screen, keys2), ...olderKeys(screen, keys2.behind));
+      card2.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen), rotateForm(screen, keys2), ...olderKeys(screen, keys2.behind));
     } else {
-      card.append(unsealForm(screen, keys2));
+      card2.append(unsealForm(screen, keys2));
     }
-    return card;
+    return card2;
   }
 
   // src/status.ts
@@ -2603,11 +2616,11 @@
   function state(member2) {
     return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
   }
-  function memberTable(members) {
-    return members.length === 0 ? empty("No members are registered yet.") : table(
+  function memberTable(members2) {
+    return members2.length === 0 ? empty("No members are registered yet.") : table(
       "Cluster members",
       ["Member", "Zone", "State", "Disk", "Internal address"],
-      members.map(
+      members2.map(
         (member2) => row(
           mono(member2.node),
           member2.zone === null ? "—" : mono(member2.zone),
@@ -2618,12 +2631,12 @@
       )
     );
   }
-  function membersTile(members) {
-    if (members === null) {
+  function membersTile(members2) {
+    if (members2 === null) {
       return tile("members", "Members", "—", "No cluster");
     }
-    const answering = members.filter((member2) => member2.answering).length;
-    return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
+    const answering = members2.filter((member2) => member2.answering).length;
+    return answering === members2.length ? tile("members", "Members", String(members2.length), "Registered and answering") : tile("members", "Members", String(members2.length), el("span", { class: "chip bad" }, `${answering} of ${members2.length} answering`));
   }
   function storedTile(usage) {
     if (!usage.ok) {
@@ -2675,7 +2688,7 @@
       return;
     }
     const node = answer.value;
-    const members = node.members === null ? null : memberTable(node.members);
+    const members2 = node.members === null ? null : memberTable(node.members);
     fill(
       screen.main,
       head(TITLE3, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -2692,7 +2705,7 @@
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
         tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
       ),
-      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members),
+      members2 === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members2),
       encryption
     );
   }
@@ -2764,6 +2777,288 @@
       layoutCard(view),
       staging
     );
+  }
+
+  // src/group-parts.ts
+  //! The two halves of a group's page: its members and the buckets it is
+  //! granted. Each lists what is there with a remove action per row, and carries
+  //! a form to add one more; every change takes a reason. A member of the group's
+  //! space and a bucket of that space are all the server accepts — anything else
+  //! is refused as missing, so a group never reaches across spaces.
+  function card(id, title, body, region, form) {
+    return el("section", { class: "card", "aria-labelledby": `${id}-title` }, el("h2", { id: `${id}-title` }, title), body, region, form);
+  }
+  function addForm(id, button, fields, act) {
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const go = el("button", { type: "submit", class: "primary" }, button);
+    const form = el("form", { class: "card-part", novalidate: "" }, ...fields, reason.row, el("div", { class: "actions" }, go), said);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      go.disabled = true;
+      const failure = await act(reason.input.value.trim());
+      go.disabled = false;
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function askRemoval(screen, region, id, what, consequence, button, route, opener, done5) {
+    const back = () => {
+      fill(region);
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        id,
+        mono(what),
+        consequence,
+        button,
+        async (reason) => {
+          const answer = await call("DELETE", route, ignored, { reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(done5);
+          screen.redraw();
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function members(screen, group3, at2) {
+    const region = el("div", {});
+    const line = (user3) => {
+      const remove = iconAction("close", "Remove…", `Remove ${user3} from ${group3.name}`, "danger");
+      remove.addEventListener(
+        "click",
+        () => askRemoval(screen, region, `member-${user3}`, user3, `${user3} loses what this group is granted within five seconds; its own grants stay.`, "Remove member", at2(`/members/${encodeURIComponent(user3)}`), remove, `Removed ${user3} from ${group3.name}.`)
+      );
+      return row(mono(user3), el("div", { class: "actions" }, remove));
+    };
+    const user2 = field("add-member", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "A user of this group's space.");
+    const form = addForm("add-member", "Add member", [user2.row], async (reason) => {
+      const name = user2.input.value.trim();
+      const answer = await call("PUT", at2(`/members/${encodeURIComponent(name)}`), ignored, { reason });
+      if (!answer.ok) {
+        return settle(screen, answer);
+      }
+      announce(`Added ${name} to ${group3.name}.`);
+      screen.redraw();
+      return null;
+    });
+    const body = group3.members.length === 0 ? empty("No members yet. Add a user of this space below.") : table(`Members of ${group3.name}`, ["User", "Actions"], group3.members.map(line));
+    return card("members", `Members (${group3.members.length.toLocaleString()})`, body, region, form);
+  }
+  var yes = (granted) => el("span", { class: granted ? "chip ok" : "chip" }, granted ? "Yes" : "No");
+  function grants2(screen, group3, at2) {
+    const region = el("div", {});
+    const line = (grant2) => {
+      const remove = iconAction("close", "Remove…", `Remove ${group3.name}'s grant on ${grant2.bucket}`, "danger");
+      remove.addEventListener(
+        "click",
+        () => askRemoval(screen, region, `grant-${grant2.bucket}`, grant2.bucket, "Every member loses this group's access to the bucket within five seconds; their own grants stay.", "Remove grant", at2(`/grants/${encodeURIComponent(grant2.bucket)}`), remove, `Removed ${group3.name}'s grant on ${grant2.bucket}.`)
+      );
+      return row(mono(grant2.bucket), yes(grant2.read), yes(grant2.write), el("div", { class: "actions" }, remove));
+    };
+    const bucket2 = field("grant-bucket", "Bucket", { spellcheck: "false", autocomplete: "off", required: "" }, "A bucket of this group's space. Granting it again replaces what the grant allows.");
+    const read = el("input", { id: "grant-read", type: "checkbox" });
+    const write = el("input", { id: "grant-write", type: "checkbox" });
+    read.checked = true;
+    const access = el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write"));
+    const form = addForm("grant", "Grant bucket", [bucket2.row, access], async (reason) => {
+      const name = bucket2.input.value.trim();
+      const answer = await call("PUT", at2(`/grants/${encodeURIComponent(name)}`), ignored, { read: read.checked, write: write.checked, reason });
+      if (!answer.ok) {
+        return settle(screen, answer);
+      }
+      announce(`Granted ${group3.name} access to ${name}.`);
+      screen.redraw();
+      return null;
+    });
+    const body = group3.grants.length === 0 ? empty("No buckets granted yet. Grant one below.") : table(`Buckets granted to ${group3.name}`, ["Bucket", "Read", "Write", "Actions"], group3.grants.map(line));
+    return card("grants", `Bucket grants (${group3.grants.length.toLocaleString()})`, body, region, form);
+  }
+
+  // src/groups-model.ts
+  //! A space's groups as the console sees them: each group's name and when it was
+  //! made, and for one group its members and the buckets it is granted, with
+  //! whether each grant reads and writes.
+  var group = (v) => record(v) && text(v["name"]) && text(v["created"]) ? { name: v["name"], created: v["created"] } : null;
+  var grant = (v) => record(v) && text(v["bucket"]) && flag(v["read"]) && flag(v["write"]) ? { bucket: v["bucket"], read: v["read"], write: v["write"] } : null;
+  function readGroups(v) {
+    return record(v) ? list(v["groups"], group) : null;
+  }
+  function readGroupDetail(v) {
+    const named = group(v);
+    if (named === null || !record(v)) {
+      return null;
+    }
+    const members2 = list(v["members"], (entry) => text(entry) ? entry : null);
+    const grants3 = list(v["grants"], grant);
+    return members2 === null || grants3 === null ? null : { ...named, members: members2, grants: grants3 };
+  }
+
+  // src/group.ts
+  //! One group of a space: who is in it and which buckets it is granted, with the
+  //! forms to change either, and deleting the group — which takes every grant it
+  //! carries away from every member, so it is confirmed by name with a reason.
+  async function group2(screen, space2, name) {
+    const at2 = (rest) => `/spaces/${encodeURIComponent(space2)}/groups/${encodeURIComponent(name)}${rest}`;
+    loading(screen, name, "the group");
+    const answer = await call("GET", at2(""), readGroupDetail);
+    if (!answer.ok) {
+      failed(screen, name, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const found = answer.value;
+    const region = el("div", {});
+    const remove = el("button", { type: "button", class: "danger" }, icon("trash"), "Delete group");
+    remove.addEventListener(
+      "click",
+      () => fill(
+        region,
+        el(
+          "div",
+          { class: "card" },
+          confirmation(
+            "delete-group",
+            mono(`${space2}/${found.name}`),
+            `Every member loses what the group grants within five seconds. The ${found.members.length.toLocaleString()} memberships and ${found.grants.length.toLocaleString()} grants go with it.`,
+            "Delete group",
+            async (reason) => {
+              const gone = await call("DELETE", at2(""), ignored, { reason });
+              if (!gone.ok) {
+                return settle(screen, gone);
+              }
+              announce(`Deleted group ${found.name}.`);
+              location.hash = format({ kind: "groups", space: space2 });
+              return null;
+            },
+            () => {
+              fill(region);
+              remove.focus();
+            }
+          )
+        )
+      )
+    );
+    const lede = el("span", {}, "In space ", el("a", { href: format({ kind: "groups", space: space2 }) }, mono(space2)), ` · created ${moment(found.created)}`);
+    fill(screen.main, head(found.name, lede, remove), region, members(screen, found, at2), grants2(screen, found, at2));
+  }
+
+  // src/groups.ts
+  //! Groups: a space's named sets of users that buckets are granted to, so a
+  //! grant reaches every member at once. An operator first picks the space; a
+  //! space admin lands on its own. The server judges every route as managing the
+  //! space and answers alike for a space that is not the caller's and one that
+  //! does not exist; this page only offers. A new group takes a reason, which
+  //! goes into the action record.
+  var TITLE5 = "Groups";
+  var groupsOf = (space2) => `/spaces/${encodeURIComponent(space2)}/groups`;
+  function createForm3(screen, space2, opener) {
+    const name = field("new-group", "Group name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique in the space.");
+    const reason = field("new-group-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const form = el(
+      "form",
+      { id: "new-group-form", class: "card", novalidate: "", hidden: "", "aria-labelledby": "new-group-title" },
+      el("h2", { id: "new-group-title" }, "New group in ", mono(space2)),
+      name.row,
+      reason.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create group"), cancel),
+      said
+    );
+    const close = () => {
+      form.hidden = true;
+      opener.setAttribute("aria-expanded", "false");
+      opener.focus();
+    };
+    opener.addEventListener("click", () => {
+      form.hidden = false;
+      opener.setAttribute("aria-expanded", "true");
+      name.input.focus();
+    });
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const wanted = name.input.value.trim();
+      const answer = await call("POST", groupsOf(space2), ignored, { name: wanted, reason: reason.input.value.trim() });
+      if (!answer.ok) {
+        if (answer.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(answer));
+        return;
+      }
+      announce(`Created group ${wanted} in ${space2}.`);
+      screen.redraw();
+    });
+    return form;
+  }
+  async function ofSpace(screen, space2) {
+    loading(screen, TITLE5, "groups");
+    const answer = await call("GET", groupsOf(space2), readGroups);
+    if (!answer.ok) {
+      failed(screen, TITLE5, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-group-form" }, icon("plus"), "New group");
+    const link = (group3) => el("a", { href: format({ kind: "group", space: space2, group: group3 }) }, mono(group3));
+    fill(
+      screen.main,
+      head(TITLE5, el("span", {}, `${answer.value.length.toLocaleString()} in space `, mono(space2)), opener),
+      createForm3(screen, space2, opener),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No groups in this space yet. Create one with “New group”, add users to it, then grant it buckets.") : table(`Groups of ${space2}`, ["Name", "Created"], answer.value.map((group3) => row(link(group3.name), moment(group3.created))))
+      )
+    );
+  }
+  async function pick(screen) {
+    loading(screen, TITLE5, "spaces");
+    const answer = await call("GET", "/spaces", readSpaces);
+    if (!answer.ok) {
+      failed(screen, TITLE5, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const link = (space2) => el("a", { href: format({ kind: "groups", space: space2 }) }, mono(space2));
+    fill(
+      screen.main,
+      head(TITLE5, "Pick the space whose groups to manage."),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No spaces yet. Create one under Spaces first.") : table("Spaces", ["Space", "Created"], answer.value.map((space2) => row(link(space2.name), moment(space2.created))))
+      )
+    );
+  }
+  function groups(screen, space2) {
+    if (space2 !== null) {
+      return ofSpace(screen, space2);
+    }
+    const own = screen.may?.operate === true ? null : screen.may?.space ?? null;
+    return own === null ? pick(screen) : ofSpace(screen, own);
   }
 
   // src/object-delete.ts
@@ -2846,14 +3141,14 @@
   //! One object: what the server holds for it, a recorded download, and a delete
   //! that only goes through while the object is still the version shown here —
   //! the ETag on screen is the condition, so a rewrite in between is refused.
-  var TITLE5 = "Object";
+  var TITLE6 = "Object";
   var parent = (key) => key.slice(0, key.lastIndexOf("/") + 1);
   async function object(screen, bucket2, key) {
-    loading(screen, TITLE5, "the object");
+    loading(screen, TITLE6, "the object");
     const where = `/buckets/${encodeURIComponent(bucket2)}/object`;
     const answer = await call("GET", `${where}${search([["key", key]])}`, readDetail);
     if (!answer.ok) {
-      failed(screen, TITLE5, answer);
+      failed(screen, TITLE6, answer);
       return;
     }
     if (!screen.live()) {
@@ -3269,12 +3564,12 @@
   //! Renditions that failed for good: the tasks whose five hand-outs are spent,
   //! with the original, the output, and the last error a worker recorded. They
   //! stay listed until the original is written again; for operators.
-  var TITLE6 = "Renditions";
+  var TITLE7 = "Renditions";
   async function renditions(screen) {
-    loading(screen, TITLE6, "failed renditions");
+    loading(screen, TITLE7, "failed renditions");
     const answer = await call("GET", "/media/failed", readFailedRenditions);
     if (!answer.ok) {
-      failed(screen, TITLE6, answer);
+      failed(screen, TITLE7, answer);
       return;
     }
     if (!screen.live()) {
@@ -3292,7 +3587,7 @@
     );
     fill(
       screen.main,
-      head(TITLE6, "Renditions the workers stopped trying after five attempts, with the last error. Writing the original again plans it anew."),
+      head(TITLE7, "Renditions the workers stopped trying after five attempts, with the last error. Writing the original again plans it anew."),
       el(
         "section",
         { class: "card flush" },
@@ -3415,8 +3710,8 @@
   //! Spaces: the tenants buckets and users belong to. Only operators reach this
   //! view; anyone else is told their key does not allow it. A new space takes a
   //! reason, which goes into the action record.
-  var TITLE7 = "Spaces";
-  function createForm3(screen, opener) {
+  var TITLE8 = "Spaces";
+  function createForm4(screen, opener) {
     const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
     const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     const said = el("div", { "aria-live": "polite" });
@@ -3464,10 +3759,10 @@
     return form;
   }
   async function spaces(screen) {
-    loading(screen, TITLE7, "spaces");
+    loading(screen, TITLE8, "spaces");
     const answer = await call("GET", "/spaces", readSpaces);
     if (!answer.ok) {
-      failed(screen, TITLE7, answer);
+      failed(screen, TITLE8, answer);
       return;
     }
     if (!screen.live()) {
@@ -3476,12 +3771,16 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-space-form" }, icon("plus"), "New space");
     fill(
       screen.main,
-      head(TITLE7, `${answer.value.length.toLocaleString()} on this store`, opener),
-      createForm3(screen, opener),
+      head(TITLE8, `${answer.value.length.toLocaleString()} on this store`, opener),
+      createForm4(screen, opener),
       el(
         "section",
         { class: "card flush" },
-        answer.value.length === 0 ? empty("No spaces yet.") : table("Spaces", ["Name", "Created"], answer.value.map((space2) => row(mono(space2.name), moment(space2.created))))
+        answer.value.length === 0 ? empty("No spaces yet.") : table(
+          "Spaces",
+          ["Name", "Created", "Groups"],
+          answer.value.map((space2) => row(mono(space2.name), moment(space2.created), el("a", { href: format({ kind: "groups", space: space2.name }) }, "Groups")))
+        )
       )
     );
   }
@@ -3531,12 +3830,12 @@
   //! Creating a user is judged by the server on the user it would be, so a space
   //! admin who asks for an administrator, an operator or a cluster viewer is told
   //! the key does not allow it. Each row's actions are in `user-actions.ts`.
-  var TITLE8 = "Users";
+  var TITLE9 = "Users";
   function check(id, label) {
     const input = el("input", { id, name: id, type: "checkbox" });
     return { row: el("label", { class: "check", for: id }, input, label), input };
   }
-  function createForm4(screen, opener) {
+  function createForm5(screen, opener) {
     const name = field("new-user", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique across the store.");
     const space2 = field("new-user-space", "Space", { spellcheck: "false", autocomplete: "off", required: "" });
     const role2 = el("select", { id: "new-user-role" }, el("option", { value: "member" }, "Member"), el("option", { value: "space_admin" }, "Space admin"));
@@ -3614,10 +3913,10 @@
     return line;
   }
   async function users(screen) {
-    loading(screen, TITLE8, "users");
+    loading(screen, TITLE9, "users");
     const answer = await call("GET", "/users", readUsers);
     if (!answer.ok) {
-      failed(screen, TITLE8, answer);
+      failed(screen, TITLE9, answer);
       return;
     }
     if (!screen.live()) {
@@ -3626,8 +3925,8 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-user-form" }, icon("plus"), "New user");
     fill(
       screen.main,
-      head(TITLE8, `${answer.value.length.toLocaleString()} you administer`, opener),
-      createForm4(screen, opener),
+      head(TITLE9, `${answer.value.length.toLocaleString()} you administer`, opener),
+      createForm5(screen, opener),
       el(
         "section",
         { class: "card flush" },
@@ -3647,6 +3946,7 @@
   var NEEDS = {
     users: (can) => can.administer,
     spaces: (can) => can.operate,
+    groups: (can) => can.administer,
     cluster: (can) => can.view_cluster,
     renditions: (can) => can.operate,
     actions: (can) => can.operate
@@ -3671,6 +3971,10 @@
         return users(screen);
       case "spaces":
         return spaces(screen);
+      case "groups":
+        return groups(screen, route.space);
+      case "group":
+        return group2(screen, route.space, route.group);
       case "cluster":
         return cluster(screen);
       case "renditions":
@@ -3680,7 +3984,7 @@
     }
   }
   function mark(route) {
-    const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind;
+    const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind === "group" ? "groups" : route.kind;
     for (const link of all("[data-section]")) {
       if (link.dataset["section"] === section) {
         link.setAttribute("aria-current", "page");
@@ -3737,7 +4041,7 @@
     announce("Signed out.");
     showSignIn();
   });
-  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", renditions: "image", actions: "record" };
+  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", groups: "group", cluster: "members", renditions: "image", actions: "record" };
   for (const link of all("[data-section]")) {
     const name = SECTION_ICONS[link.dataset["section"] ?? ""];
     if (name !== void 0) {

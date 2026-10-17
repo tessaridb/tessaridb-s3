@@ -8,6 +8,8 @@ export type Route =
   | { readonly kind: "buckets" }
   | { readonly kind: "users" }
   | { readonly kind: "spaces" }
+  | { readonly kind: "groups"; readonly space: string | null }
+  | { readonly kind: "group"; readonly space: string; readonly group: string }
   | { readonly kind: "cluster" }
   | { readonly kind: "renditions" }
   | { readonly kind: "objects"; readonly bucket: string; readonly prefix: string; readonly cursor: string | null; readonly key: string | null; readonly filter: string }
@@ -34,6 +36,10 @@ export function format(route: Route): string {
       return "#/users";
     case "spaces":
       return "#/spaces";
+    case "groups":
+      return route.space === null ? "#/groups" : `#/groups/${encodeURIComponent(route.space)}`;
+    case "group":
+      return `#/groups/${encodeURIComponent(route.space)}/${encodeURIComponent(route.group)}`;
     case "cluster":
       return "#/cluster";
     case "renditions":
@@ -76,6 +82,13 @@ export function parse(hash: string): Route {
     }
     if (path === "/spaces") {
       return { kind: "spaces" };
+    }
+    if (path === "/groups" || path.startsWith("/groups/")) {
+      const [space = "", group = ""] = path.slice("/groups/".length).split("/").map(decodeURIComponent);
+      if (space === "") {
+        return { kind: "groups", space: null };
+      }
+      return group === "" ? { kind: "groups", space } : { kind: "group", space, group };
     }
     if (path === "/cluster") {
       return { kind: "cluster" };

@@ -7,6 +7,7 @@ import { announce, el, field, fill, mono, row, table } from "./dom.ts";
 import { moment } from "./format.ts";
 import { icon } from "./icons.ts";
 import { ignored, readSpaces } from "./models.ts";
+import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
 
 const TITLE = "Spaces";
@@ -79,7 +80,11 @@ export async function spaces(screen: Screen): Promise<void> {
       { class: "card flush" },
       answer.value.length === 0
         ? empty("No spaces yet.")
-        : table("Spaces", ["Name", "Created"], answer.value.map((space) => row(mono(space.name), moment(space.created)))),
+        : table(
+            "Spaces",
+            ["Name", "Created", "Groups"],
+            answer.value.map((space) => row(mono(space.name), moment(space.created), el("a", { href: format({ kind: "groups", space: space.name }) }, "Groups"))),
+          ),
     ),
   );
 }

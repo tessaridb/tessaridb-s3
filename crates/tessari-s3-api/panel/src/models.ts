@@ -108,6 +108,8 @@ export type Capabilities = {
   readonly administer: boolean;
   readonly view_cluster: boolean;
   readonly issue_upload_keys: boolean;
+  /** The signed-in user's own space; null for root. */
+  readonly space: string | null;
 };
 /** A node of a layout's erasure set and the zone it was in when the layout was made (null: a domain of its own). */
 export type LayoutMember = { readonly node: string; readonly zone: string | null };
@@ -377,13 +379,14 @@ export function readUploadKey(v: unknown): UploadKey | null {
 }
 
 export function readCapabilities(v: unknown): Capabilities | null {
-  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"])
+  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) && textOrNull(v["space"])
     ? {
         access_key_id: v["access_key_id"],
         operate: v["operate"],
         administer: v["administer"],
         view_cluster: v["view_cluster"],
         issue_upload_keys: v["issue_upload_keys"],
+        space: v["space"],
       }
     : null;
 }
