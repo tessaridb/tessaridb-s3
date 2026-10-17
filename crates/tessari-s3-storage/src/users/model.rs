@@ -98,6 +98,8 @@ pub struct SessionScope {
     pub subject: String,
     /// When they were issued, in whole seconds since the epoch.
     pub issued: i64,
+    /// The session policy they were issued with, as written; `None` for none.
+    pub policy: Option<String>,
 }
 
 impl SessionScope {
@@ -108,6 +110,7 @@ impl SessionScope {
             token_digest: &self.token_digest,
             issuer: &self.issuer,
             subject: &self.subject,
+            policy: self.policy.as_deref(),
         }
     }
 }
@@ -123,6 +126,8 @@ pub struct NewSession {
     pub issuer: String,
     /// The provider's subject it named.
     pub subject: String,
+    /// The session policy narrowing them, as written (already checked); `None` for none.
+    pub policy: Option<String>,
 }
 
 /// A key record's scope: all three fields or none of them; anything between is a malformed record, never a full key.
@@ -158,6 +163,7 @@ pub(crate) fn session_of(key: &AccessKeyEntity) -> Result<Option<SessionScope>> 
             issuer: issuer.clone(),
             subject: subject.clone(),
             issued: key.created.0,
+            policy: key.session_policy.clone(),
         })),
         _ => Err(malformed(
             "a session needs session_hash, session_issuer, session_subject and expires together",

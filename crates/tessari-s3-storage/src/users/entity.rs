@@ -56,6 +56,8 @@ pub struct AccessKeyEntity {
     pub session_issuer: Option<String>,
     /// A session's identity-provider subject.
     pub session_subject: Option<String>,
+    /// The session policy, as written, when the session was issued with one.
+    pub session_policy: Option<String>,
 }
 
 /// One access key as a listing reads it: never the secret, which the listing does not fetch.
@@ -214,6 +216,7 @@ impl AccessKeyEntity {
             session_hash: fields.optional_bytes("session_hash")?,
             session_issuer: fields.optional_text("session_issuer")?,
             session_subject: fields.optional_text("session_subject")?,
+            session_policy: fields.optional_text("session_policy")?,
         })
     }
 }

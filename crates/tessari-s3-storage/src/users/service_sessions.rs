@@ -39,6 +39,7 @@ impl UserService {
                     token_digest: &session.token_digest,
                     issuer: &session.issuer,
                     subject: &session.subject,
+                    policy: session.policy.as_deref(),
                 }),
             };
             let sealed = sealer.seal(&secret, binding)?;

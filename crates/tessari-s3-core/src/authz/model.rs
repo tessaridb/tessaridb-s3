@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::policy::{BucketPolicy, PolicyError, PublicAccessBlock};
+use super::policy::{BucketPolicy, PolicyError, PublicAccessBlock, SessionPolicy};
 
 /// A space's name: the tenant buckets and users belong to.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -140,6 +140,8 @@ pub struct UploadPrincipal {
 pub struct SessionPrincipal {
     /// The user, as the principal every decision of the session is taken for.
     as_user: Box<Principal>,
+    /// The session policy it was issued with, which every allowed request must also satisfy.
+    policy: Option<Arc<SessionPolicy>>,
 }
 
 impl SessionPrincipal {
@@ -148,7 +150,23 @@ impl SessionPrincipal {
     pub fn new(user: UserPrincipal) -> Self {
         Self {
             as_user: Box::new(Principal::User(user)),
+            policy: None,
         }
+    }
+
+    /// A session of `user` narrowed by `policy`: it may do only what both its user and the policy allow.
+    #[must_use]
+    pub fn narrowed(user: UserPrincipal, policy: Arc<SessionPolicy>) -> Self {
+        Self {
+            as_user: Box::new(Principal::User(user)),
+            policy: Some(policy),
+        }
+    }
+
+    /// The session policy, when it was issued with one.
+    #[must_use]
+    pub fn policy(&self) -> Option<&SessionPolicy> {
+        self.policy.as_deref()
     }
 
     /// The user the session acts as.

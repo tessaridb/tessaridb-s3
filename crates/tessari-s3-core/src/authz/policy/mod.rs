@@ -8,6 +8,7 @@ mod context;
 mod document;
 mod evaluate;
 mod public;
+mod session;
 mod wildcard;
 
 pub use actions::{S3_ACTIONS, Scope, policy_action};
@@ -15,6 +16,7 @@ pub use context::{Context, Requester};
 pub use document::{BucketPolicy, Effect, PolicyError, Statement};
 pub use evaluate::{PolicyAnswer, PolicyRequest};
 pub use public::PublicAccessBlock;
+pub use session::SessionPolicy;
 
 #[cfg(test)]
 mod actions_tests;
@@ -24,3 +26,5 @@ mod document_tests;
 mod evaluate_tests;
 #[cfg(test)]
 mod public_tests;
+#[cfg(test)]
+mod session_tests;

@@ -105,6 +105,7 @@ DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
 DEFINE FIELD IF NOT EXISTS session_hash ON access_keys TYPE bytes;
 DEFINE FIELD IF NOT EXISTS session_issuer ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS session_subject ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS session_policy ON access_keys TYPE string;
 ALTER TABLE access_keys SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
 ALTER TABLE key_issues SET EXPIRE;

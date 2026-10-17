@@ -40,6 +40,7 @@ async fn session(storage: &Storage, expires: i64, seed: u8) -> (Key, String) {
         token_digest: session_token_digest(&token),
         issuer: ISSUER.to_owned(),
         subject: SUBJECT.to_owned(),
+        policy: None,
     };
     let issued = storage
         .users()

@@ -193,10 +193,11 @@ const SESSION: SessionBinding<'static> = SessionBinding {
     token_digest: &[9; 32],
     issuer: "https://id.example.com",
     subject: "248289761001",
+    policy: Some(r#"{"Version":"2012-10-17","Statement":[]}"#),
 };
 
 #[test]
-fn a_session_secret_opens_only_under_its_own_expiry_token_and_identity() {
+fn a_session_secret_opens_only_under_its_own_expiry_token_identity_and_policy() {
     let sealer = sealer("a1");
     let session = Binding {
         session: Some(SESSION),
@@ -223,6 +224,14 @@ fn a_session_secret_opens_only_under_its_own_expiry_token_and_identity() {
         },
         SessionBinding {
             subject: "248289761002",
+            ..SESSION
+        },
+        SessionBinding {
+            policy: None,
+            ..SESSION
+        },
+        SessionBinding {
+            policy: Some(r#"{"Version":"2012-10-17","Statement":[{}]}"#),
             ..SESSION
         },
     ] {

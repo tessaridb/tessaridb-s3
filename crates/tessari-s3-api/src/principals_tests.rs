@@ -43,6 +43,7 @@ fn live() -> Fetched {
         secret: SecretKey::new("s".repeat(40)),
         scope: None,
         session: None,
+        policy: None,
     }))
 }
 
@@ -117,6 +118,7 @@ fn scoped(expires: i64) -> Live {
             expires,
         }),
         session: None,
+        policy: None,
     }
 }
 
@@ -140,6 +142,7 @@ fn a_full_key_is_its_user_whatever_the_time() {
         secret: SecretKey::new("s".repeat(40)),
         scope: None,
         session: None,
+        policy: None,
     };
     assert_eq!(principal_of(full, i64::MAX), Some(Principal::User(ann())));
 }
@@ -155,7 +158,9 @@ fn session(expires: i64) -> Live {
             issuer: "https://id.example.com".to_owned(),
             subject: "248289761001".to_owned(),
             issued: 100,
+            policy: None,
         }),
+        policy: None,
     }
 }
 

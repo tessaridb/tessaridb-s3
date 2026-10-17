@@ -43,40 +43,9 @@ impl BucketPolicy {
             Some(key) => format!("arn:aws:s3:::{}/{key}", self.bucket),
             None => format!("arn:aws:s3:::{}", self.bucket),
         };
-        let mut allowed = None;
-        for statement in self
-            .statements
-            .iter()
-            .filter(|s| self.applies(s, request, &resource))
-        {
-            match statement.effect {
-                Effect::Deny => {
-                    return PolicyAnswer::Deny {
-                        sid: statement.sid.clone(),
-                    };
-                }
-                Effect::Allow => {
-                    allowed.get_or_insert_with(|| statement.sid.clone());
-                }
-            }
-        }
-        allowed.map_or(PolicyAnswer::NotApplicable, |sid| PolicyAnswer::Allow {
-            sid,
+        answer(&self.statements, request, &resource, |principals| {
+            self.names(principals, request.requester)
         })
-    }
-
-    fn applies(&self, statement: &Statement, request: &PolicyRequest<'_>, resource: &str) -> bool {
-        self.names(&statement.principals, request.requester)
-            && listed(&statement.actions, |pattern| {
-                wildcard::matches_ignoring_case(pattern, request.action)
-            })
-            && listed(&statement.resources, |pattern| {
-                wildcard::matches(pattern, resource)
-            })
-            && statement
-                .conditions
-                .iter()
-                .all(|condition| condition.holds(request.requester, request.context))
     }
 
     fn names(&self, principals: &Principals, requester: Requester<'_>) -> bool {
@@ -88,6 +57,45 @@ impl BucketPolicy {
             (Principals::Named { .. }, Requester::Anonymous) => false,
         }
     }
+}
+
+/// What `statements` say about `request` on `resource`: a matching Deny ends it, else a matching Allow answers.
+pub(super) fn answer(
+    statements: &[Statement],
+    request: &PolicyRequest<'_>,
+    resource: &str,
+    names: impl Fn(&Principals) -> bool,
+) -> PolicyAnswer {
+    let mut allowed = None;
+    for statement in statements
+        .iter()
+        .filter(|s| names(&s.principals) && applies(s, request, resource))
+    {
+        match statement.effect {
+            Effect::Deny => {
+                return PolicyAnswer::Deny {
+                    sid: statement.sid.clone(),
+                };
+            }
+            Effect::Allow => {
+                allowed.get_or_insert_with(|| statement.sid.clone());
+            }
+        }
+    }
+    allowed.map_or(PolicyAnswer::NotApplicable, |sid| PolicyAnswer::Allow {
+        sid,
+    })
+}
+
+fn applies(statement: &Statement, request: &PolicyRequest<'_>, resource: &str) -> bool {
+    listed(&statement.actions, |pattern| {
+        wildcard::matches_ignoring_case(pattern, request.action)
+    }) && listed(&statement.resources, |pattern| {
+        wildcard::matches(pattern, resource)
+    }) && statement
+        .conditions
+        .iter()
+        .all(|condition| condition.holds(request.requester, request.context))
 }
 
 /// Whether the patterns cover the value: any of them, or — for a `Not…` list — none of them.

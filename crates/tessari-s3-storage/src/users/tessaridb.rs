@@ -195,10 +195,22 @@ impl UserRepository for TessariUsers {
                 },
             ),
         ]);
-        let script = "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
-             kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
-             session_hash: $session_hash, session_issuer: $session_issuer, session_subject: $session_subject, \
-             expires: $expires } EXPIRE $expires;";
+        // Two fixed statements rather than one with an absent value: a session without a policy stores no field.
+        let script = match &session.policy {
+            Some(policy) => {
+                parameters.push(text("session_policy", policy));
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
+                 session_hash: $session_hash, session_issuer: $session_issuer, session_subject: $session_subject, \
+                 session_policy: $session_policy, expires: $expires } EXPIRE $expires;"
+            }
+            None => {
+                "CREATE access_keys:$id = { user_name: $user, secret: $secret, nonce: $nonce, \
+                 kek_id: $kek_id, algorithm: $algorithm, disabled: false, created: time::now(), \
+                 session_hash: $session_hash, session_issuer: $session_issuer, session_subject: $session_subject, \
+                 expires: $expires } EXPIRE $expires;"
+            }
+        };
         match self.pool.run(script, parameters).await {
             Ok(_) => Ok(true),
             Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),

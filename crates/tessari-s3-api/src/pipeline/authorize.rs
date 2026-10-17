@@ -43,11 +43,13 @@ pub async fn authorize_operation(
         required(operation)
     }
     .ok_or_else(denied)?;
-    // A batch delete on a bucket with a policy is asked key by key by its handler (`may_delete`); without one, the
-    // bucket's grant decides every key at once, as it always has.
+    // A batch delete on a bucket with a policy, or by a session with one, is asked key by key by its handler
+    // (`may_delete`); otherwise the bucket's grant decides every key at once, as it always has.
     if operation == Operation::DeleteObjects {
         let resource = bucket(state, addressed.bucket.as_ref()).await?;
-        if resource.policy.is_some() {
+        let narrowed =
+            matches!(principal, Principal::Session(session) if session.policy().is_some());
+        if resource.policy.is_some() || narrowed {
             return Ok(());
         }
         return allowed(principal, &Action::WriteObject(resource), None);

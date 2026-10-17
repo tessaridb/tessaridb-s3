@@ -202,6 +202,7 @@ async fn assume(
                 token_digest: session_token_digest(&session_token),
                 issuer: identity.issuer.clone(),
                 subject: identity.subject.clone(),
+                policy: asked.policy.clone(),
             },
         )
         .await

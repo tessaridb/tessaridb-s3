@@ -385,3 +385,141 @@ async fn without_a_provider_nothing_is_issued_and_asking_is_metered_per_address(
         (400, Some("Throttling"))
     );
 }
+
+/// Temporary credentials for `ann` narrowed by `policy`, as the key and its session token.
+async fn narrowed(state: &ApiState, provider: &Provider, policy: &str) -> (Key, String) {
+    let token = provider.identity_token(Shape::Good);
+    let answer = ask(state, &asking(&token, &[("Policy", policy)], "")).await;
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    let key = Key {
+        id: element(&answer.body, "AccessKeyId").to_owned(),
+        secret: element(&answer.body, "SecretAccessKey").to_owned(),
+    };
+    (key, element(&answer.body, "SessionToken").to_owned())
+}
+
+async fn as_session(
+    state: &ApiState,
+    session: &(Key, String),
+    method: &str,
+    path: &str,
+) -> (u16, Option<String>) {
+    let seen = call_as(
+        state,
+        session.0.pair(),
+        method,
+        path,
+        vec![],
+        vec![("x-amz-security-token", &session.1)],
+        b"data",
+    )
+    .await;
+    (seen.status, seen.code)
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_session_policy_narrows_what_its_user_may_do_and_never_widens_it() {
+    let _why = IGNORED;
+    let provider = Provider::start().await;
+    let (state, _) = issuing(&provider, 100).await;
+    assert_eq!(
+        crate::call(&state, "PUT", "/foreign", vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let denied = (403, Some("AccessDenied".to_owned()));
+    let reader = narrowed(
+        &state,
+        &provider,
+        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::own/*"}]}"#,
+    )
+    .await;
+    assert_eq!(
+        as_session(&state, &reader, "GET", "/own/a.txt").await,
+        (200, None)
+    );
+    assert_eq!(
+        as_session(&state, &reader, "PUT", "/own/b.txt").await,
+        denied,
+        "ann may write her bucket; the session policy does not allow it"
+    );
+    assert_eq!(
+        as_session(&state, &reader, "GET", "/").await,
+        denied,
+        "no ListAllMyBuckets"
+    );
+    let fenced = narrowed(
+        &state,
+        &provider,
+        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"},{"Effect":"Deny","Action":"s3:GetObject","Resource":"arn:aws:s3:::own/a.*"}]}"#,
+    )
+    .await;
+    assert_eq!(
+        as_session(&state, &fenced, "GET", "/own/a.txt").await,
+        denied,
+        "the Deny outweighs"
+    );
+    assert_eq!(
+        as_session(&state, &fenced, "PUT", "/own/b.txt").await,
+        (200, None)
+    );
+    assert_eq!(
+        as_session(&state, &fenced, "GET", "/own/b.txt").await,
+        (200, None)
+    );
+    assert_eq!(
+        as_session(&state, &fenced, "GET", "/foreign/x").await,
+        denied,
+        "a policy allowing everything grants nothing the user lacks"
+    );
+    // A batch delete is asked key by key of the session policy, as of a bucket's: one entry refused, the other done.
+    let keeper = narrowed(
+        &state,
+        &provider,
+        r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:*","Resource":"*"},{"Effect":"Deny","Action":"s3:DeleteObject","Resource":"arn:aws:s3:::own/a.*"}]}"#,
+    )
+    .await;
+    let document = r#"<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Object><Key>a.txt</Key></Object><Object><Key>b.txt</Key></Object></Delete>"#;
+    let md5 = crate::delete_many::md5_of(document);
+    let batch = call_as(
+        &state,
+        keeper.0.pair(),
+        "POST",
+        "/own",
+        vec![("delete", None)],
+        vec![
+            ("content-md5", md5.as_str()),
+            ("x-amz-security-token", &keeper.1),
+        ],
+        document.as_bytes(),
+    )
+    .await;
+    assert_eq!(batch.status, 200, "{}", batch.body);
+    assert!(
+        batch.body.contains("<Deleted><Key>b.txt</Key>"),
+        "{}",
+        batch.body
+    );
+    assert!(
+        batch
+            .body
+            .contains("<Error><Key>a.txt</Key><Code>AccessDenied</Code>"),
+        "{}",
+        batch.body
+    );
+    assert_eq!(
+        as_session(&state, &keeper, "GET", "/own/a.txt").await,
+        (200, None)
+    );
+    let unparsable = ask(
+        &state,
+        &asking(&provider.identity_token(Shape::Good), &[("Policy", r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:*","Resource":"*"}]}"#)], ""),
+    )
+    .await;
+    assert_eq!(
+        (unparsable.status, unparsable.code.as_deref()),
+        (400, Some("MalformedPolicyDocument"))
+    );
+}

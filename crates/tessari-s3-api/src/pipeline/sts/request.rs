@@ -3,7 +3,9 @@
 //! refused rather than ignored, because each of them would narrow or reshape the credentials it answers with.
 
 use axum::http::StatusCode;
+use tessari_s3_constants::access::SESSION_POLICY_MAX_CHARS;
 use tessari_s3_core::auth::percent_decode;
+use tessari_s3_core::authz::policy::SessionPolicy;
 
 use super::StsError;
 
@@ -27,6 +29,8 @@ pub(super) struct AssumeRequest {
     pub(super) session_name: String,
     pub(super) token: String,
     pub(super) duration_secs: i64,
+    /// The session policy, as written and already checked.
+    pub(super) policy: Option<String>,
 }
 
 fn invalid(message: impl Into<String>) -> StsError {
@@ -57,7 +61,7 @@ fn sized<'a>(name: &str, value: &'a str, min: usize, max: usize) -> Result<&'a s
 /// The request in `body`.
 ///
 /// # Errors
-/// `InvalidAction` for any other action, `MalformedPolicyDocument` for a session policy (not accepted yet),
+/// `InvalidAction` for any other action, `MalformedPolicyDocument` for a session policy this server cannot evaluate,
 /// `ValidationError` for a parameter missing, repeated, out of its limits or not known here.
 pub(super) fn parse(body: &str) -> Result<AssumeRequest, StsError> {
     let mut fields: Vec<(String, String)> = Vec::new();
@@ -85,16 +89,24 @@ pub(super) fn parse(body: &str) -> Result<AssumeRequest, StsError> {
     if field("Version").is_some_and(|version| version != VERSION) {
         return Err(invalid(format!("Version must be {VERSION}")));
     }
-    if field("Policy").is_some() {
-        return Err(StsError::new(
-            StatusCode::BAD_REQUEST,
-            "MalformedPolicyDocument",
-            "session policies are not accepted",
-        ));
-    }
-    const KNOWN: [&str; 6] = [
+    let policy = match field("Policy") {
+        None => None,
+        Some(text) => {
+            let text = sized("Policy", text, 1, SESSION_POLICY_MAX_CHARS)?;
+            SessionPolicy::parse(text).map_err(|error| {
+                StsError::new(
+                    StatusCode::BAD_REQUEST,
+                    "MalformedPolicyDocument",
+                    error.to_string(),
+                )
+            })?;
+            Some(text.to_owned())
+        }
+    };
+    const KNOWN: [&str; 7] = [
         "Action",
         "Version",
+        "Policy",
         "RoleArn",
         "RoleSessionName",
         "WebIdentityToken",
@@ -135,5 +147,6 @@ pub(super) fn parse(body: &str) -> Result<AssumeRequest, StsError> {
         session_name: session_name.to_owned(),
         token: token.to_owned(),
         duration_secs,
+        policy,
     })
 }

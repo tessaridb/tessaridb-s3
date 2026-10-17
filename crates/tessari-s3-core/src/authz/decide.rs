@@ -3,7 +3,8 @@
 //! Allow last — the IAM order, with Root the documented exception.
 
 use super::model::{
-    Access, Action, BucketResource, Principal, Role, UploadPrincipal, UserPrincipal, UserResource,
+    Access, Action, BucketResource, Principal, Role, SessionPrincipal, UploadPrincipal,
+    UserPrincipal, UserResource,
 };
 use super::policy::{Context, PolicyAnswer, PolicyRequest, Requester};
 
@@ -28,6 +29,8 @@ pub enum Denied {
     Unasked,
     /// Only a public statement allows it, and RestrictPublicBuckets keeps those to the bucket's own space.
     Restricted,
+    /// The session's user may, but the session policy it was issued with does not allow it (or was not asked).
+    SessionPolicy,
 }
 
 /// The policy question a request asks: the S3 action, the key (none for the bucket itself) and its facts.
@@ -66,7 +69,7 @@ pub fn authorize_asked(principal: &Principal, action: &Action, asked: &Asked<'_>
 fn decide(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> Decision {
     match principal {
         Principal::Root => return Decision::Allow,
-        Principal::Session(session) => return decide(session.as_user(), action, asked),
+        Principal::Session(session) => return within_session(session, action, asked),
         _ => {}
     }
     let Some((bucket, stored)) = action
@@ -106,6 +109,38 @@ fn decide(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> 
 }
 
 /// Who asks, as a bucket policy sees them; a one-key credential is its issuer.
+/// A session decides as its user, and when it was issued with a session policy that policy must also allow the
+/// request — the intersection, so a session never reaches further than its user, and a Deny in its policy refuses.
+fn within_session(
+    session: &SessionPrincipal,
+    action: &Action,
+    asked: Option<&Asked<'_>>,
+) -> Decision {
+    let decided = decide(session.as_user(), action, asked);
+    let Some(policy) = session.policy() else {
+        return decided;
+    };
+    if decided != Decision::Allow {
+        return decided;
+    }
+    let Some(asked) = asked else {
+        return Decision::Deny(Denied::SessionPolicy);
+    };
+    let request = PolicyRequest {
+        requester: requester(session.as_user()),
+        action: asked.action,
+        key: asked.key,
+        context: asked.context,
+    };
+    let bucket = action.bucket().map(|bucket| bucket.name.as_str());
+    match policy.evaluate(&request, bucket) {
+        PolicyAnswer::Allow { .. } => Decision::Allow,
+        PolicyAnswer::Deny { .. } | PolicyAnswer::NotApplicable => {
+            Decision::Deny(Denied::SessionPolicy)
+        }
+    }
+}
+
 fn requester(principal: &Principal) -> Requester<'_> {
     match principal {
         Principal::User(user) => Requester::User {

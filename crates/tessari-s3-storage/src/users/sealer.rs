@@ -73,6 +73,8 @@ pub(crate) struct SessionBinding<'a> {
     pub issuer: &'a str,
     /// The provider's subject it was issued to.
     pub subject: &'a str,
+    /// The session policy it was issued with, when any.
+    pub policy: Option<&'a str>,
 }
 
 /// A one-key credential's scope as bound into its associated data, so a record whose scope was stripped or widened
@@ -146,6 +148,16 @@ impl Sealer {
             aad.push(0);
             for byte in session.token_digest {
                 aad.extend_from_slice(format!("{byte:02x}").as_bytes());
+            }
+            aad.push(0);
+            // The policy as its digest (hex, or `-` for none), so its length cannot blur into the fields after it.
+            match session.policy {
+                Some(policy) => {
+                    for byte in Sha256::digest(policy.as_bytes()) {
+                        aad.extend_from_slice(format!("{byte:02x}").as_bytes());
+                    }
+                }
+                None => aad.push(b'-'),
             }
             aad.push(0);
             aad.extend_from_slice(session.issuer.as_bytes());

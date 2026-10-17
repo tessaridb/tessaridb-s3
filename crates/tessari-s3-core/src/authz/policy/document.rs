@@ -23,7 +23,7 @@ impl fmt::Display for PolicyError {
 
 impl std::error::Error for PolicyError {}
 
-fn refuse(message: impl Into<String>) -> PolicyError {
+pub(super) fn refuse(message: impl Into<String>) -> PolicyError {
     PolicyError(message.into())
 }
 
@@ -86,33 +86,7 @@ impl BucketPolicy {
                 BUCKET_POLICY_MAX_BYTES / 1024
             )));
         }
-        // An untyped tree is the honest first step: the document's shape is what is being validated, once.
-        let root: Value =
-            serde_json::from_str(text).map_err(|_| refuse("the policy is not JSON"))?;
-        let root = root
-            .as_object()
-            .ok_or_else(|| refuse("the policy is not a JSON object"))?;
-        for key in root.keys() {
-            if !matches!(key.as_str(), "Version" | "Id" | "Statement") {
-                return Err(refuse(format!("the policy key {key} is not supported")));
-            }
-        }
-        match root.get("Version").and_then(Value::as_str) {
-            Some("2012-10-17" | "2008-10-17") => {}
-            _ => return Err(refuse("the policy needs a Version of 2012-10-17")),
-        }
-        let listed = match root.get("Statement") {
-            Some(Value::Array(list)) => list.iter().collect::<Vec<_>>(),
-            Some(single @ Value::Object(_)) => vec![single],
-            _ => Vec::new(),
-        };
-        if listed.is_empty() {
-            return Err(refuse("the policy has no statement"));
-        }
-        let statements = listed
-            .into_iter()
-            .map(|value| statement(value, bucket, space))
-            .collect::<Result<Vec<_>, _>>()?;
+        let statements = statements_of(text, &Governs::Bucket { bucket, space })?;
         Ok(Self {
             bucket: bucket.to_owned(),
             space: space.clone(),
@@ -127,7 +101,51 @@ impl BucketPolicy {
     }
 }
 
-fn statement(value: &Value, bucket: &str, space: &SpaceName) -> Result<Statement, PolicyError> {
+/// What a document governs, which decides who its statements may name and which resources they may cover.
+pub(super) enum Governs<'a> {
+    /// One bucket of one space: principals of that space, resources within that bucket.
+    Bucket {
+        bucket: &'a str,
+        space: &'a SpaceName,
+    },
+    /// A session: no principal (it is the session), any S3 resource.
+    Session,
+}
+
+/// The statements of policy `text`, every one checked against what the document governs.
+pub(super) fn statements_of(
+    text: &str,
+    governs: &Governs<'_>,
+) -> Result<Vec<Statement>, PolicyError> {
+    // An untyped tree is the honest first step: the document's shape is what is being validated, once.
+    let root: Value = serde_json::from_str(text).map_err(|_| refuse("the policy is not JSON"))?;
+    let root = root
+        .as_object()
+        .ok_or_else(|| refuse("the policy is not a JSON object"))?;
+    for key in root.keys() {
+        if !matches!(key.as_str(), "Version" | "Id" | "Statement") {
+            return Err(refuse(format!("the policy key {key} is not supported")));
+        }
+    }
+    match root.get("Version").and_then(Value::as_str) {
+        Some("2012-10-17" | "2008-10-17") => {}
+        _ => return Err(refuse("the policy needs a Version of 2012-10-17")),
+    }
+    let listed = match root.get("Statement") {
+        Some(Value::Array(list)) => list.iter().collect::<Vec<_>>(),
+        Some(single @ Value::Object(_)) => vec![single],
+        _ => Vec::new(),
+    };
+    if listed.is_empty() {
+        return Err(refuse("the policy has no statement"));
+    }
+    listed
+        .into_iter()
+        .map(|value| statement(value, governs))
+        .collect()
+}
+
+fn statement(value: &Value, governs: &Governs<'_>) -> Result<Statement, PolicyError> {
     let fields = value
         .as_object()
         .ok_or_else(|| refuse("a statement is not a JSON object"))?;
@@ -160,19 +178,24 @@ fn statement(value: &Value, bucket: &str, space: &SpaceName) -> Result<Statement
         Some("Deny") => Effect::Deny,
         _ => return Err(refuse("a statement's Effect is Allow or Deny")),
     };
-    let principals = principals(
-        fields
-            .get("Principal")
-            .ok_or_else(|| refuse("a statement needs a Principal"))?,
-        space,
-    )?;
+    let principals = match (governs, fields.get("Principal")) {
+        (Governs::Bucket { space, .. }, Some(principal)) => principals(principal, space)?,
+        (Governs::Bucket { .. }, None) => return Err(refuse("a statement needs a Principal")),
+        (Governs::Session, None) => Principals::Anyone,
+        (Governs::Session, Some(_)) => {
+            return Err(refuse("a session policy names no Principal"));
+        }
+    };
     let actions = patterns(fields, "Action", "NotAction")?;
     for action in &actions.list {
         known_action(action)?;
     }
     let resources = patterns(fields, "Resource", "NotResource")?;
     for resource in &resources.list {
-        this_bucket(resource, bucket)?;
+        match governs {
+            Governs::Bucket { bucket, .. } => this_bucket(resource, bucket)?,
+            Governs::Session => s3_resource(resource)?,
+        }
     }
     let conditions = match fields.get("Condition") {
         None => Vec::new(),
@@ -301,6 +324,13 @@ fn this_bucket(resource: &str, bucket: &str) -> Result<(), PolicyError> {
             "the resource {resource} is not this bucket or a key in it"
         ))
     })
+}
+
+/// A resource a session policy may name: every resource, or S3 ones.
+fn s3_resource(resource: &str) -> Result<(), PolicyError> {
+    (resource == "*" || resource.starts_with("arn:aws:s3:::"))
+        .then_some(())
+        .ok_or_else(|| refuse(format!("the resource {resource} is not an S3 resource")))
 }
 
 fn conditions(value: &Value) -> Result<Vec<Condition>, PolicyError> {
