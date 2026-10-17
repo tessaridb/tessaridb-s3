@@ -314,7 +314,8 @@ async fn a_copy_is_refused_by_name_before_it_writes() {
                     "AES256".to_owned(),
                 ),
             ],
-            "NotImplemented",
+            // A source's customer key arrives as three headers; one alone is no key.
+            "InvalidArgument",
         ),
         (
             vec![

@@ -1,6 +1,6 @@
 [package]
 name = "tessari-s3-storage"
-version = "0.1.0"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -25,6 +25,8 @@ rustix.workspace = true
 chacha20poly1305.workspace = true
 hkdf.workspace = true
 sha2.workspace = true
+hmac.workspace = true
+subtle.workspace = true
 base64.workspace = true
 zeroize.workspace = true
 scc.workspace = true

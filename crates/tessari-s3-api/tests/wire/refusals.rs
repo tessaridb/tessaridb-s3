@@ -23,14 +23,21 @@ fn signed(
 }
 
 #[tokio::test]
-async fn an_anonymous_request_is_access_denied() {
+async fn an_anonymous_request_is_denied_and_one_whose_bucket_cannot_be_read_is_an_outage() {
     let headers = [("Host".to_owned(), "localhost".to_owned())];
-    let seen = send(state(NOW, 64), request("GET", "/bucket/key", &headers)).await;
+    // Nothing grants an anonymous caller the list of buckets, and no store is read to say so.
+    let seen = send(state(NOW, 64), request("GET", "/", &headers)).await;
     assert_eq!(
         (seen.status, seen.code.as_deref()),
         (403, Some("AccessDenied"))
     );
     assert!(seen.request_id.is_some());
+    // A bucket's policy decides an anonymous read; with no store to read it from that is not a denial but an outage.
+    let unread = send(state(NOW, 64), request("GET", "/bucket/key", &headers)).await;
+    assert_eq!(
+        (unread.status, unread.code.as_deref()),
+        (503, Some("ServiceUnavailable"))
+    );
 }
 
 #[tokio::test]
@@ -108,7 +115,8 @@ async fn past_the_in_flight_limit_a_request_is_slow_down_before_any_work() {
 async fn markup_in_the_path_cannot_break_out_of_the_error_envelope() {
     let headers = [("Host".to_owned(), "localhost".to_owned())];
     let seen = send(state(NOW, 64), request("GET", "/bucket/a&b'c", &headers)).await;
-    assert_eq!(seen.code.as_deref(), Some("AccessDenied"));
+    // No store answers this harness, so the anonymous read is refused as an outage; the envelope is the subject.
+    assert_eq!(seen.code.as_deref(), Some("ServiceUnavailable"));
     assert!(
         seen.body
             .contains("<Resource>/bucket/a&amp;b&apos;c</Resource>"),

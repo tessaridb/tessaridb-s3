@@ -3,6 +3,8 @@ use tessari_s3_core::objects::checksum::ChecksumAlgorithm;
 use tessari_s3_storage::objects::WriteCondition;
 use tessari_s3_types::ErrorCode;
 
+use tessari_s3_storage::encryption::Sealing;
+
 use super::read_put_headers;
 
 fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
@@ -56,8 +58,41 @@ fn system_headers_and_metadata_are_kept_and_aws_chunked_is_removed() {
 #[test]
 fn semantics_this_server_does_not_implement_are_refused_not_dropped() {
     assert_eq!(
-        refused(&[("x-amz-server-side-encryption", "AES256")]),
+        refused(&[("x-amz-server-side-encryption", "aws:kms:dsse")]),
         ErrorCode::NotImplemented
+    );
+    assert_eq!(
+        refused(&[
+            ("x-amz-server-side-encryption", "AES256"),
+            ("x-amz-server-side-encryption-aws-kms-key-id", "k")
+        ]),
+        ErrorCode::InvalidArgument,
+        "a key id belongs to aws:kms"
+    );
+    let customer = [
+        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
+        (
+            "x-amz-server-side-encryption-customer-key",
+            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+        ),
+        (
+            "x-amz-server-side-encryption-customer-key-md5",
+            "y4HAEFCYWuvAXWFTtA1Qpg==",
+        ),
+    ];
+    assert!(
+        read_put_headers(&headers(&customer))
+            .expect("reads")
+            .customer
+            .is_some(),
+        "a customer key is read, not refused"
+    );
+    let mut beside_server = customer.to_vec();
+    beside_server.push(("x-amz-server-side-encryption", "AES256"));
+    assert_eq!(
+        refused(&beside_server),
+        ErrorCode::InvalidArgument,
+        "a customer key is not one of the server's"
     );
     assert_eq!(
         refused(&[("x-amz-object-lock-event-hold", "ON")]),
@@ -251,4 +286,21 @@ fn the_tagging_header_is_read_as_tags_or_refused_as_an_invalid_tag() {
             "{header}"
         );
     }
+}
+
+#[test]
+fn server_side_encryption_with_the_servers_keys_is_asked_for_by_name() {
+    let asked =
+        read_put_headers(&headers(&[("x-amz-server-side-encryption", "AES256")])).expect("reads");
+    assert_eq!(
+        asked.encryption,
+        Some(Sealing::Server),
+        "AES256 asks for the server's own keys"
+    );
+    let plain = read_put_headers(&headers(&[])).expect("reads");
+    assert_eq!(plain.encryption, None);
+    assert_eq!(
+        refused(&[("x-amz-server-side-encryption", "rot13")]),
+        ErrorCode::InvalidArgument
+    );
 }

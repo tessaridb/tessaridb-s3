@@ -10,6 +10,8 @@ pub enum ErrorCode {
     AccessControlListNotSupported,
     /// 400: the Content-MD5 or checksum value is not well formed.
     InvalidDigest,
+    /// 400: a customer-provided key names an algorithm other than AES256.
+    InvalidEncryptionAlgorithmError,
     /// 400: the upload exceeds the maximum allowed object size.
     EntityTooLarge,
     /// 400: the storage class is not one this server offers.
@@ -46,12 +48,36 @@ pub enum ErrorCode {
     InvalidTag,
     /// 503: a dependency the request needs is unavailable; retry.
     ServiceUnavailable,
+    /// 400: the KMS key the request names does not exist.
+    KmsNotFound,
+    /// 400: the bucket has no default encryption configuration.
+    ServerSideEncryptionConfigurationNotFoundError,
     /// 404: the bucket does not exist.
     NoSuchBucket,
     /// 400: the request body is longer than this operation accepts.
     MaxMessageLengthExceeded,
     /// 400: the XML body is not well formed or not the expected shape.
     MalformedXml,
+    /// 400: a bucket policy is not valid or names what cannot be evaluated.
+    MalformedPolicy,
+    /// 404: the bucket has no policy.
+    NoSuchBucketPolicy,
+    /// 404: the bucket has no CORS configuration.
+    NoSuchCorsConfiguration,
+    /// 403: a CORS preflight that no rule allows, or for a bucket without CORS.
+    AccessForbidden,
+    /// 400: a CORS preflight without its Origin or requested method.
+    BadRequest,
+    /// 400: the session token of temporary credentials has expired.
+    ExpiredToken,
+    /// 400: the session token is missing, malformed, or not this credential's.
+    InvalidToken,
+    /// 400: a form upload whose body is not a well-formed multipart/form-data document.
+    MalformedPostRequest,
+    /// 400: a form upload's policy document cannot be read.
+    InvalidPolicyDocument,
+    /// 404: the bucket carries no Block Public Access configuration.
+    NoSuchPublicAccessBlockConfiguration,
     /// 400: the bucket would be created in another region than this server's.
     IllegalLocationConstraintException,
     /// 409: the bucket still holds objects.
@@ -114,6 +140,7 @@ impl ErrorCode {
             Self::AccessDenied => "AccessDenied",
             Self::AccessControlListNotSupported => "AccessControlListNotSupported",
             Self::InvalidDigest => "InvalidDigest",
+            Self::InvalidEncryptionAlgorithmError => "InvalidEncryptionAlgorithmError",
             Self::EntityTooLarge => "EntityTooLarge",
             Self::InvalidStorageClass => "InvalidStorageClass",
             Self::MissingContentLength => "MissingContentLength",
@@ -135,11 +162,25 @@ impl ErrorCode {
             Self::InvalidPartOrder => "InvalidPartOrder",
             Self::EntityTooSmall => "EntityTooSmall",
             Self::ServiceUnavailable => "ServiceUnavailable",
+            Self::KmsNotFound => "KMS.NotFoundException",
+            Self::ServerSideEncryptionConfigurationNotFoundError => {
+                "ServerSideEncryptionConfigurationNotFoundError"
+            }
             Self::NoSuchBucket => "NoSuchBucket",
             Self::InvalidBucketState => "InvalidBucketState",
             Self::OperationAborted => "OperationAborted",
             Self::MaxMessageLengthExceeded => "MaxMessageLengthExceeded",
             Self::MalformedXml => "MalformedXML",
+            Self::MalformedPolicy => "MalformedPolicy",
+            Self::NoSuchBucketPolicy => "NoSuchBucketPolicy",
+            Self::NoSuchCorsConfiguration => "NoSuchCORSConfiguration",
+            Self::AccessForbidden => "AccessForbidden",
+            Self::BadRequest => "BadRequest",
+            Self::ExpiredToken => "ExpiredToken",
+            Self::InvalidToken => "InvalidToken",
+            Self::MalformedPostRequest => "MalformedPOSTRequest",
+            Self::InvalidPolicyDocument => "InvalidPolicyDocument",
+            Self::NoSuchPublicAccessBlockConfiguration => "NoSuchPublicAccessBlockConfiguration",
             Self::IllegalLocationConstraintException => "IllegalLocationConstraintException",
             Self::BucketNotEmpty => "BucketNotEmpty",
             Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
@@ -170,7 +211,8 @@ impl ErrorCode {
             Self::AccessDenied
             | Self::InvalidAccessKeyId
             | Self::RequestTimeTooSkewed
-            | Self::SignatureDoesNotMatch => 403,
+            | Self::SignatureDoesNotMatch
+            | Self::AccessForbidden => 403,
             Self::BadDigest
             | Self::IncompleteBody
             | Self::InvalidArgument
@@ -188,17 +230,22 @@ impl ErrorCode {
             | Self::OperationAborted => 409,
             Self::IllegalLocationConstraintException
             | Self::MalformedXml
+            | Self::MalformedPolicy
             | Self::MaxMessageLengthExceeded
             | Self::InvalidTag => 400,
             Self::NoSuchBucket => 404,
             Self::ServiceUnavailable => 503,
+            Self::KmsNotFound | Self::ServerSideEncryptionConfigurationNotFoundError => 400,
             Self::NoSuchKey
             | Self::NoSuchUpload
             | Self::NoSuchVersion
             | Self::NoSuchLifecycleConfiguration
             | Self::ReplicationConfigurationNotFoundError
             | Self::ObjectLockConfigurationNotFoundError
-            | Self::NoSuchTagSet => 404,
+            | Self::NoSuchTagSet
+            | Self::NoSuchBucketPolicy
+            | Self::NoSuchCorsConfiguration
+            | Self::NoSuchPublicAccessBlockConfiguration => 404,
             Self::PreconditionFailed => 412,
             Self::NotModified => 304,
             Self::PermanentRedirect => 301,
@@ -207,11 +254,17 @@ impl ErrorCode {
             Self::MetadataTooLarge
             | Self::InvalidStorageClass
             | Self::InvalidDigest
+            | Self::InvalidEncryptionAlgorithmError
             | Self::EntityTooLarge
             | Self::InvalidPart
             | Self::InvalidPartOrder
             | Self::EntityTooSmall
-            | Self::AccessControlListNotSupported => 400,
+            | Self::AccessControlListNotSupported
+            | Self::BadRequest
+            | Self::ExpiredToken
+            | Self::InvalidToken
+            | Self::MalformedPostRequest
+            | Self::InvalidPolicyDocument => 400,
             Self::MethodNotAllowed => 405,
             Self::NotImplemented => 501,
             Self::SlowDown => 503,
@@ -234,6 +287,11 @@ mod tests {
                 400,
             ),
             (ErrorCode::InvalidDigest, "InvalidDigest", 400),
+            (
+                ErrorCode::InvalidEncryptionAlgorithmError,
+                "InvalidEncryptionAlgorithmError",
+                400,
+            ),
             (ErrorCode::InvalidStorageClass, "InvalidStorageClass", 400),
             (ErrorCode::MissingContentLength, "MissingContentLength", 411),
             (ErrorCode::MetadataTooLarge, "MetadataTooLarge", 400),
@@ -266,6 +324,12 @@ mod tests {
             (ErrorCode::InvalidPartOrder, "InvalidPartOrder", 400),
             (ErrorCode::EntityTooSmall, "EntityTooSmall", 400),
             (ErrorCode::ServiceUnavailable, "ServiceUnavailable", 503),
+            (ErrorCode::KmsNotFound, "KMS.NotFoundException", 400),
+            (
+                ErrorCode::ServerSideEncryptionConfigurationNotFoundError,
+                "ServerSideEncryptionConfigurationNotFoundError",
+                400,
+            ),
             (ErrorCode::NoSuchBucket, "NoSuchBucket", 404),
             (
                 ErrorCode::MaxMessageLengthExceeded,
@@ -273,6 +337,28 @@ mod tests {
                 400,
             ),
             (ErrorCode::MalformedXml, "MalformedXML", 400),
+            (ErrorCode::MalformedPolicy, "MalformedPolicy", 400),
+            (ErrorCode::NoSuchBucketPolicy, "NoSuchBucketPolicy", 404),
+            (
+                ErrorCode::NoSuchCorsConfiguration,
+                "NoSuchCORSConfiguration",
+                404,
+            ),
+            (ErrorCode::AccessForbidden, "AccessForbidden", 403),
+            (ErrorCode::BadRequest, "BadRequest", 400),
+            (ErrorCode::ExpiredToken, "ExpiredToken", 400),
+            (ErrorCode::InvalidToken, "InvalidToken", 400),
+            (ErrorCode::MalformedPostRequest, "MalformedPOSTRequest", 400),
+            (
+                ErrorCode::InvalidPolicyDocument,
+                "InvalidPolicyDocument",
+                400,
+            ),
+            (
+                ErrorCode::NoSuchPublicAccessBlockConfiguration,
+                "NoSuchPublicAccessBlockConfiguration",
+                404,
+            ),
             (
                 ErrorCode::IllegalLocationConstraintException,
                 "IllegalLocationConstraintException",

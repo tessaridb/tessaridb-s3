@@ -65,6 +65,8 @@ pub const fn required(operation: Operation) -> Option<Required> {
         Operation::CreateBucket => on(Need::CreateBucket),
         Operation::DeleteBucket => on(Need::DeleteBucket),
         Operation::PutBucketVersioning
+        | Operation::PutBucketEncryption
+        | Operation::DeleteBucketEncryption
         | Operation::PutBucketLifecycleConfiguration
         | Operation::PutBucketNotificationConfiguration
         | Operation::PutBucketReplication
@@ -73,16 +75,27 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::PutObjectLockConfiguration
         | Operation::PutBucketTagging
         | Operation::DeleteBucketTagging
+        | Operation::PutBucketPolicy
+        | Operation::DeleteBucketPolicy
+        | Operation::PutPublicAccessBlock
+        | Operation::PutBucketCors
+        | Operation::DeleteBucketCors
+        | Operation::DeletePublicAccessBlock
         // Releasing a legal hold must not be a plain write: a hold exists to outlast who may write.
         | Operation::PutObjectLegalHold => on(Need::ConfigureBucket),
         Operation::HeadBucket
         | Operation::GetBucketLocation
         | Operation::GetBucketVersioning
+        | Operation::GetBucketEncryption
         | Operation::GetBucketLifecycleConfiguration
         | Operation::GetBucketNotificationConfiguration
         | Operation::GetBucketReplication
         | Operation::GetObjectLockConfiguration
         | Operation::GetBucketTagging
+        | Operation::GetBucketPolicy
+        | Operation::GetBucketPolicyStatus
+        | Operation::GetPublicAccessBlock
+        | Operation::GetBucketCors
         | Operation::ListObjects
         | Operation::ListObjectsV2
         | Operation::ListObjectVersions

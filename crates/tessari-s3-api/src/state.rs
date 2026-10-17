@@ -1,14 +1,19 @@
 //! What every request handler shares: the signing region, the endpoint domains, the root credential, the cache of
-//! resolved user keys and the clock.
+//! resolved user keys, the clock, the node's metrics and where requests queue their access-log records.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+use tessari_s3_core::auth::{session_token_expiry, session_token_matches};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
 use tessari_s3_infrastructure::S3Config;
+use tessari_s3_infrastructure::oidc::OidcClient;
+use tessari_s3_observability::Metrics;
 use tessari_s3_storage::Storage;
+use tessari_s3_storage::audit::AccessRecord;
 use tessari_s3_types::{ErrorCode, SecretKey};
 
+use crate::pipeline::sts::WebIdentityIssuer;
 use crate::principals::{Principals, principal_of, resolve_user_key};
 use crate::{Error, Result};
 
@@ -41,6 +46,9 @@ struct Inner {
     storage: Storage,
     principals: Principals,
     notify_targets: Vec<String>,
+    metrics: Arc<Metrics>,
+    audit: OnceLock<tokio::sync::mpsc::Sender<AccessRecord>>,
+    web_identity: OnceLock<WebIdentityIssuer>,
 }
 
 impl ApiState {
@@ -75,6 +83,9 @@ impl ApiState {
                     .iter()
                     .map(|target| target.id.clone())
                     .collect(),
+                metrics: Arc::new(Metrics::new()),
+                audit: OnceLock::new(),
+                web_identity: OnceLock::new(),
             }),
         }
     }
@@ -138,41 +149,118 @@ impl ApiState {
         &self.inner.list_tokens
     }
 
+    /// What this node served, refused and shed.
+    #[must_use]
+    pub fn metrics(&self) -> &Arc<Metrics> {
+        &self.inner.metrics
+    }
+
+    /// Starts the access log: requests from now on queue a record, up to `capacity` waiting, for the writer this
+    /// answers to append. `None` when it was started already.
+    #[must_use]
+    pub fn audit_writer(&self, capacity: usize) -> Option<crate::AuditWriter> {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+        self.inner.audit.set(sender).ok()?;
+        Some(crate::AuditWriter::new(
+            receiver,
+            self.inner.storage.audit(),
+            Arc::clone(&self.inner.metrics),
+        ))
+    }
+
+    /// Where requests queue their access-log records, when the access log is started.
+    pub(crate) fn audit(&self) -> Option<&tokio::sync::mpsc::Sender<AccessRecord>> {
+        self.inner.audit.get()
+    }
+
+    /// Issues temporary credentials to people `client`'s provider vouches for, at most `per_minute` requests per
+    /// client address; `false` when it was set already.
+    pub fn accept_web_identity(&self, client: OidcClient, per_minute: usize) -> bool {
+        self.inner
+            .web_identity
+            .set(WebIdentityIssuer::new(client, per_minute))
+            .is_ok()
+    }
+
+    /// Where web identity tokens are checked, when temporary credentials are issued.
+    pub(crate) fn web_identity(&self) -> Option<&WebIdentityIssuer> {
+        self.inner.web_identity.get()
+    }
+
     /// The storage services.
     #[must_use]
     pub fn storage(&self) -> &Storage {
         &self.inner.storage
     }
 
-    /// Who signs with `access_key` and the secret to verify the signature with: the root credential from
-    /// configuration, a user's key from the store through the principal cache.
+    /// Who signs with `access_key`, presenting session token `token` when the request carried one, and the secret
+    /// to verify the signature with: the root credential from configuration, a user's key from the store through the
+    /// principal cache. Temporary credentials stand only with their own session token and until they expire; any
+    /// other credential refuses a token, since nothing could check it.
     ///
     /// # Errors
-    /// `InvalidAccessKeyId` when no credential has that key or it or its user is disabled; the store's failure,
-    /// which serves nothing cached in its place.
-    pub(crate) async fn credential_for(&self, access_key: &str) -> Result<Credential> {
+    /// `InvalidAccessKeyId` when no credential has that key or it or its user is disabled; `InvalidToken` for a
+    /// token missing, wrong or presented with a long-term key; `ExpiredToken` for temporary credentials past their
+    /// expiry; the store's failure, which serves nothing cached in its place.
+    pub(crate) async fn credential_for(
+        &self,
+        access_key: &str,
+        token: Option<&str>,
+    ) -> Result<Credential> {
+        let now = self.now();
+        let invalid_token = || {
+            Error::new(
+                ErrorCode::InvalidToken,
+                "the security token is not valid for this access key",
+            )
+        };
+        let expired = || Error::new(ErrorCode::ExpiredToken, "the security token has expired");
         if access_key == self.inner.root_access_key {
-            return Ok(Credential {
-                principal: Principal::Root,
-                secret: self.inner.root_secret_key.clone(),
-            });
+            return match token {
+                Some(_) => Err(invalid_token()),
+                None => Ok(Credential {
+                    principal: Principal::Root,
+                    secret: self.inner.root_secret_key.clone(),
+                }),
+            };
         }
         let live = resolve_user_key(
             &self.inner.principals,
             self.inner.storage.users(),
+            self.inner.storage.identities(),
             access_key,
-            self.now(),
+            now,
         )
         .await?;
-        live.and_then(|live| {
-            let secret = live.secret.clone();
-            principal_of(live, self.now()).map(|principal| Credential { principal, secret })
-        })
-        .ok_or_else(|| {
-            Error::new(
-                ErrorCode::InvalidAccessKeyId,
-                "the access key does not exist",
-            )
-        })
+        let Some(live) = live else {
+            // The store drops temporary credentials when they expire; their token still names when that was.
+            return Err(match token.and_then(session_token_expiry) {
+                Some(expiry) if expiry <= now => expired(),
+                _ => Error::new(
+                    ErrorCode::InvalidAccessKeyId,
+                    "the access key does not exist",
+                ),
+            });
+        };
+        match (&live.session, token) {
+            (Some(session), Some(presented))
+                if session_token_matches(presented, &session.token_digest) => {}
+            (Some(_), _) | (None, Some(_)) => return Err(invalid_token()),
+            (None, None) => {}
+        }
+        let secret = live.secret.clone();
+        let session = live.session.is_some();
+        principal_of(live, now)
+            .map(|principal| Credential { principal, secret })
+            .ok_or_else(|| {
+                if session {
+                    expired()
+                } else {
+                    Error::new(
+                        ErrorCode::InvalidAccessKeyId,
+                        "the access key does not exist",
+                    )
+                }
+            })
     }
 }

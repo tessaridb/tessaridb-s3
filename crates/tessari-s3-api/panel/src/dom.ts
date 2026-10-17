@@ -57,6 +57,37 @@ export function field(
   return { row: el("div", { class: "field" }, el("label", { for: id }, label), input, described), input };
 }
 
+/**
+ * A few choices shown side by side, one picked: radios under one name, so the
+ * arrow keys move between them and no popup opens. `chosen` reads the pick and
+ * `choose` sets it.
+ */
+export function segmented(
+  id: string,
+  label: string,
+  options: readonly string[],
+): { readonly group: HTMLElement; readonly chosen: () => string; readonly choose: (value: string) => void } {
+  const inputs = options.map((option, at) => {
+    const input = el("input", { type: "radio", name: id, id: `${id}-${at}`, value: option });
+    if (at === 0) {
+      input.checked = true;
+    }
+    return input;
+  });
+  const group = el(
+    "div",
+    { class: "segmented", role: "radiogroup", "aria-label": label },
+    ...inputs.flatMap((input) => [input, el("label", { for: input.id }, input.value)]),
+  );
+  const chosen = (): string => inputs.find((input) => input.checked)?.value ?? "";
+  const choose = (value: string): void => {
+    for (const input of inputs) {
+      input.checked = input.value === value;
+    }
+  };
+  return { group, chosen, choose };
+}
+
 /** A small table: `head` names the columns, `rows` are already built cells. */
 export function table(caption: string, head: readonly string[], rows: readonly HTMLTableRowElement[]): HTMLElement {
   return el(

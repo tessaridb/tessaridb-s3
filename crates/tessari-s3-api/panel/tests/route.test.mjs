@@ -67,3 +67,19 @@ test("a listing names the start of the names it is filtered to, within its folde
   assert.equal(format({ kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null, filter: "ca t" }), "#/b/b1b?prefix=p%2F&filter=ca%20t");
   assert.deepEqual(parse("#/b/b1b?prefix=p%2F&filter=ca"), { kind: "objects", bucket: "b1b", prefix: "p/", cursor: null, key: null, filter: "ca" });
 });
+
+test("a space's groups and one group are views of their own, the space picker when no space is named", () => {
+  assert.equal(format({ kind: "groups", space: null }), "#/groups");
+  assert.equal(format({ kind: "groups", space: "alpha" }), "#/groups/alpha");
+  assert.equal(format({ kind: "group", space: "alpha", group: "editors" }), "#/groups/alpha/editors");
+  for (const route of [
+    { kind: "groups", space: null },
+    { kind: "groups", space: "alpha" },
+    { kind: "group", space: "alpha", group: "editors" },
+    { kind: "group", space: "a/b", group: "x?y" },
+  ]) {
+    assert.deepEqual(parse(format(route)), route, JSON.stringify(route));
+  }
+  assert.deepEqual(parse("#/groups/"), { kind: "groups", space: null });
+  assert.deepEqual(parse("#/groups/alpha/"), { kind: "groups", space: "alpha" });
+});

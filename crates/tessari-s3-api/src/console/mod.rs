@@ -7,17 +7,22 @@ mod access;
 mod acknowledgement;
 mod actions;
 mod break_glass;
+mod bucket_encryption;
 mod buckets;
 mod cluster;
 mod content;
+mod encryption;
+mod encryption_rotation;
 mod error;
 mod grants;
+mod group_changes;
+mod groups;
 mod guard;
 mod identity;
 mod input;
 mod keys;
 mod layout;
-mod limits;
+pub(crate) mod limits;
 mod logout;
 mod media;
 mod media_failed;
@@ -149,13 +154,15 @@ impl ConsoleState {
         let live = resolve_user_key(
             &self.inner.principals,
             self.inner.storage.users(),
+            self.inner.storage.identities(),
             key_id,
             self.now(),
         )
         .await?;
-        // A one-key upload credential signs nothing in here: it is for uploading its key over S3 and nothing else.
+        // A one-key upload credential signs nothing in here: it is for uploading its key over S3 and nothing else; nor
+        // do temporary credentials — a person signs in through the identity provider instead.
         Ok(live
-            .filter(|live| live.scope.is_none())
+            .filter(|live| live.scope.is_none() && live.session.is_none())
             .map(|live| (Principal::User(live.principal), live.secret)))
     }
 
@@ -262,6 +269,18 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route("/api/v1/cluster/members/approve", post(members::approve))
         .route("/api/v1/cluster/members/token", post(members::token))
         .route("/api/v1/cluster/members/remove", post(members::remove))
+        .route("/api/v1/encryption", get(encryption::state))
+        .route("/api/v1/encryption/unseal", post(encryption::unseal))
+        .route("/api/v1/encryption/seal", post(encryption::seal))
+        .route("/api/v1/encryption/keys", post(encryption::create))
+        .route(
+            "/api/v1/encryption/rotate",
+            post(encryption_rotation::rotate),
+        )
+        .route(
+            "/api/v1/encryption/destroy",
+            post(encryption_rotation::destroy),
+        )
         .route("/api/v1/regions", get(regions::list))
         .route("/api/v1/regions/failover", post(regions::fail_over))
         .route("/api/v1/regions/restore", post(regions::restore))
@@ -271,6 +290,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route(
             "/api/v1/buckets/{bucket}/acknowledgement",
             put(acknowledgement::set),
+        )
+        .route(
+            "/api/v1/buckets/{bucket}/encryption",
+            put(bucket_encryption::set),
         )
         .route(
             "/api/v1/buckets/{bucket}/media",
@@ -307,6 +330,22 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
         .route(
             "/api/v1/users/{user}/grants/{bucket}",
             put(grants::set).delete(grants::remove),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups",
+            get(groups::list).post(groups::create),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}",
+            get(groups::detail).delete(groups::delete),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}/members/{user}",
+            put(group_changes::add_member).delete(group_changes::remove_member),
+        )
+        .route(
+            "/api/v1/spaces/{space}/groups/{group}/grants/{bucket}",
+            put(group_changes::set_grant).delete(group_changes::remove_grant),
         )
         .fallback(not_found)
         .layer(from_fn_with_state(state.clone(), guard::require_session));

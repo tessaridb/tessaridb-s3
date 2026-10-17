@@ -13,7 +13,7 @@ use tessari_s3_storage::media::{MediaService, Task, TaskQueue};
 use tessari_s3_storage::objects::ObjectService;
 
 use crate::daemon::{Daemon, DaemonFuture, Report};
-use crate::media_work::{encoding, landed, original, target, work};
+use crate::media_work::{encoding, landed, original, sealed, target, work};
 
 /// Renders image tasks.
 pub struct ImageWorker {
@@ -63,6 +63,7 @@ impl ImageWorker {
                 &target(rendition)?,
                 &made.bytes,
                 format.content_type(),
+                sealed(&object)?.as_ref(),
             )
             .await
             .map_err(|error| error.to_string())?;

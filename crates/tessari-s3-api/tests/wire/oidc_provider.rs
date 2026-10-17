@@ -267,6 +267,25 @@ impl Provider {
         token
     }
 
+    /// An ID token made as `shape` says, as a client holds one it obtained itself — presented for temporary
+    /// credentials rather than redeemed by the console.
+    #[allow(
+        dead_code,
+        reason = "the live tests present one; the wire tests only redeem codes"
+    )]
+    pub(crate) fn identity_token(&self, shape: Shape) -> String {
+        let grant = Grant {
+            challenge: String::new(),
+            nonce: "a-client-nonce".to_owned(),
+            shape,
+        };
+        id_token(
+            &self.shared.issuer,
+            &grant,
+            &AccessToken::new("a-client-access-token".to_owned()),
+        )
+    }
+
     /// How many times the key set was fetched.
     pub(crate) fn key_fetches(&self) -> usize {
         self.shared.key_fetches.load(Ordering::Acquire)

@@ -9,9 +9,7 @@ use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::format::{
-    HASH_LEN, HEADER_LEN, Piece, block_hash, block_span, decode_header, encode_header, file_len,
-};
+use super::format::{HEADER_LEN, Piece, decode_header, encode_header, file_len};
 use super::writer::DataWriter;
 use crate::{Error, Result};
 
@@ -96,6 +94,11 @@ impl DataFiles {
         Self { root, block_size }
     }
 
+    /// Bytes per stored block of the files this writes.
+    pub(crate) const fn block_size(&self) -> u32 {
+        self.block_size
+    }
+
     /// The directory every data file and shard lives under.
     pub(super) fn data_root(&self) -> PathBuf {
         self.root.join(DATA_SUBDIR)
@@ -144,18 +147,26 @@ impl DataFiles {
 
     /// Starts writing data `id`: its directory exists and its temporary file holds the header.
     pub(crate) async fn create(&self, id: [u8; 16]) -> Result<DataWriter> {
-        self.create_piece(id, Piece::Whole, self.block_size).await
+        self.create_piece(id, Piece::Whole, self.block_size, false)
+            .await
     }
 
-    /// Starts writing `piece` of data `id` in blocks of `block_size` bytes.
+    /// As [`Self::create`], for a file whose blocks are sealed before they are appended.
+    pub(crate) async fn create_sealed(&self, id: [u8; 16]) -> Result<DataWriter> {
+        self.create_piece(id, Piece::Whole, self.block_size, true)
+            .await
+    }
+
+    /// Starts writing `piece` of data `id` in blocks of `block_size` bytes, its header saying `sealed`.
     pub(super) async fn create_piece(
         &self,
         id: [u8; 16],
         piece: Piece,
         block_size: u32,
+        sealed: bool,
     ) -> Result<DataWriter> {
         let (path, temp) = self.piece_paths(id, piece);
-        let header = encode_header(block_size, id, piece);
+        let header = encode_header(block_size, id, piece, sealed);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
         let open_temp = temp.clone();
         let (file, created_dirs) = blocking("create", move || {
@@ -185,15 +196,21 @@ impl DataFiles {
     /// Opens data `id`, which must hold an object of `size` bytes: the header must be ours and name this id, and
     /// the file's length must be exactly what that size lays out.
     pub(crate) async fn open(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
-        self.open_piece(id, Piece::Whole, size).await
+        self.open_piece(id, Piece::Whole, size, false).await
     }
 
-    /// Opens `piece` of data `id`, which must hold `size` bytes.
+    /// As [`Self::open`], for a file of sealed blocks holding `size` stored bytes.
+    pub(crate) async fn open_sealed(&self, id: [u8; 16], size: u64) -> Result<DataReader> {
+        self.open_piece(id, Piece::Whole, size, true).await
+    }
+
+    /// Opens `piece` of data `id`, which must hold `size` bytes, sealed when `sealed`.
     pub(super) async fn open_piece(
         &self,
         id: [u8; 16],
         piece: Piece,
         size: u64,
+        sealed: bool,
     ) -> Result<DataReader> {
         let (path, _) = self.piece_paths(id, piece);
         let name = hex(id);
@@ -207,7 +224,8 @@ impl DataFiles {
             let mut header = [0; HEADER_LEN];
             file.read_exact_at(&mut header, 0)
                 .map_err(|_| corrupt("header"))?;
-            let block_size = decode_header(&header, id, piece).map_err(|_| corrupt("header"))?;
+            let block_size =
+                decode_header(&header, id, piece, sealed).map_err(|_| corrupt("header"))?;
             let length = file.metadata().map_err(io("stat"))?.len();
             if file_len(size, block_size) != Some(length) {
                 return Err(corrupt("length"));
@@ -246,49 +264,8 @@ impl DataFiles {
     }
 }
 
-impl DataReader {
-    /// The object's size in bytes.
-    #[must_use]
-    pub const fn size(&self) -> u64 {
-        self.size
-    }
-
-    /// Bytes per block.
-    #[must_use]
-    pub const fn block_size(&self) -> u32 {
-        self.block_size
-    }
-
-    /// Block `index`, verified against its hash before a byte of it is returned.
-    ///
-    /// # Errors
-    /// [`Error::Corrupt`] when the block fails its hash, [`Error::DataIo`] when the drive fails.
-    pub async fn read_block(&self, index: u64) -> Result<Vec<u8>> {
-        let corrupt = |reason| Error::Corrupt {
-            id: self.hex.clone(),
-            reason,
-        };
-        let (offset, length) =
-            block_span(index, self.size, self.block_size).ok_or_else(|| corrupt("block index"))?;
-        let length = usize::try_from(length).map_err(|_| corrupt("block length"))?;
-        let file = Arc::clone(&self.file);
-        let (block, verified) = blocking("read", move || {
-            let mut framed = vec![0; length.saturating_add(HASH_LEN)];
-            file.read_exact_at(&mut framed, offset)
-                .map_err(io("read"))?;
-            let stored = framed.split_off(length);
-            let verified = block_hash(index, &framed)[..] == stored[..];
-            Ok((framed, verified))
-        })
-        .await?;
-        if verified {
-            Ok(block)
-        } else {
-            tracing::error!(data = %self.hex, index, "a data block failed its hash");
-            Err(corrupt("block hash"))
-        }
-    }
-}
+#[path = "files_read.rs"]
+mod read;
 
 #[cfg(test)]
 #[path = "files_tests.rs"]

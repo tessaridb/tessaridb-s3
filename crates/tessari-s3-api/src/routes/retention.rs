@@ -11,7 +11,7 @@ use tessari_s3_types::{ErrorCode, ObjectKey, Timestamp};
 
 use super::buckets::{existing, no_such_bucket};
 use super::object_lock::checked_document;
-use crate::pipeline::authorize::may_configure;
+use crate::pipeline::authorize::may_bypass;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, xml_response};
 use crate::xml::{S3_NAMESPACE, element_text};
@@ -161,7 +161,8 @@ pub(crate) async fn put_retention(
     lock_bucket(call).await?;
     let bucket = call.bucket()?;
     // Bypassing governance retention is what administering the bucket allows, and only when asked for.
-    let bypass = bypass_asked(call) && may_configure(call.state, call.principal, bucket).await?;
+    let bypass = bypass_asked(call)
+        && may_bypass(call.state, call.principal, bucket, key, call.context).await?;
     if bypass_asked(call) && !bypass {
         return Err(Error::new(
             ErrorCode::AccessDenied,

@@ -48,6 +48,13 @@ pub(crate) trait BucketRepository: Send + Sync {
         state: &'static str,
     ) -> impl Future<Output = Result<()>> + Send;
 
+    /// Sets `name`'s CORS rules, or removes them when `rules` is `None`.
+    fn set_cors(
+        &self,
+        name: &BucketName,
+        rules: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// Sets `name`'s lifecycle rules, or removes them when `rules` is `None`.
     fn set_lifecycle(
         &self,
@@ -61,6 +68,27 @@ pub(crate) trait BucketRepository: Send + Sync {
         name: &BucketName,
         configuration: Value,
     ) -> impl Future<Output = Result<bool>> + Send;
+
+    /// Sets `name`'s default encryption, or removes it when `encryption` is `None`.
+    fn set_encryption(
+        &self,
+        name: &BucketName,
+        encryption: Option<Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Sets `name`'s policy text, or removes it when `policy` is `None`.
+    fn set_policy(
+        &self,
+        name: &BucketName,
+        policy: Option<String>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// Sets `name`'s Block Public Access text (empty: removed).
+    fn set_public_access(
+        &self,
+        name: &BucketName,
+        text: String,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Replaces `name`'s tags, or removes them when `tags` is `None`.
     fn set_tags(

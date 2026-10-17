@@ -1,6 +1,6 @@
 use tessari_s3_types::{IamKey, SecretKey};
 
-use super::{Binding, ScopeBinding, Sealed, Sealer};
+use super::{Binding, ScopeBinding, Sealed, Sealer, SessionBinding};
 use crate::Error;
 
 const SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -15,6 +15,7 @@ const fn binding() -> Binding<'static> {
         user: "ann",
         space: "alpha",
         scope: None,
+        session: None,
     }
 }
 
@@ -185,4 +186,64 @@ fn a_one_key_secret_opens_only_under_its_own_scope() {
     // Nor does a full key open as a scoped one.
     let full = sealer.seal(&secret(), binding()).expect("sealed");
     assert!(refused(&sealer, &full, scoped), "full key read as scoped");
+}
+
+const SESSION: SessionBinding<'static> = SessionBinding {
+    expires: 1_800_000_000,
+    token_digest: &[9; 32],
+    issuer: "https://id.example.com",
+    subject: "248289761001",
+    policy: Some(r#"{"Version":"2012-10-17","Statement":[]}"#),
+};
+
+#[test]
+fn a_session_secret_opens_only_under_its_own_expiry_token_identity_and_policy() {
+    let sealer = sealer("a1");
+    let session = Binding {
+        session: Some(SESSION),
+        ..binding()
+    };
+    let sealed = sealer.seal(&secret(), session).expect("sealed");
+    assert_eq!(
+        sealer.open(&sealed, session).expect("opens").expose(),
+        SECRET
+    );
+    assert!(refused(&sealer, &sealed, binding()), "session stripped");
+    for other in [
+        SessionBinding {
+            expires: 1_800_000_001,
+            ..SESSION
+        },
+        SessionBinding {
+            token_digest: &[8; 32],
+            ..SESSION
+        },
+        SessionBinding {
+            issuer: "https://other.example.com",
+            ..SESSION
+        },
+        SessionBinding {
+            subject: "248289761002",
+            ..SESSION
+        },
+        SessionBinding {
+            policy: None,
+            ..SESSION
+        },
+        SessionBinding {
+            policy: Some(r#"{"Version":"2012-10-17","Statement":[{}]}"#),
+            ..SESSION
+        },
+    ] {
+        let changed = Binding {
+            session: Some(other),
+            ..binding()
+        };
+        assert!(refused(&sealer, &sealed, changed), "{other:?}");
+    }
+    let full = sealer.seal(&secret(), binding()).expect("sealed");
+    assert!(
+        refused(&sealer, &full, session),
+        "full key read as a session"
+    );
 }

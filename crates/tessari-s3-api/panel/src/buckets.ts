@@ -13,6 +13,7 @@ import { ignored, readBuckets, readUsage, type Bucket, type BucketUsage, type Us
 import { format } from "./route.ts";
 import { empty, failed, head, loading, refusal, type Screen } from "./screen.ts";
 import { acknowledgementForm } from "./bucket-acknowledgement.ts";
+import { encryptionChip, encryptionForm } from "./bucket-encryption.ts";
 import { limits, quotaForm } from "./bucket-quota.ts";
 import { uploadKeyForm } from "./bucket-upload-key.ts";
 import { mediaForm } from "./bucket-media.ts";
@@ -83,43 +84,46 @@ const numeric = (text: string): HTMLElement => el("span", { class: "numeric" }, 
 
 function bucketRow(screen: Screen, bucket: Bucket, usage: Answer<Usage>): HTMLTableRowElement {
   const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket.name}`, "danger");
-  // Offered to keys that may operate; the server refuses everyone else regardless.
-  const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket.name}`) : null;
-  const acknowledge = screen.may?.operate === true ? iconAction("shield", "Acknowledgement…", `Write acknowledgement of ${bucket.name}`) : null;
   // Offered to users; the server issues one only to a user who may write this bucket.
   const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket.name}`) : null;
   // Offered on every row: a reader sees the rules, and the server refuses a save from anyone who may not configure.
   const media = iconAction("image", "Media…", `Media rules of ${bucket.name}`);
+  // One action for the bucket's settings, so a row's actions fit its table. Encryption is offered on every row (the
+  // server refuses a save from anyone who may not configure the bucket); quota and acknowledgement to keys that may
+  // operate, the server refusing everyone else regardless.
+  const settings = iconAction("sliders", "Settings…", `Settings of ${bucket.name}`);
   const held = figures(usage, bucket);
   const line = row(
-    el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket.name)),
+    el(
+      "span",
+      {},
+      el("a", { class: "name", href: format({ kind: "objects", bucket: bucket.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket.name)),
+      encryptionChip(bucket),
+    ),
     numeric(held === null ? "—" : amount(held.objects)),
     numeric(held === null ? "—" : size(held.bytes)),
     numeric(held === null ? "—" : size(held.raw_bytes)),
     numeric(limits(bucket)),
     moment(bucket.created),
     bucket.acknowledgement === "region" ? el("span", {}, mono(bucket.region), " · region majority") : mono(bucket.region),
-    el("div", { class: "actions" }, upload, media, quota, acknowledge, remove),
+    el("div", { class: "actions" }, upload, media, settings, remove),
   );
-  acknowledge?.addEventListener("click", () => {
+  settings.addEventListener("click", () => {
     const cell = el("td", { colspan: "8" });
     const region = el("tr", { class: "asking" }, cell);
+    const close = (): void => {
+      region.remove();
+      settings.focus();
+    };
+    const operate = screen.may?.operate === true;
     cell.append(
-      acknowledgementForm(screen, bucket, () => {
-        region.remove();
-        acknowledge.focus();
-      }),
-    );
-    line.after(region);
-  });
-  quota?.addEventListener("click", () => {
-    const cell = el("td", { colspan: "8" });
-    const region = el("tr", { class: "asking" }, cell);
-    cell.append(
-      quotaForm(screen, bucket, () => {
-        region.remove();
-        quota.focus();
-      }),
+      el(
+        "div",
+        { class: "settings" },
+        encryptionForm(screen, bucket, close),
+        operate ? quotaForm(screen, bucket, close) : null,
+        operate ? acknowledgementForm(screen, bucket, close) : null,
+      ),
     );
     line.after(region);
   });

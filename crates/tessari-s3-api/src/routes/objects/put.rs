@@ -7,11 +7,14 @@ use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use tessari_s3_constants::SINGLE_PUT_MAX;
 use tessari_s3_core::auth::PayloadHash;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Digests};
+use tessari_s3_storage::encryption::{Sealing, WrappedKey};
 use tessari_s3_storage::objects::{Content, NewObject, WriteCondition, Written};
 use tessari_s3_types::{ErrorCode, ObjectKey};
 
-use super::data;
+use super::customer::{admit, answer_customer};
+use super::data::{self, Seal};
 use super::headers::{Integrity, PutHeaders, read_put_headers};
+use super::sse::{answer_sse, etag_for, opaque_etag};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{empty_response, with_version};
 use crate::routes::quota;
@@ -103,6 +106,10 @@ pub(crate) fn check(
 /// `PUT /{bucket}/{key}`.
 pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<Response<Body>> {
     let headers = read_put_headers(call.headers)?;
+    let customer_seal = match &headers.customer {
+        Some(customer) => Some(admit(call, customer).await?),
+        None => None,
+    };
     // A replica is the source's version as it was: it carries no condition of its own.
     if super::replica::replica_version(call)?.is_some() && headers.condition != WriteCondition::None
     {
@@ -121,7 +128,16 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
     }
     quota::admit(call, call.bucket()?, Some(key), length).await?;
     let objects = call.state.storage().objects();
-    let (uploaded, trailer) = data::receive(call, body, length).await?;
+    // A customer's key replaces the bucket's default: the object is sealed under it alone.
+    let encryption = match &headers.customer {
+        Some(_) => None,
+        None => super::sse::requested_or_default(call, headers.encryption.clone()).await?,
+    };
+    let seal = match (&headers.customer, &customer_seal) {
+        (Some(customer), Some(seal)) => Seal::Customer(&customer.key, seal),
+        _ => Seal::from(encryption.as_ref()),
+    };
+    let (uploaded, trailer) = data::receive(call, body, length, seal).await?;
     let algorithm = match check(&headers.integrity, &uploaded.digests, trailer) {
         Ok(algorithm) => algorithm,
         Err(error) => {
@@ -137,7 +153,7 @@ pub(crate) async fn put(call: &Call<'_>, key: &ObjectKey, body: Body) -> Result<
         &uploaded.digests,
         uploaded.size,
         algorithm,
-        content,
+        (content, uploaded.encryption),
     )
     .await
 }
@@ -151,9 +167,17 @@ async fn commit(
     digests: &Digests,
     size: u64,
     algorithm: ChecksumAlgorithm,
-    content: Content,
+    (content, encryption): (Content, Option<WrappedKey>),
 ) -> Result<Response<Body>> {
-    let etag = format!("\"{}\"", digests.md5_hex);
+    let sealing = encryption.as_ref().and_then(Sealing::of);
+    let etag = if encryption
+        .as_ref()
+        .is_some_and(|wrapped| wrapped.customer.is_some())
+    {
+        opaque_etag()?
+    } else {
+        etag_for(&digests.md5_hex, sealing.as_ref())?
+    };
     let declared_checksum = headers.integrity.checksum.is_some();
     let object = NewObject {
         copied: false,
@@ -169,6 +193,7 @@ async fn commit(
         .into(),
         content,
         lock: headers.lock.lock(),
+        encryption,
     };
     let bucket = call.bucket()?;
     let objects = call.state.storage().objects();
@@ -197,6 +222,12 @@ async fn commit(
             let response_headers = response.headers_mut();
             if let Ok(value) = HeaderValue::from_str(&etag) {
                 response_headers.insert("etag", value);
+            }
+            if let Some(sealing) = &sealing {
+                answer_sse(response_headers, sealing);
+            }
+            if let Some(customer) = &headers.customer {
+                answer_customer(response_headers, customer);
             }
             if let Some(value) = declared_checksum
                 .then(|| HeaderValue::from_str(digests.value(algorithm)).ok())

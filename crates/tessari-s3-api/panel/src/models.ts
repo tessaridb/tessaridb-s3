@@ -45,7 +45,13 @@ export type Bucket = {
   readonly maxObjects: number | null;
   /** Who acknowledges its writes: the majority keeping its metadata, or its region's majority alone. */
   readonly acknowledgement: "majority" | "region";
+  /** How a write that asks for no encryption is sealed — the server's key, a named key, or not at all (null) — and whether writes may bring their own key. */
+  readonly encryption: BucketEncryption;
 };
+export type BucketEncryption =
+  | { readonly algorithm: "AES256"; readonly customerKeys: boolean }
+  | { readonly algorithm: "aws:kms"; readonly key: string; readonly customerKeys: boolean }
+  | null;
 export type ObjectRow = {
   readonly key: string;
   readonly size: number;
@@ -102,6 +108,8 @@ export type Capabilities = {
   readonly administer: boolean;
   readonly view_cluster: boolean;
   readonly issue_upload_keys: boolean;
+  /** The signed-in user's own space; null for root. */
+  readonly space: string | null;
 };
 /** A node of a layout's erasure set and the zone it was in when the layout was made (null: a domain of its own). */
 export type LayoutMember = { readonly node: string; readonly zone: string | null };
@@ -217,14 +225,33 @@ export function readUsage(v: unknown): Usage | null {
 
 const acknowledgement = (v: unknown): v is Bucket["acknowledgement"] => v === "majority" || v === "region";
 
-const bucket = (v: unknown): Bucket | null =>
-  record(v) &&
-  text(v["name"]) &&
-  text(v["created"]) &&
-  text(v["region"]) &&
-  countOrNull(v["max_bytes"]) &&
-  countOrNull(v["max_objects"]) &&
-  acknowledgement(v["acknowledgement"])
+/** The default encryption a bucket row sends, or undefined for one it cannot send. */
+function bucketEncryption(v: unknown): BucketEncryption | undefined {
+  if (v === null) {
+    return null;
+  }
+  if (!record(v) || typeof v["customer_keys"] !== "boolean") {
+    return undefined;
+  }
+  const customerKeys = v["customer_keys"];
+  if (v["algorithm"] === "AES256" && v["key"] === null) {
+    return { algorithm: "AES256", customerKeys };
+  }
+  return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"], customerKeys } : undefined;
+}
+
+function bucket(v: unknown): Bucket | null {
+  if (!record(v)) {
+    return null;
+  }
+  const encryption = bucketEncryption(v["encryption"]);
+  return text(v["name"]) &&
+    text(v["created"]) &&
+    text(v["region"]) &&
+    countOrNull(v["max_bytes"]) &&
+    countOrNull(v["max_objects"]) &&
+    acknowledgement(v["acknowledgement"]) &&
+    encryption !== undefined
     ? {
         name: v["name"],
         created: v["created"],
@@ -232,8 +259,10 @@ const bucket = (v: unknown): Bucket | null =>
         maxBytes: v["max_bytes"],
         maxObjects: v["max_objects"],
         acknowledgement: v["acknowledgement"],
+        encryption,
       }
     : null;
+}
 
 export function readBuckets(v: unknown): readonly Bucket[] | null {
   return record(v) ? list(v["buckets"], bucket) : null;
@@ -350,13 +379,14 @@ export function readUploadKey(v: unknown): UploadKey | null {
 }
 
 export function readCapabilities(v: unknown): Capabilities | null {
-  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"])
+  return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) && textOrNull(v["space"])
     ? {
         access_key_id: v["access_key_id"],
         operate: v["operate"],
         administer: v["administer"],
         view_cluster: v["view_cluster"],
         issue_upload_keys: v["issue_upload_keys"],
+        space: v["space"],
       }
     : null;
 }

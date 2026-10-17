@@ -120,6 +120,42 @@ impl BucketRepository for TessariBuckets {
         Ok(single(answers)?.is_some())
     }
 
+    async fn set_encryption(&self, name: &BucketName, encryption: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("encryption".to_owned(), encryption.unwrap_or(Value::None)));
+        self.pool
+            .run(
+                "UPDATE buckets:$name SET encryption = $encryption;",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn set_policy(&self, name: &BucketName, policy: Option<String>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push((
+            "policy".to_owned(),
+            policy.map_or(Value::None, Value::String),
+        ));
+        self.pool
+            .run("UPDATE buckets:$name SET policy = $policy;", parameters)
+            .await?;
+        Ok(())
+    }
+
+    async fn set_public_access(&self, name: &BucketName, text: String) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("public_access".to_owned(), Value::String(text)));
+        self.pool
+            .run(
+                "UPDATE buckets:$name SET public_access = $public_access;",
+                parameters,
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn set_tags(&self, name: &BucketName, tags: Option<Value>) -> Result<()> {
         let mut parameters = name_param(name);
         parameters.push(("tags".to_owned(), tags.unwrap_or(Value::None)));
@@ -139,6 +175,15 @@ impl BucketRepository for TessariBuckets {
             None => "UPDATE buckets:$name SET replication = NONE;",
         };
         self.pool.run(script, parameters).await?;
+        Ok(())
+    }
+
+    async fn set_cors(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
+        let mut parameters = name_param(name);
+        parameters.push(("rules".to_owned(), rules.unwrap_or(Value::None)));
+        self.pool
+            .run("UPDATE buckets:$name SET cors = $rules;", parameters)
+            .await?;
         Ok(())
     }
 

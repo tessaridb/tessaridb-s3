@@ -6,6 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Number, Value};
 
 use super::model::{Content, Multipart, NewObject, ObjectSummary, StoredObject};
 use super::repository::ListRow;
+use crate::encryption::{CUSTOMER_KEK_ID, CustomerSeal, WrappedKey};
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -68,12 +69,99 @@ pub(crate) fn record(
     .chain(content)
     // Only a tagged object carries the field, so an untagged record is what it always was.
     .chain((!object.tags.is_empty()).then(|| ("tags", strings(&object.tags))))
+    // Likewise only a sealed object carries its wrapped data key.
+    .chain(object.encryption.iter().flat_map(sealed_fields))
     .map(|(k, v)| (k.to_owned(), v))
     .collect();
     Ok(Value::Object(fields))
 }
 
-type Fields = BTreeMap<String, Value>;
+pub(crate) type Fields = BTreeMap<String, Value>;
+
+/// The fields holding a sealed object's (or part's) wrapped data key, and under a customer's key its seal.
+pub(crate) fn sealed_fields(key: &WrappedKey) -> Vec<(&'static str, Value)> {
+    let mut fields = vec![
+        ("sse_alg", Value::String(key.algorithm.clone())),
+        ("sse_kek", Value::String(key.kek_id.clone())),
+        ("sse_nonce", Value::Bytes(key.nonce.clone())),
+        ("sse_key", Value::Bytes(key.ciphertext.clone())),
+    ];
+    if let Some(seal) = &key.customer {
+        fields.extend(seal_fields(seal));
+    }
+    fields
+}
+
+/// The fields holding a customer's key's seal: its salt and its verifier.
+pub(crate) fn seal_fields(seal: &CustomerSeal) -> [(&'static str, Value); 2] {
+    [
+        ("sse_c_salt", Value::Bytes(seal.salt.to_vec())),
+        ("sse_c_verifier", Value::Bytes(seal.verifier.to_vec())),
+    ]
+}
+
+/// A record's customer seal: none when it carries neither field, refused when it carries one or a field that is not
+/// 32 bytes.
+pub(crate) fn customer_seal(fields: &Fields) -> Result<Option<CustomerSeal>> {
+    let field = |name| {
+        fields
+            .get(name)
+            .filter(|value| !matches!(value, Value::None))
+    };
+    match (field("sse_c_salt"), field("sse_c_verifier")) {
+        (None, None) => Ok(None),
+        (Some(salt), Some(verifier)) => Ok(Some(CustomerSeal {
+            salt: seal_part(salt).ok_or_else(|| malformed("a customer key's salt"))?,
+            verifier: seal_part(verifier).ok_or_else(|| malformed("a customer key's verifier"))?,
+        })),
+        _ => Err(malformed("a customer key's seal")),
+    }
+}
+
+/// A customer seal's 32-byte field.
+fn seal_part(value: &Value) -> Option<[u8; 32]> {
+    match value {
+        Value::Bytes(bytes) => bytes.as_slice().try_into().ok(),
+        _ => None,
+    }
+}
+
+/// A record's wrapped data key: none when it carries no part of one, refused when it carries only some.
+pub(crate) fn sealed(fields: &Fields) -> Result<Option<WrappedKey>> {
+    let field = |name| {
+        fields
+            .get(name)
+            .filter(|value| !matches!(value, Value::None))
+    };
+    match (
+        field("sse_alg"),
+        field("sse_kek"),
+        field("sse_nonce"),
+        field("sse_key"),
+    ) {
+        (None, None, None, None) => Ok(None),
+        (
+            Some(Value::String(algorithm)),
+            Some(Value::String(kek_id)),
+            Some(Value::Bytes(nonce)),
+            Some(Value::Bytes(ciphertext)),
+        ) => {
+            let customer = customer_seal(fields)?;
+            // A key wrapped under a customer's key carries the seal it opens with, and only such a key does.
+            if customer.is_some() != (kek_id == CUSTOMER_KEK_ID) {
+                return Err(malformed("a customer key's seal"));
+            }
+            Ok(Some(WrappedKey {
+                algorithm: algorithm.clone(),
+                kek_id: kek_id.clone(),
+                nonce: nonce.clone(),
+                ciphertext: ciphertext.clone(),
+                customer,
+            }))
+        }
+        _ => Err(malformed("a wrapped data key")),
+    }
+}
 
 fn incarnation(fields: &Fields) -> Result<[u8; 16]> {
     match fields.get("incarnation") {
@@ -156,6 +244,7 @@ pub(crate) fn read(value: &Value) -> Result<([u8; 16], StoredObject)> {
             Some(Value::String(status)) => Some(status.clone()),
             Some(_) => return Err(malformed("replication_status")),
         },
+        encryption: sealed(fields)?,
     };
     Ok((incarnation(fields)?, object))
 }
@@ -184,3 +273,7 @@ pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
         },
     })
 }
+
+#[cfg(test)]
+#[path = "entity_tests.rs"]
+mod tests;

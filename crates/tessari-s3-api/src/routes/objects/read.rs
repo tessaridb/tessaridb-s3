@@ -10,6 +10,8 @@ use tessari_s3_storage::objects::{Content, StoredObject, VersionRead};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
+use super::customer::{admit_read, answer_customer, read_customer};
+use super::sse::{answer_sse, object_sealing};
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
@@ -57,6 +59,8 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         Some(version) => stored_version(call, key, version).await?,
         None => stored(call, key).await?,
     };
+    let customer = read_customer(call.headers)?;
+    admit_read(call, &object, customer.as_ref())?;
     let text = |name: &str| call.headers.get(name).and_then(|v| v.to_str().ok());
     let conditions = ReadConditions {
         if_match: text("if-match"),
@@ -127,16 +131,28 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             _ if object.size == 0 => Body::empty(),
             Content::Data(id) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
-                body::send(call.state.storage().objects(), *id, object.size, start, end).await?
+                body::send(
+                    call.state.storage().objects(),
+                    *id,
+                    object.size,
+                    object.encryption.as_ref(),
+                    customer.as_ref().map(|customer| &customer.key),
+                    start,
+                    end,
+                )
+                .await?
             }
             Content::Parts(multipart) => {
                 let (start, end) = slice.unwrap_or((0, object.size.saturating_sub(1)));
-                let parts: Vec<([u8; 16], u64)> = multipart
-                    .parts
-                    .iter()
-                    .map(|part| (part.data, part.size))
-                    .collect();
-                body::send_parts(call.state.storage().objects(), &parts, start, end).await?
+                let parts = &multipart.parts;
+                body::send_parts(
+                    call.state.storage().objects(),
+                    parts,
+                    customer.as_ref().map(|customer| &customer.key),
+                    start,
+                    end,
+                )
+                .await?
             }
         }
     };
@@ -144,6 +160,9 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
     *response.status_mut() = status;
     let headers = response.headers_mut();
     describe(headers, &object, call, slice.is_none());
+    if let Some(customer) = &customer {
+        answer_customer(headers, customer);
+    }
     set(
         headers,
         header::CONTENT_LENGTH.as_str(),
@@ -238,6 +257,9 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
     }
     if let Some(status) = &object.replication {
         set(headers, "x-amz-replication-status", status);
+    }
+    if let Some(sealing) = object_sealing(object) {
+        answer_sse(headers, &sealing);
     }
     if !object.tags.is_empty() {
         set(

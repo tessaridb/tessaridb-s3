@@ -15,7 +15,7 @@ use tessari_s3_types::{ErrorCode, ObjectKey};
 
 use super::headers::read_integrity;
 use super::put::check;
-use crate::pipeline::authorize::may_configure;
+use crate::pipeline::authorize::may_delete;
 use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
@@ -172,16 +172,20 @@ pub(crate) async fn delete_many(call: &Call<'_>, body: Body) -> Result<Response<
     let bucket = call.bucket()?;
     // Sent to the bucket's region once the body is known to be well formed, so a malformed one never reads the store.
     crate::routes::buckets::resident(call).await?;
-    // An entry naming a version deletes it for good, which needs who administers the bucket; without that, those
-    // entries are refused one by one and the rest go ahead (S3 reports each key on its own).
-    let versions_allowed = !request.entries.iter().any(|(_, version)| version.is_some())
-        || may_configure(call.state, call.principal, bucket).await?;
+    // Each entry is asked of the bucket's policy for its own key; one naming a version deletes it for good, which
+    // also needs who administers the bucket. A refused entry is reported on its own and the rest go ahead.
+    let asked: Vec<(&ObjectKey, bool)> = request
+        .entries
+        .iter()
+        .map(|(key, version)| (key, version.is_some()))
+        .collect();
+    let permitted = may_delete(call.state, call.principal, bucket, &asked, call.context).await?;
     let (allowed, refused): (Vec<_>, Vec<_>) = request
         .entries
         .iter()
         .cloned()
         .enumerate()
-        .partition(|(_, (_, version))| versions_allowed || version.is_none());
+        .partition(|(position, _)| permitted.get(*position).copied().unwrap_or(false));
     let (positions, entries): (Vec<usize>, Vec<_>) = allowed.into_iter().unzip();
     let outcomes = call
         .state

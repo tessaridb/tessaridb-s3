@@ -1,0 +1,506 @@
+//! Encryption keys through the console, against a real node: root sees whether they are held, unseals them with the
+//! keys passphrase — a weak or wrong one refused by name — and seals them again; a user is refused; every act is
+//! recorded with how it ended and never with the passphrase.
+
+use serde_json::Value;
+use tessari_s3_core::authz::Role;
+
+use crate::access::user_with_key;
+use crate::console::{send, sign_in};
+use crate::console_users::sign_in_as;
+use crate::{IGNORED, fresh_console};
+
+const STATE: &str = "/api/v1/encryption";
+const UNSEAL: &str = "/api/v1/encryption/unseal";
+const SEAL: &str = "/api/v1/encryption/seal";
+const RIGHT: &str = "the console keys passphrase";
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn root_unseals_and_seals_the_keys_and_every_act_is_recorded_without_the_passphrase() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let read = |cookie: String| {
+        let console = console.clone();
+        async move {
+            send(&console, "GET", STATE, Some(&cookie), None)
+                .await
+                .json()
+        }
+    };
+    assert_eq!(read(root.clone()).await["state"], "uninitialised");
+
+    for (body, code) in [
+        (r#"{"passphrase":"short"}"#.to_owned(), "weak_passphrase"),
+        (format!(r#"{{"passphrase":"{RIGHT}'"}}"#), "weak_passphrase"),
+    ] {
+        let refused = send(&console, "POST", UNSEAL, Some(&root), Some(&body)).await;
+        assert_eq!(
+            (refused.status, refused.code().as_deref()),
+            (400, Some(code)),
+            "{body}"
+        );
+    }
+    let body = format!(r#"{{"passphrase":"{RIGHT}"}}"#);
+    let opened = send(&console, "POST", UNSEAL, Some(&root), Some(&body)).await;
+    assert_eq!(opened.status, 200);
+    assert_eq!(
+        (
+            opened.json()["state"].clone(),
+            opened.json()["active"].clone()
+        ),
+        (Value::from("unsealed"), Value::from("server_1"))
+    );
+    assert!(
+        state.storage().keys().ring().is_ok(),
+        "the node holds the keys"
+    );
+
+    let sealed = send(
+        &console,
+        "POST",
+        SEAL,
+        Some(&root),
+        Some(r#"{"reason":"drill"}"#),
+    )
+    .await;
+    assert_eq!(sealed.status, 200);
+    assert_eq!(read(root.clone()).await["state"], "sealed");
+    assert!(state.storage().keys().ring().is_err());
+
+    let wrong = r#"{"passphrase":"not the keys passphrase at all"}"#;
+    let refused = send(&console, "POST", UNSEAL, Some(&root), Some(wrong)).await;
+    assert_eq!(
+        (refused.status, refused.code().as_deref()),
+        (400, Some("wrong_passphrase"))
+    );
+    assert_eq!(read(root.clone()).await["state"], "sealed");
+
+    let key = user_with_key(state.storage(), "enc", "enc-space", Role::SpaceAdmin, true).await;
+    let user = sign_in_as(&console, &key).await.expect("signed in");
+    for (path, body) in [
+        (STATE, None),
+        (UNSEAL, Some(body.as_str())),
+        (SEAL, Some("{}")),
+    ] {
+        let method = if body.is_some() { "POST" } else { "GET" };
+        let denied = send(&console, method, path, Some(&user), body).await;
+        assert_eq!(denied.status, 403, "{path}");
+    }
+    assert!(
+        state.storage().keys().ring().is_err(),
+        "a user unsealed nothing"
+    );
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let text = String::from_utf8_lossy(&actions.bytes).into_owned();
+    assert!(
+        !text.contains(RIGHT) && !text.contains("not the keys"),
+        "{text}"
+    );
+    let recorded: Vec<(String, String)> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| {
+            action["operation"]
+                .as_str()
+                .is_some_and(|operation| operation.ends_with("_keys"))
+        })
+        .map(|action| {
+            (
+                action["operation"].as_str().unwrap_or_default().to_owned(),
+                action["outcome"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    for expected in [
+        ("unseal_keys", "unsealed"),
+        ("seal_keys", "sealed"),
+        ("unseal_keys", "wrong_passphrase"),
+    ] {
+        assert!(
+            recorded.contains(&(expected.0.to_owned(), expected.1.to_owned())),
+            "{expected:?} in {recorded:?}"
+        );
+    }
+}
+
+const DEFAULT: &str = "/api/v1/buckets/sealed-by-default/encryption";
+
+/// The default encryption the bucket list shows for `bucket`.
+fn default_of(listing: &Value, bucket: &str) -> Value {
+    listing["buckets"]
+        .as_array()
+        .expect("buckets")
+        .iter()
+        .find(|row| row["name"] == bucket)
+        .map(|row| row["encryption"].clone())
+        .expect("listed")
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_bucket_default_is_set_only_by_who_configures_it_and_only_under_a_key_held() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    assert_eq!(
+        crate::call(&state, "PUT", "/sealed-by-default", vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let root = sign_in(&console).await;
+    let server = r#"{"algorithm":"AES256","reason":"tenant asked"}"#;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    let as_ann = sign_in_as(&console, &ann).await.expect("signed in");
+    let probe = send(&console, "PUT", DEFAULT, Some(&as_ann), Some(server)).await;
+    assert_eq!(probe.status, 403, "a member who may not configure it");
+
+    let sealed = send(&console, "PUT", DEFAULT, Some(&root), Some(server)).await;
+    assert_eq!(
+        (sealed.status, sealed.code().as_deref()),
+        (409, Some("keys_sealed"))
+    );
+    crate::sse::unseal(&state).await;
+    for (body, status, code) in [
+        (
+            r#"{"algorithm":"aws:kms","key":"nobody","reason":"x"}"#,
+            400,
+            "unknown_key",
+        ),
+        (
+            r#"{"algorithm":"aws:kms","key":"Not A Name","reason":"x"}"#,
+            400,
+            "invalid_key_name",
+        ),
+        (
+            r#"{"algorithm":"DES","reason":"x"}"#,
+            400,
+            "invalid_encryption",
+        ),
+        (r#"{"algorithm":"AES256"}"#, 400, "reason_required"),
+    ] {
+        let refused = send(&console, "PUT", DEFAULT, Some(&root), Some(body)).await;
+        assert_eq!(
+            (refused.status, refused.code().as_deref()),
+            (status, Some(code)),
+            "{body}"
+        );
+    }
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "sealed-by-default"),
+        Value::Null,
+        "nothing was set by a refusal"
+    );
+
+    let set = send(&console, "PUT", DEFAULT, Some(&root), Some(server)).await;
+    assert_eq!(set.status, 204);
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "sealed-by-default")["algorithm"],
+        "AES256"
+    );
+    let put = crate::call(&state, "PUT", "/sealed-by-default/k", vec![], b"bytes").await;
+    assert_eq!(
+        crate::sse::sse_header(&put),
+        Some(&b"AES256"[..]),
+        "the default seals a write set from the console"
+    );
+
+    let cleared = send(
+        &console,
+        "PUT",
+        DEFAULT,
+        Some(&root),
+        Some(r#"{"algorithm":"none","reason":"tenant left"}"#),
+    )
+    .await;
+    assert_eq!(cleared.status, 204);
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(default_of(&listed.json(), "sealed-by-default"), Value::Null);
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let recorded: Vec<(String, String)> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| {
+            action["operation"]
+                .as_str()
+                .is_some_and(|operation| operation.starts_with("set_encryption"))
+        })
+        .map(|action| {
+            let text = |field: &str| action[field].as_str().unwrap_or_default().to_owned();
+            (text("operation"), text("outcome"))
+        })
+        .collect();
+    for expected in [
+        ("set_encryption AES256", "sealed"),
+        ("set_encryption aws:kms nobody", "unknown_key"),
+        ("set_encryption AES256", "done"),
+        ("set_encryption none", "done"),
+    ] {
+        assert!(
+            recorded
+                .iter()
+                .any(|(operation, outcome)| (operation.as_str(), outcome.as_str()) == expected),
+            "{expected:?} in {recorded:?}"
+        );
+    }
+}
+
+const OPEN: &str = "/api/v1/buckets/open-to-customers/encryption";
+
+/// The `EncryptionType` S3's GetBucketEncryption answers for `bucket`.
+async fn blocked_types(state: &tessari_s3_api::ApiState, bucket: &str) -> String {
+    let answer = crate::call(state, "GET", bucket, vec![("encryption", None)], b"").await;
+    assert_eq!(answer.status, 200, "{}", answer.body);
+    crate::multipart::text(&answer.body, "EncryptionType").expect("an EncryptionType")
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn customer_keys_are_allowed_only_beside_a_default_and_s3_answers_what_was_set() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let bucket = "/open-to-customers";
+    assert_eq!(
+        crate::call(&state, "PUT", bucket, vec![], b"").await.status,
+        200
+    );
+    crate::sse::unseal(&state).await;
+    let root = sign_in(&console).await;
+
+    let alone = r#"{"algorithm":"none","customer_keys":true,"reason":"x"}"#;
+    let refused = send(&console, "PUT", OPEN, Some(&root), Some(alone)).await;
+    assert_eq!(refused.status, 400, "customer keys with no default");
+    assert_eq!(refused.code().as_deref(), Some("invalid_encryption"));
+
+    let allow = r#"{"algorithm":"AES256","customer_keys":true,"reason":"tenant brings keys"}"#;
+    assert_eq!(
+        send(&console, "PUT", OPEN, Some(&root), Some(allow))
+            .await
+            .status,
+        204
+    );
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "open-to-customers")["customer_keys"],
+        true
+    );
+    assert_eq!(blocked_types(&state, bucket).await, "NONE");
+
+    let block = r#"{"algorithm":"AES256","reason":"tenant stopped"}"#;
+    assert_eq!(
+        send(&console, "PUT", OPEN, Some(&root), Some(block))
+            .await
+            .status,
+        204
+    );
+    let listed = send(&console, "GET", "/api/v1/buckets", Some(&root), None).await;
+    assert_eq!(
+        default_of(&listed.json(), "open-to-customers")["customer_keys"],
+        false
+    );
+    assert_eq!(blocked_types(&state, bucket).await, "SSE-C");
+
+    let over_s3 = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
+        <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault><BlockedEncryptionTypes>\
+        <EncryptionType>NONE</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
+    let put = crate::call(&state, "PUT", bucket, vec![("encryption", None)], over_s3).await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    assert_eq!(blocked_types(&state, bucket).await, "NONE");
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let recorded = String::from_utf8_lossy(&actions.bytes).into_owned();
+    assert!(
+        recorded.contains("set_encryption AES256 customer-keys"),
+        "{recorded}"
+    );
+}
+
+const ROTATE: &str = "/api/v1/encryption/rotate";
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn root_rotates_the_server_key_under_the_passphrase_and_the_act_is_recorded() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let body = format!(r#"{{"passphrase":"{RIGHT}","reason":"yearly"}}"#);
+    let opened = send(&console, "POST", UNSEAL, Some(&root), Some(&body)).await;
+    assert_eq!(opened.status, 200);
+
+    let wrong = r#"{"passphrase":"not the keys passphrase at all","reason":"yearly"}"#;
+    let refused = send(&console, "POST", ROTATE, Some(&root), Some(wrong)).await;
+    assert_eq!(
+        (refused.status, refused.code().as_deref()),
+        (400, Some("wrong_passphrase"))
+    );
+    let key = user_with_key(state.storage(), "rot", "rot-space", Role::SpaceAdmin, true).await;
+    let user = sign_in_as(&console, &key).await.expect("signed in");
+    let denied = send(&console, "POST", ROTATE, Some(&user), Some(&body)).await;
+    assert_eq!(denied.status, 403);
+    let held = send(&console, "GET", STATE, Some(&root), None).await.json();
+    assert_eq!(held["active"], "server_1", "neither refusal rotated");
+
+    let rotated = send(&console, "POST", ROTATE, Some(&root), Some(&body)).await;
+    assert_eq!(rotated.status, 200);
+    assert_eq!(
+        (
+            rotated.json()["active"].clone(),
+            rotated.json()["keys"].clone()
+        ),
+        (Value::from("server_2"), Value::from(2))
+    );
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let text = String::from_utf8_lossy(&actions.bytes).into_owned();
+    assert!(!text.contains(RIGHT), "{text}");
+    let outcomes: Vec<String> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| action["operation"] == "rotate_server_key")
+        .map(|action| action["outcome"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(outcomes, ["rotated", "wrong_passphrase"], "newest first");
+}
+
+const DESTROY: &str = "/api/v1/encryption/destroy";
+
+fn destroying(key: &str, passphrase: &str) -> String {
+    format!(r#"{{"passphrase":"{passphrase}","key":"{key}","reason":"rotation done"}}"#)
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_old_server_key_is_destroyed_only_when_no_record_names_it() {
+    let _why = IGNORED;
+    let (state, console) = fresh_console().await;
+    let root = sign_in(&console).await;
+    let body = format!(r#"{{"passphrase":"{RIGHT}","reason":"start"}}"#);
+    assert_eq!(
+        send(&console, "POST", UNSEAL, Some(&root), Some(&body))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        crate::call(&state, "PUT", "/old", vec![], b"").await.status,
+        200
+    );
+    let bytes = crate::sse::body();
+    let put = crate::call_with(
+        &state,
+        "PUT",
+        "/old/a",
+        vec![],
+        vec![crate::sse::SSE],
+        &bytes,
+    )
+    .await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    assert_eq!(
+        send(&console, "POST", ROTATE, Some(&root), Some(&body))
+            .await
+            .status,
+        200
+    );
+    let behind = |cookie: String| {
+        let console = console.clone();
+        async move {
+            send(&console, "GET", STATE, Some(&cookie), None)
+                .await
+                .json()["behind"]
+                .clone()
+        }
+    };
+    let before = behind(root.clone()).await;
+    assert_eq!(before[0]["id"], "server_1", "{before}");
+    assert!(
+        before[0]["remaining"].as_u64().is_some_and(|left| left > 0),
+        "{before}"
+    );
+
+    let in_use = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", RIGHT)),
+    )
+    .await;
+    assert_eq!(
+        (in_use.status, in_use.code().as_deref()),
+        (409, Some("key_in_use"))
+    );
+    let active = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_2", RIGHT)),
+    )
+    .await;
+    assert_eq!(
+        (active.status, active.code().as_deref()),
+        (409, Some("key_active"))
+    );
+
+    let swept = tessari_s3_daemons::Rewrapper::new(state.storage().objects().clone());
+    tessari_s3_daemons::Daemon::run_once(&swept)
+        .await
+        .expect("a pass");
+    assert_eq!(behind(root.clone()).await[0]["remaining"], 0);
+    let wrong = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", "not the keys passphrase at all")),
+    )
+    .await;
+    assert_eq!(
+        (wrong.status, wrong.code().as_deref()),
+        (400, Some("wrong_passphrase"))
+    );
+    let destroyed = send(
+        &console,
+        "POST",
+        DESTROY,
+        Some(&root),
+        Some(&destroying("server_1", RIGHT)),
+    )
+    .await;
+    assert_eq!(destroyed.status, 200);
+    assert_eq!(
+        (
+            destroyed.json()["active"].clone(),
+            destroyed.json()["keys"].clone()
+        ),
+        (Value::from("server_2"), Value::from(1))
+    );
+    assert_eq!(behind(root.clone()).await, Value::Array(Vec::new()));
+    let read = crate::call(&state, "GET", "/old/a", vec![], b"").await;
+    assert!(
+        read.bytes == bytes,
+        "the object opens under the key it was re-wrapped under"
+    );
+
+    let actions = send(&console, "GET", "/api/v1/actions", Some(&root), None).await;
+    let outcomes: Vec<String> = actions.json()["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .filter(|action| action["operation"] == "destroy_server_key server_1")
+        .map(|action| action["outcome"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        outcomes,
+        ["destroyed", "wrong_passphrase", "in_use"],
+        "newest first"
+    );
+}

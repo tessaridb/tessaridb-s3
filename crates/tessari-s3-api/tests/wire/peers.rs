@@ -14,7 +14,7 @@ use tessari_s3_infrastructure::InternalTls;
 use tessari_s3_infrastructure::peer::PeerError;
 use tessari_s3_infrastructure::tls::server_config;
 use tessari_s3_storage::Error;
-use tessari_s3_storage::peers::{PeerAt, RemoteShards, ShardRef};
+use tessari_s3_storage::peers::{PeerAt, RemoteShards, ShardRef, ShardShape};
 use tessari_s3_types::NodeId;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -24,6 +24,12 @@ use crate::internal::{Admissions, internal_with};
 const SHARD: ShardRef = ShardRef {
     id: [9; 16],
     index: 4,
+};
+/// 160 bytes in blocks of 64, plain.
+const SHAPE: ShardShape = ShardShape {
+    block_len: 64,
+    size: 160,
+    sealed: false,
 };
 const BUDGET: Duration = Duration::from_secs(10);
 
@@ -80,7 +86,7 @@ async fn read(
     blocks: Option<std::ops::Range<u64>>,
 ) -> Vec<u8> {
     let parts: Vec<Bytes> = peers
-        .get(peer, SHARD, 160, blocks, BUDGET)
+        .get(peer, SHARD, 160, false, blocks, BUDGET)
         .await
         .expect("read")
         .try_collect()
@@ -97,14 +103,17 @@ async fn a_node_stores_reads_and_removes_a_shard_on_another() {
     let peer = n1(&address);
     let bytes = body();
     peers
-        .put(&peer, SHARD, 64, 160, chunked(&bytes), BUDGET)
+        .put(&peer, SHARD, SHAPE, chunked(&bytes), BUDGET)
         .await
         .expect("stored");
     assert_eq!(read(&peers, &peer, None).await, bytes);
     assert_eq!(read(&peers, &peer, Some(1..3)).await, bytes[64..].to_vec());
     peers.delete(&peer, SHARD, BUDGET).await.expect("removed");
     assert_eq!(
-        peers.get(&peer, SHARD, 160, None, BUDGET).await.err(),
+        peers
+            .get(&peer, SHARD, 160, false, None, BUDGET)
+            .await
+            .err(),
         Some(Error::PeerRefused { status: 404 })
     );
     server.abort();
@@ -120,14 +129,14 @@ async fn a_caller_whose_certificate_is_not_its_own_or_not_the_clusters_stores_no
     let impostor = caller(&authority.issue("n3"));
     assert_eq!(
         impostor
-            .put(&peer, SHARD, 64, 160, chunked(&body()), BUDGET)
+            .put(&peer, SHARD, SHAPE, chunked(&body()), BUDGET)
             .await,
         Err(Error::PeerRefused { status: 401 })
     );
     // Issued by another authority: the handshake itself fails. The reason names the TLS stage, which varies.
     let stranger = caller(&Authority::new().issue("n2"));
     let refused = stranger
-        .put(&peer, SHARD, 64, 160, chunked(&body()), BUDGET)
+        .put(&peer, SHARD, SHAPE, chunked(&body()), BUDGET)
         .await;
     assert!(
         matches!(refused, Err(Error::Peer(PeerError::Unavailable { .. }))),
@@ -150,7 +159,7 @@ async fn a_caller_whose_certificate_is_not_its_own_or_not_the_clusters_stores_no
     );
     assert_eq!(
         caller(&authority.issue("n2"))
-            .get(&peer, SHARD, 160, None, BUDGET)
+            .get(&peer, SHARD, 160, false, None, BUDGET)
             .await
             .err(),
         Some(Error::PeerRefused { status: 404 }),
@@ -167,7 +176,7 @@ async fn a_server_that_is_not_the_node_dialled_is_not_reached() {
     let (address, server, dir) = serving_as(&authority.issue("n4"), Arc::default()).await;
     let peers = caller(&authority.issue("n2"));
     let refused = peers
-        .put(&n1(&address), SHARD, 64, 160, chunked(&body()), BUDGET)
+        .put(&n1(&address), SHARD, SHAPE, chunked(&body()), BUDGET)
         .await;
     assert!(
         matches!(refused, Err(Error::Peer(PeerError::Unavailable { .. }))),
@@ -178,7 +187,10 @@ async fn a_server_that_is_not_the_node_dialled_is_not_reached() {
         endpoint: address.clone(),
     };
     assert_eq!(
-        peers.get(&as_n4, SHARD, 160, None, BUDGET).await.err(),
+        peers
+            .get(&as_n4, SHARD, 160, false, None, BUDGET)
+            .await
+            .err(),
         Some(Error::PeerRefused { status: 404 }),
         "nothing was stored on the server that was not dialled"
     );

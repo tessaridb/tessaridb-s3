@@ -58,11 +58,21 @@ pub struct S3Config {
     pub advertise: Option<String>,
     /// `TESSARIDB_S3_ERASURE` and its companions — set when this node is one of an erasure-coded cluster.
     pub cluster: Option<ClusterSettings>,
+    /// `TESSARIDB_S3_TLS_CERT` and `_KEY` — both or neither; `None` serves the S3 API in the clear.
+    pub tls: Option<crate::tls::ServerTls>,
     /// `TESSARIDB_S3_CONSOLE_LISTEN` and its companions — set when this node serves the operator console.
     pub console: Option<crate::console_config::ConsoleSettings>,
+    /// `TESSARIDB_S3_AUDIT` — `on` (the default) records every S3 request in the region's access log; `off` records
+    /// none.
+    pub audit: bool,
+    /// `TESSARIDB_S3_METRICS_LISTEN` — where this node serves its metrics as Prometheus text; unset, it serves none.
+    pub metrics_listen: Option<SocketAddr>,
     /// `TESSARIDB_S3_IAM_KEY` — the root key user access-key secrets are sealed under; unset, the root credential is
     /// the only one.
     pub iam_key: Option<tessari_s3_types::IamKey>,
+    /// `TESSARIDB_S3_KEYS_PASSPHRASE` — opens the encryption keys at start; unset, the node starts sealed until an
+    /// operator unseals it.
+    pub keys_passphrase: Option<SecretKey>,
     /// `TESSARIDB_S3_NOTIFY_TARGETS` — the destinations bucket notifications may name.
     pub notify_targets: Vec<crate::NotifyTarget>,
 }
@@ -163,14 +173,23 @@ impl S3Config {
             });
         }
         let cluster = cluster_settings(&get)?;
+        let tls =
+            crate::console_config::tls_pair(&get, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY")?;
         let console = crate::console_config::console_settings(&get)?;
+        let audit = crate::observability_config::audit(&get)?;
+        let metrics_listen = crate::observability_config::metrics_listen(&get)?;
         let iam_key = crate::iam_config::iam_key(&get)?;
+        let keys_passphrase = crate::keys_config::keys_passphrase(&get);
         let notify_targets = crate::notify_config::notify_targets(&get)?;
         Ok(Self {
             meta,
             cluster,
+            tls,
             console,
+            audit,
+            metrics_listen,
             iam_key,
+            keys_passphrase,
             notify_targets,
             reclaim_grace_secs: match get("TESSARIDB_S3_RECLAIM_GRACE_SECS") {
                 None => DEFAULT_RECLAIM_GRACE_SECS,

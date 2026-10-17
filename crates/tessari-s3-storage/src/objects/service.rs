@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
+use crate::keys::KeyService;
 use crate::{Error, Result};
 
 #[path = "service_bytes.rs"]
@@ -29,6 +30,10 @@ mod list;
 mod lock;
 #[path = "service_replica.rs"]
 mod replica;
+#[path = "service_rewrap.rs"]
+mod rewrap;
+#[path = "service_sealed.rs"]
+mod sealed;
 #[path = "service_tags.rs"]
 mod tags;
 #[path = "service_version_list.rs"]
@@ -44,16 +49,22 @@ pub struct ObjectService {
     repository: TessariObjects,
     data: DataFiles,
     erasure: Option<Arc<ErasureWrites>>,
+    keys: Arc<KeyService>,
 }
 
 impl ObjectService {
-    /// The service over `repository`, with data files in `data`.
+    /// The service over `repository`, with data files in `data` and encryption keys from `keys`.
     #[must_use]
-    pub(crate) const fn new(repository: TessariObjects, data: DataFiles) -> Self {
+    pub(crate) const fn new(
+        repository: TessariObjects,
+        data: DataFiles,
+        keys: Arc<KeyService>,
+    ) -> Self {
         Self {
             repository,
             data,
             erasure: None,
+            keys,
         }
     }
 

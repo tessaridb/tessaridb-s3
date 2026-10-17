@@ -38,6 +38,7 @@ impl UserService {
                 user: holder.name.as_str(),
                 space: holder.space.as_str(),
                 scope: None,
+                session: None,
             };
             let sealed = sealer.seal(&secret, binding)?;
             let written = self
@@ -93,10 +94,12 @@ impl UserService {
             .await?
             .into_iter()
             .map(|key| {
+                let session = key.session_issuer.is_some();
                 let scope = scope_from(
                     key.scope_bucket.as_ref(),
                     key.scope_key.as_ref(),
                     key.expires,
+                    session,
                 )?;
                 let (seconds, nanos) = key.created;
                 Ok(ListedKey {
@@ -104,6 +107,7 @@ impl UserService {
                     created: Timestamp { seconds, nanos },
                     disabled: key.disabled,
                     scope,
+                    session_expires: key.expires.filter(|_| session).map(|(at, _)| at),
                 })
             })
             .collect()

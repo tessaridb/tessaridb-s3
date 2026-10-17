@@ -63,8 +63,10 @@ test("an issued key carries its id and its secret, both as text", () => {
 });
 
 test("the session says what the key may do, each as a yes or no", () => {
-  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false, issue_upload_keys: true };
+  const may = { access_key_id: "TSABCDEFGHIJKLMNOPQR", operate: false, administer: true, view_cluster: false, issue_upload_keys: true, space: "alpha" };
   assert.deepEqual(readCapabilities(may), may);
+  assert.deepEqual(readCapabilities({ ...may, space: null }), { ...may, space: null }, "root belongs to no space");
+  assert.equal(readCapabilities({ ...may, space: 7 }), null);
   assert.equal(readCapabilities({ ...may, operate: "no" }), null);
   const { issue_upload_keys: _gone, ...older } = may;
   assert.equal(readCapabilities(older), null, "every capability is always sent");
@@ -96,7 +98,7 @@ test("the status backlog carries how many objects are at risk", () => {
 });
 
 test("a bucket carries its limits, null where it has none", () => {
-  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1", acknowledgement: "region" };
+  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1", acknowledgement: "region", encryption: null };
   assert.deepEqual(readBuckets({ buckets: [{ ...row, max_bytes: 1000, max_objects: null }] }), [
     { ...row, maxBytes: 1000, maxObjects: null },
   ]);
@@ -105,6 +107,25 @@ test("a bucket carries its limits, null where it has none", () => {
   assert.equal(readBuckets({ buckets: [{ ...row, acknowledgement: "leader", max_bytes: 1000, max_objects: null }] }), null);
   assert.equal(readBuckets({ buckets: [{ ...row, max_bytes: -1, max_objects: null }] }), null);
   assert.equal(readBuckets({ buckets: [row] }), null, "the limits are always sent");
+});
+
+test("a bucket carries its default encryption: none, the server's key, or a named key, and whether customer keys are allowed", () => {
+  const row = { name: "media", created: "2026-10-08T00:00:00.000Z", region: "us-east-1", acknowledgement: "majority", max_bytes: null, max_objects: null };
+  const read = (encryption) => readBuckets({ buckets: [{ ...row, encryption }] })?.[0]?.encryption;
+  assert.equal(read(null), null);
+  assert.deepEqual(read({ algorithm: "AES256", key: null, customer_keys: false }), { algorithm: "AES256", customerKeys: false });
+  assert.deepEqual(read({ algorithm: "aws:kms", key: "logs-key", customer_keys: true }), { algorithm: "aws:kms", key: "logs-key", customerKeys: true });
+  for (const wrong of [
+    { algorithm: "aws:kms", key: null, customer_keys: false },
+    { algorithm: "DES", key: null, customer_keys: false },
+    { algorithm: "AES256", key: "x", customer_keys: false },
+    { algorithm: "AES256", key: null },
+    { algorithm: "AES256", key: null, customer_keys: "yes" },
+    "AES256",
+    undefined,
+  ]) {
+    assert.equal(readBuckets({ buckets: [{ ...row, encryption: wrong }] }), null, JSON.stringify(wrong));
+  }
 });
 
 test("an upload key carries its id, its secret and when it stops", () => {

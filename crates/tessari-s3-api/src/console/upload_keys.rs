@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use tessari_s3_constants::{UPLOAD_KEY_MAX_SECS, UPLOAD_KEY_MIN_SECS};
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal, UserName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
@@ -43,6 +44,7 @@ pub(super) async fn issue(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -71,7 +73,15 @@ pub(super) async fn issue(
             "an upload key is issued by a user, whose authority it narrows; root has none to narrow",
         ));
     };
-    on_bucket(&state, &principal, &name, Action::WriteObject).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::WriteObject,
+        ("s3:PutObject", Some(key.as_str())),
+    )
+    .await?;
     let user = UserName::new(&issuer.name).ok_or(ConsoleError::forbidden())?;
     let scope = KeyScope {
         bucket: name,

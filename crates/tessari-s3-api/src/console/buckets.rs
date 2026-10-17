@@ -7,10 +7,12 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal, SpaceName};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
 use tessari_s3_storage::buckets::{Acknowledgement, Created, Deleted};
+use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_types::BucketName;
 
 use super::ConsoleState;
@@ -28,6 +30,18 @@ struct BucketView {
     max_objects: Option<u64>,
     /// `region` when its writes are acknowledged by its region's majority alone, `majority` otherwise.
     acknowledgement: &'static str,
+    /// The default encryption of writes that ask for none; null while there is none.
+    encryption: Option<EncryptionView>,
+}
+
+#[derive(Serialize)]
+struct EncryptionView {
+    /// `AES256` or `aws:kms`.
+    algorithm: &'static str,
+    /// The named key under `aws:kms`.
+    key: Option<String>,
+    /// Whether writes may bring their own key (SSE-C).
+    customer_keys: bool,
 }
 
 #[derive(Serialize)]
@@ -63,6 +77,20 @@ pub(super) async fn list(
                     Acknowledgement::Majority => "majority",
                     Acknowledgement::RegionMajority => "region",
                 },
+                encryption: bucket
+                    .encryption
+                    .map(|encryption| match encryption.sealing {
+                        Sealing::Server => EncryptionView {
+                            algorithm: "AES256",
+                            key: None,
+                            customer_keys: encryption.allow_customer_keys,
+                        },
+                        Sealing::Named(name) => EncryptionView {
+                            algorithm: "aws:kms",
+                            key: Some(name.as_str().to_owned()),
+                            customer_keys: encryption.allow_customer_keys,
+                        },
+                    }),
             })
             .collect(),
     }))
@@ -98,6 +126,12 @@ pub(super) async fn create(
         Principal::User(user) => (user.space.clone(), Some(user.name.as_str())),
         // Refused before it creates anything; named for the match, never for the bucket.
         Principal::Upload(upload) => (upload.parent.space.clone(), None),
+        Principal::Session(session) => session
+            .user()
+            .map_or((SpaceName::default_space(), None), |user| {
+                (user.space.clone(), Some(user.name.as_str()))
+            }),
+        Principal::Anonymous => (SpaceName::default_space(), None),
     };
     allow(&principal, &Action::CreateBucket(space.clone()))?;
     let created = state
@@ -144,6 +178,7 @@ pub(super) async fn delete(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -152,7 +187,15 @@ pub(super) async fn delete(
     let Delete { reason: given } = json(&headers, &body, "expected reason")?;
     let why = reason(given, true)?;
     let name = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &name, Action::DeleteBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::DeleteBucket,
+        ("s3:DeleteBucket", None),
+    )
+    .await?;
     super::regions::writable(&state).await?;
     let deleted = state.storage().buckets().delete(&name).await?;
     let outcome = match deleted {

@@ -110,13 +110,57 @@ pub enum Error {
     /// An access key was to be issued or resolved and no root key (`TESSARIDB_S3_IAM_KEY`) is configured.
     #[error("no IAM root key is configured (TESSARIDB_S3_IAM_KEY)")]
     NoIamKey,
-    /// A stored access-key secret did not open: another root key, another binding, a changed byte or an unknown
-    /// algorithm — deliberately not told apart.
-    #[error("a stored access key secret could not be opened")]
+    /// A sealed value did not open — an access-key secret, a wrapped data key or a block of object data: another key,
+    /// another binding, a changed byte or an unknown algorithm, deliberately not told apart.
+    #[error("a sealed value could not be opened")]
     Unsealable,
     /// Another node holds the claim on this data id (it is healing or reclaiming it); try on a later pass.
     #[error("another node is working on this data id")]
     Held,
+    /// A request brought a customer key (SSE-C) other than the one the object or upload was sealed under.
+    #[error("the customer key is not the one the data was sealed under")]
+    CustomerKeyMismatch,
+    /// This node holds no encryption keys: an operator has not unsealed them since it started.
+    #[error("the encryption keys are sealed on this node")]
+    KeysSealed,
+    /// A key was to be created under an id the keys vault already holds; keys are never replaced.
+    #[error("the keys vault already holds {id}")]
+    KeyExists {
+        /// The record id.
+        id: String,
+    },
+    /// The key new data keys are wrapped under was to be destroyed; only an older server key can be.
+    #[error("{id} is the active key")]
+    KeyActive {
+        /// The record id.
+        id: String,
+    },
+    /// An object was to be sealed under a named key this node does not hold.
+    #[error("no encryption key is named {name}")]
+    UnknownKey {
+        /// The name asked for.
+        name: String,
+    },
+    /// A keys passphrase that cannot be used; the reason never quotes it.
+    #[error("the keys passphrase is not usable: {reason}")]
+    WeakPassphrase {
+        /// What is wrong with it.
+        reason: &'static str,
+    },
+    /// The keys vault did not open with the passphrase given.
+    #[error("the keys passphrase is wrong")]
+    WrongPassphrase,
+    /// A sealed object's body was not the length declared before its first byte; nothing of it is kept.
+    #[error("a sealed body declared {declared} bytes and carried {received}")]
+    SealedLength {
+        /// Bytes declared.
+        declared: u64,
+        /// Bytes carried (when too many, those offered up to the refusal).
+        received: u64,
+    },
+    /// Too many wrong passphrases in a row: the metadata store makes the next attempt wait, right or not.
+    #[error("too many wrong keys passphrases; wait before trying again")]
+    PassphraseThrottled,
 }
 
 impl Error {
@@ -140,10 +184,17 @@ impl Error {
             | Self::Unsealable
             | Self::NoIamKey
             | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
-            Self::InvalidShard { .. } | Self::ShardLength { .. } | Self::OtherRegion { .. } => {
-                ErrorCategory::Validation
+            Self::InvalidShard { .. }
+            | Self::ShardLength { .. }
+            | Self::SealedLength { .. }
+            | Self::OtherRegion { .. } => ErrorCategory::Validation,
+            Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
+                ErrorCategory::Conflict
             }
-            Self::Contended | Self::Held => ErrorCategory::Conflict,
+            Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
+            Self::WeakPassphrase { .. } | Self::UnknownKey { .. } => ErrorCategory::Validation,
+            Self::WrongPassphrase => ErrorCategory::Unauthorized,
+            Self::CustomerKeyMismatch => ErrorCategory::Forbidden,
         }
     }
 }

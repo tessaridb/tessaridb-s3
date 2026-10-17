@@ -29,12 +29,52 @@ COPY --from=build --chown=65532:65532 /out/var/lib/tessaridb-s3 /var/lib/tessari
 COPY --from=build /src/target/release/tessaridb-s3 /usr/local/bin/tessaridb-s3
 COPY LICENSE /usr/share/doc/tessaridb-s3/LICENSE
 
-# Defaults that make a container reachable: `0.0.0.0`, because a container's
-# loopback answers nothing outside it. Everything else the server reads —
-# above all the credentials (`TESSARIDB_S3_ROOT_ACCESS_KEY` / `_SECRET_KEY`,
-# `TESSARIDB_S3_META_ADDRESS` / `_USER` / `_PASSWORD`, `TESSARIDB_S3_IAM_KEY`)
-# — is deliberately NOT defaulted: an image carrying a secret hands it to
-# everybody who pulls it. The server refuses to start without the required ones.
+# What the server reads. Two have a default here, because without them a
+# container answers nothing: `0.0.0.0`, since a container's loopback is
+# reachable from nothing outside it, and the data directory inside the volume.
+#
+#   TESSARIDB_S3_LISTEN           the S3 API's address
+#   TESSARIDB_S3_DATA_DIR         where every object's bytes are stored
+#
+# Required, and deliberately NOT defaulted: an image carrying a secret hands it
+# to everybody who pulls it. The server refuses to start without them.
+#
+#   TESSARIDB_S3_ROOT_ACCESS_KEY / _ROOT_SECRET_KEY  the root credential
+#   TESSARIDB_S3_META_ADDRESS     the TessariDB nodes holding the metadata
+#   TESSARIDB_S3_META_USER / _META_PASSWORD  the account the server signs in as
+#
+# Secrets that are optional, and likewise never defaulted:
+#
+#   TESSARIDB_S3_IAM_KEY          64 hex digits; without it only the root
+#                                 credential signs in
+#   TESSARIDB_S3_KEYS_PASSPHRASE  unseals the keys objects are encrypted under
+#                                 (AES256 or aws:kms); unset, the keys stay
+#                                 sealed until an operator unseals them in the
+#                                 console, and encrypted reads and writes
+#                                 answer 503
+#   TESSARIDB_S3_CLUSTER_SECRET   placement key, the same on every member
+#   TESSARIDB_S3_JOIN_TOKEN       one-time token from the console for this node
+#   TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET  the console's client secret
+#
+# Everything else has the server's own default when unset:
+#
+#   TESSARIDB_S3_REGION, _DOMAINS, _ADVERTISE, _MAX_INFLIGHT,
+#   _SHUTDOWN_GRACE_SECS, _TLS_CERT / _TLS_KEY (unset, the S3 API is plain)
+#   TESSARIDB_S3_META_NAMESPACE, _META_DATABASE, _META_CA, _META_REPLICATION,
+#   _META_MAX_CONNECTIONS, _META_STATEMENT_TIMEOUT_SECS
+#   TESSARIDB_S3_RECLAIM_GRACE_SECS, _RECLAIM_INTERVAL_SECS,
+#   _UPLOAD_MAX_AGE_SECS, _USAGE_INTERVAL_SECS
+#   TESSARIDB_S3_MEDIA_WORKERS, _FFMPEG (this image carries no ffmpeg)
+#   TESSARIDB_S3_NOTIFY_TARGETS
+#   a cluster member: TESSARIDB_S3_ERASURE, _NODE_ID, _ZONE, _INTERNAL_LISTEN,
+#   _INTERNAL_ADVERTISE, _INTERNAL_TLS_CERT / _KEY / _CA, _FOUNDING_MEMBERS,
+#   _HEAL_INTERVAL_SECS, _MOVE_BYTES_PER_SEC
+#   the console: TESSARIDB_S3_CONSOLE_LISTEN (9101 below), _CONSOLE_TLS_CERT /
+#   _KEY, _CONSOLE_SIGN_INS_PER_MINUTE, _CONSOLE_REQUESTS_PER_MINUTE,
+#   _CONSOLE_KEY_SIGN_IN, _CONSOLE_BREAK_GLASS_WEBHOOK, _CONSOLE_OIDC_ISSUER,
+#   _CONSOLE_OIDC_CLIENT_ID, _CONSOLE_OIDC_REDIRECT_URI, _CONSOLE_OIDC_MFA_AMR
+#
+# The README's configuration table states each one's default and meaning.
 ENV TESSARIDB_S3_LISTEN=0.0.0.0:9100 \
     TESSARIDB_S3_DATA_DIR=/var/lib/tessaridb-s3/data
 

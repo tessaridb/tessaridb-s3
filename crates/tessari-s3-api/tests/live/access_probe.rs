@@ -12,9 +12,9 @@ use tessari_s3_core::dispatch::{
 use crate::access::{Key, user_with_key};
 use crate::{IGNORED, call_as, fresh};
 
-struct Probe {
-    operation: Operation,
-    method: &'static str,
+pub(crate) struct Probe {
+    pub(crate) operation: Operation,
+    pub(crate) method: &'static str,
     path: String,
     query: Vec<(&'static str, Option<String>)>,
     headers: Vec<(&'static str, &'static str)>,
@@ -59,12 +59,17 @@ const RETENTION_BODY: &[u8] = b"<Retention><Mode>GOVERNANCE</Mode>\
 const HOLD_BODY: &[u8] = b"<LegalHold><Status>ON</Status></LegalHold>";
 const TAGGING_BODY: &[u8] =
     b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
+const ENCRYPTION_BODY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
+    <SSEAlgorithm>AES256</SSEAlgorithm></ApplyServerSideEncryptionByDefault></Rule></ServerSideEncryptionConfiguration>";
+const CORS_BODY: &[u8] = b"<CORSConfiguration><CORSRule><AllowedOrigin>*</AllowedOrigin><AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>";
+const BLOCK_BODY: &[u8] = b"<PublicAccessBlockConfiguration><BlockPublicPolicy>true</BlockPublicPolicy></PublicAccessBlockConfiguration>";
+const POLICY_BODY: &[u8] = br#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::alpha:user/cid"},"Action":"s3:GetObject","Resource":"arn:aws:s3:::ann-photos/*"}]}"#;
 const DELETE_BODY: &[u8] = b"<Delete><Object><Key>a.txt</Key></Object></Delete>";
 const COMPLETE_BODY: &[u8] =
     b"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>\"x\"</ETag></Part></CompleteMultipartUpload>";
 
 /// Every implemented operation, addressed at `ann-photos`; destructive ones last, so the control arm reaches each.
-fn table(upload: &str) -> Vec<Probe> {
+pub(crate) fn table(upload: &str) -> Vec<Probe> {
     let id = Some(upload);
     let part = [("partNumber", Some("1")), ("uploadId", id)];
     let copy = ("x-amz-copy-source", "/ann-photos/a.txt");
@@ -93,6 +98,27 @@ fn table(upload: &str) -> Vec<Probe> {
                 &[("versioning", None)],
             )
         },
+        Probe {
+            body: ENCRYPTION_BODY,
+            ..probe(
+                Operation::PutBucketEncryption,
+                "PUT",
+                "/ann-photos",
+                &[("encryption", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketEncryption,
+            "GET",
+            "/ann-photos",
+            &[("encryption", None)],
+        ),
+        probe(
+            Operation::DeleteBucketEncryption,
+            "DELETE",
+            "/ann-photos",
+            &[("encryption", None)],
+        ),
         Probe {
             body: LIFECYCLE_BODY,
             ..probe(
@@ -205,6 +231,75 @@ fn table(upload: &str) -> Vec<Probe> {
             &[("tagging", None)],
         ),
         Probe {
+            body: POLICY_BODY,
+            ..probe(
+                Operation::PutBucketPolicy,
+                "PUT",
+                "/ann-photos",
+                &[("policy", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketPolicy,
+            "GET",
+            "/ann-photos",
+            &[("policy", None)],
+        ),
+        probe(
+            Operation::DeleteBucketPolicy,
+            "DELETE",
+            "/ann-photos",
+            &[("policy", None)],
+        ),
+        Probe {
+            body: CORS_BODY,
+            ..probe(
+                Operation::PutBucketCors,
+                "PUT",
+                "/ann-photos",
+                &[("cors", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketCors,
+            "GET",
+            "/ann-photos",
+            &[("cors", None)],
+        ),
+        probe(
+            Operation::DeleteBucketCors,
+            "DELETE",
+            "/ann-photos",
+            &[("cors", None)],
+        ),
+        probe(
+            Operation::GetBucketPolicyStatus,
+            "GET",
+            "/ann-photos",
+            &[("policyStatus", None)],
+        ),
+        Probe {
+            body: BLOCK_BODY,
+            ..probe(
+                Operation::PutPublicAccessBlock,
+                "PUT",
+                "/ann-photos",
+                &[("publicAccessBlock", None)],
+            )
+        },
+        probe(
+            Operation::GetPublicAccessBlock,
+            "GET",
+            "/ann-photos",
+            &[("publicAccessBlock", None)],
+        ),
+        probe(
+            Operation::DeletePublicAccessBlock,
+            "DELETE",
+            "/ann-photos",
+            &[("publicAccessBlock", None)],
+        ),
+        Probe {
             body: TAGGING_BODY,
             ..probe(
                 Operation::PutObjectTagging,
@@ -297,6 +392,8 @@ fn table(upload: &str) -> Vec<Probe> {
         },
         Probe {
             body: DELETE_BODY,
+            // The base64 MD5 of `DELETE_BODY`, which a batch delete must carry.
+            headers: vec![("content-md5", "j1RRtcXPLSGU5Ku2R3gxLw==")],
             ..probe(
                 Operation::DeleteObjects,
                 "POST",
@@ -316,7 +413,7 @@ fn table(upload: &str) -> Vec<Probe> {
 }
 
 /// Whether the dispatcher reads `row` as the operation it names.
-fn addresses(row: &Probe) -> bool {
+pub(crate) fn addresses(row: &Probe) -> bool {
     let method = match row.method {
         "GET" => Method::Get,
         "HEAD" => Method::Head,
@@ -344,7 +441,7 @@ fn addresses(row: &Probe) -> bool {
     .is_ok_and(|spec| spec.operation == row.operation)
 }
 
-async fn send(state: &tessari_s3_api::ApiState, key: &Key, row: &Probe) -> crate::Seen {
+pub(crate) async fn send(state: &tessari_s3_api::ApiState, key: &Key, row: &Probe) -> crate::Seen {
     let query: Vec<(&str, Option<&str>)> = row
         .query
         .iter()
@@ -362,11 +459,9 @@ async fn send(state: &tessari_s3_api::ApiState, key: &Key, row: &Probe) -> crate
     .await
 }
 
-#[tokio::test]
-#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
-async fn a_member_without_a_grant_is_refused_every_operation_its_creator_is_not() {
-    let _why = IGNORED;
-    let (state, _) = fresh().await;
+/// `ann` (who creates buckets) and `cid` (no grant) in space `alpha`, `ann-photos` holding `a.txt`, and an upload of
+/// `big` in progress, whose id is answered.
+pub(crate) async fn prepared(state: &tessari_s3_api::ApiState) -> (Key, Key, String) {
     let storage = state.storage();
     let ann = user_with_key(storage, "ann", "alpha", Role::Member, true).await;
     let cid = user_with_key(storage, "cid", "alpha", Role::Member, false).await;
@@ -375,14 +470,14 @@ async fn a_member_without_a_grant_is_refused_every_operation_its_creator_is_not(
         ("PUT", "/ann-photos/a.txt", b"a"),
     ] {
         assert_eq!(
-            call_as(&state, ann.pair(), method, path, vec![], vec![], body)
+            call_as(state, ann.pair(), method, path, vec![], vec![], body)
                 .await
                 .status,
             200
         );
     }
     let started = call_as(
-        &state,
+        state,
         ann.pair(),
         "POST",
         "/ann-photos/big",
@@ -398,6 +493,15 @@ async fn a_member_without_a_grant_is_refused_every_operation_its_creator_is_not(
         .and_then(|rest| rest.split("</UploadId>").next())
         .expect("an upload id")
         .to_owned();
+    (ann, cid, upload)
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_member_without_a_grant_is_refused_every_operation_its_creator_is_not() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    let (ann, cid, upload) = prepared(&state).await;
     let rows = table(&upload);
 
     let probed: BTreeSet<String> = rows

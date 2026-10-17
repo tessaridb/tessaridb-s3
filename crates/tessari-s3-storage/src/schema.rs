@@ -54,6 +54,11 @@ use crate::Result;
 /// one bucket, id `<user>/<bucket>`) hold the access model; the indexes serve a space's users and a user's keys and
 /// grants. A one-key upload credential is an access key with `scope_bucket`, `scope_key` and `expires`; the table
 /// lets a record carry an expiry, so the store drops such a key at that instant, while a full key carries none.
+/// Temporary credentials from the identity provider are access keys with `expires`, `session_hash` (the digest of
+/// their session token), `session_issuer` and `session_subject`.
+/// `groups:<space>/<name>` is a set of a space's users (`group_members:<space>/<name>/<user>`) whose grants
+/// (`group_grants:<space>/<name>/<bucket>`) each member receives; a membership or grant is written in the transaction
+/// that touches its group (`touched`), so it conflicts with the group's removal instead of outliving it.
 /// `key_issues:<token>` remembers which key a console form's token issued, so a repeated submission answers that key;
 /// the store drops it once its window has passed.
 /// `oidc_logins:<state>` holds a console sign-in sent to the identity provider until its callback takes it (the store
@@ -70,12 +75,16 @@ DEFINE FIELD IF NOT EXISTS max_bytes ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS max_objects ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS versioning ON buckets TYPE 'Enabled' | 'Suspended';
 DEFINE FIELD IF NOT EXISTS lifecycle ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS cors ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
 DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;
+DEFINE FIELD IF NOT EXISTS encryption ON buckets TYPE object;
+DEFINE FIELD IF NOT EXISTS policy ON buckets TYPE string;
+DEFINE FIELD IF NOT EXISTS public_access ON buckets TYPE string;
 DEFINE EVENT OR REPLACE object_lock_kept ON buckets FOR UPDATE \
 WHEN $before.object_lock != NONE AND ($after.object_lock = NONE OR $after.versioning != 'Enabled') \
 THEN THROW 'ObjectLockKept: a bucket with Object Lock keeps it, and keeps versioning enabled';
@@ -93,12 +102,25 @@ DEFINE INDEX IF NOT EXISTS by_key_user ON access_keys FIELDS user_name;
 DEFINE FIELD IF NOT EXISTS scope_bucket ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS scope_key ON access_keys TYPE string;
 DEFINE FIELD IF NOT EXISTS expires ON access_keys TYPE datetime;
+DEFINE FIELD IF NOT EXISTS session_hash ON access_keys TYPE bytes;
+DEFINE FIELD IF NOT EXISTS session_issuer ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS session_subject ON access_keys TYPE string;
+DEFINE FIELD IF NOT EXISTS session_policy ON access_keys TYPE string;
 ALTER TABLE access_keys SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS key_issues (user_name string REQUIRED, key_id string REQUIRED);
 ALTER TABLE key_issues SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS grants (\
  user_name string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_grant_user ON grants FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS groups (space_name string REQUIRED, name string REQUIRED, created datetime REQUIRED);
+DEFINE FIELD IF NOT EXISTS touched ON groups TYPE datetime;
+DEFINE INDEX IF NOT EXISTS by_group_space ON groups FIELDS space_name;
+DEFINE TABLE IF NOT EXISTS group_members (group_id string REQUIRED, user_name string REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_member_group ON group_members FIELDS group_id;
+DEFINE INDEX IF NOT EXISTS by_member_user ON group_members FIELDS user_name;
+DEFINE TABLE IF NOT EXISTS group_grants (\
+ group_id string REQUIRED, bucket_name string REQUIRED, can_read bool REQUIRED, can_write bool REQUIRED);
+DEFINE INDEX IF NOT EXISTS by_group_grant ON group_grants FIELDS group_id;
 DEFINE TABLE IF NOT EXISTS oidc_logins (nonce string REQUIRED, verifier string REQUIRED);
 ALTER TABLE oidc_logins SET EXPIRE;
 DEFINE TABLE IF NOT EXISTS identity_links (issuer string REQUIRED, subject string REQUIRED, user_name string REQUIRED);
@@ -165,6 +187,31 @@ DEFINE FIELD IF NOT EXISTS retain_until ON versions TYPE datetime;
 DEFINE FIELD IF NOT EXISTS legal_hold ON versions TYPE bool;
 DEFINE FIELD IF NOT EXISTS lock_bypass ON versions TYPE bool;
 DEFINE FIELD IF NOT EXISTS tags ON versions TYPE object;
+DEFINE FIELD IF NOT EXISTS sse_alg ON objects TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kek ON objects TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_nonce ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_key ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_salt ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_verifier ON objects TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_alg ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kek ON versions TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_nonce ON versions TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_key ON versions TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_salt ON versions TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_verifier ON versions TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse ON uploads TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kms ON uploads TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_c_salt ON uploads TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_verifier ON uploads TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_alg ON parts TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_kek ON parts TYPE string;
+DEFINE FIELD IF NOT EXISTS sse_nonce ON parts TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_key ON parts TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_salt ON parts TYPE bytes;
+DEFINE FIELD IF NOT EXISTS sse_c_verifier ON parts TYPE bytes;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON versions FIELDS sse_kek;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON objects FIELDS sse_kek;
+DEFINE INDEX IF NOT EXISTS by_sse_kek ON parts FIELDS sse_kek;
 DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
 DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \
@@ -196,6 +243,7 @@ DEFINE TABLE IF NOT EXISTS layout_current (version int REQUIRED);
 DEFINE TABLE IF NOT EXISTS layout_staged (id string REQUIRED, base int REQUIRED, sets array REQUIRED, staged datetime REQUIRED);
 DEFINE TABLE IF NOT EXISTS shard_sets (layout int REQUIRED, size int REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_layout ON shard_sets FIELDS layout;
+DEFINE FIELD IF NOT EXISTS sealed ON shard_sets TYPE bool;
 DEFINE TABLE IF NOT EXISTS layout_retire (old int REQUIRED, switched datetime REQUIRED);
 DEFINE INDEX IF NOT EXISTS by_switched ON layout_retire FIELDS switched;
 DEFINE QUEUE IF NOT EXISTS heal_queue TIMEOUT 30s SCHEMAFULL NOT BEFORE due;
@@ -207,6 +255,7 @@ DEFINE FIELD IF NOT EXISTS op ON objects TYPE string;
 DEFINE TOPIC IF NOT EXISTS object_events RETAIN 7d;
 DEFINE TOPIC IF NOT EXISTS object_events_dead RETAIN 30d;
 DEFINE TOPIC IF NOT EXISTS s3_notifications RETAIN 7d;
+DEFINE TOPIC IF NOT EXISTS s3_access_log RETAIN 30d;
 DEFINE TOPIC IF NOT EXISTS media_failed RETAIN 30d;
 DEFINE QUEUE IF NOT EXISTS media_images TIMEOUT 300s ATTEMPTS 5 SCHEMAFULL NOT BEFORE retry_at DEDUPLICATE 7d;
 DEFINE QUEUE IF NOT EXISTS media_videos TIMEOUT 3600s ATTEMPTS 5 SCHEMAFULL NOT BEFORE retry_at DEDUPLICATE 7d;

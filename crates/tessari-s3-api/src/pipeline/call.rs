@@ -3,6 +3,7 @@
 use axum::http::HeaderMap;
 use tessari_s3_core::auth::Verified;
 use tessari_s3_core::authz::Principal;
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_types::{BucketName, ErrorCode};
 
 use super::address::Addressed;
@@ -23,6 +24,10 @@ pub struct Call<'a> {
     pub principal: &'a Principal,
     /// The request's headers.
     pub headers: &'a HeaderMap,
+    /// Whether it arrived over a connection whose TLS handshake completed.
+    pub secure: bool,
+    /// What a bucket policy's conditions read of this request.
+    pub context: &'a Context,
 }
 
 impl Call<'_> {

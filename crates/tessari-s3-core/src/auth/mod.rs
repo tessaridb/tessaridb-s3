@@ -9,7 +9,13 @@ mod encode;
 mod error;
 mod header;
 mod payload;
+mod post_policy;
+#[cfg(test)]
+mod post_policy_tests;
 mod presign;
+mod session_token;
+#[cfg(test)]
+mod session_token_tests;
 mod sign;
 mod signing;
 mod time;
@@ -22,7 +28,12 @@ pub use encode::{percent_decode, uri_encode};
 pub use error::{AuthError, AuthResult};
 pub use header::{AuthorizationHeader, verify_header};
 pub use payload::{PayloadVerifier, parse_payload_hash, verify_payload_digest};
+pub use post_policy::{PostPolicy, PostPolicyError, post_signature, verify_post};
 pub use presign::{PresignedQuery, verify_presigned};
+pub use session_token::{
+    compose as compose_session_token, digest as session_token_digest,
+    expiry as session_token_expiry, matches as session_token_matches,
+};
 pub use sign::{amz_date, sign_header};
 pub use tessari_s3_types::SecretKey;
 pub use verified::{PayloadHash, Verified};

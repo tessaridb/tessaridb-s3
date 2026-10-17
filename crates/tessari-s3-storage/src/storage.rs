@@ -11,11 +11,14 @@ use tessari_s3_types::IamKey;
 
 use crate::Result;
 use crate::actions::{ActionService, TessariActions};
+use crate::audit::{AuditService, TessariAudit};
 use crate::buckets::{BucketService, TessariBuckets};
 use crate::cluster::{ClusterService, TessariCluster};
 use crate::data::DataFiles;
 use crate::erasure::ErasureWrites;
+use crate::groups::{GroupService, TessariGroups};
 use crate::identities::{IdentityService, TessariIdentities};
+use crate::keys::{KeyService, TessariKeys};
 use crate::lifecycle::{LifecycleService, TessariLifecycle};
 use crate::media::{MediaService, TessariMedia};
 use crate::members::{MembershipService, TessariMembers};
@@ -44,7 +47,10 @@ pub struct Storage {
     usage: UsageService,
     spaces: SpaceService,
     users: UserService,
+    groups: GroupService,
     identities: IdentityService,
+    /// Shared by every clone: an unseal on this node is seen by all of them.
+    keys: Arc<KeyService>,
     pool: MetaPool,
     regional: MetaPool,
     reclaim_grace_secs: u64,
@@ -60,8 +66,14 @@ impl Storage {
         let regional = pool.regional(region)?;
         let data = DataFiles::new(data_dir, DATA_BLOCK_SIZE);
         let shards = ShardService::new(data.clone());
-        let objects = ObjectService::new(TessariObjects::new(regional.clone()), data);
+        let keys = Arc::new(KeyService::new(TessariKeys::new(pool.clone())));
+        let objects = ObjectService::new(
+            TessariObjects::new(regional.clone()),
+            data,
+            Arc::clone(&keys),
+        );
         let spaces = SpaceService::new(TessariSpaces::new(pool.clone()));
+        let groups = GroupService::new(TessariGroups::new(pool.clone()));
         Ok(Self {
             buckets: BucketService::new(TessariBuckets::new(pool.clone(), regional.clone())),
             multipart: MultipartService::new(
@@ -72,8 +84,14 @@ impl Storage {
             members: MembershipService::new(TessariMembers::new(regional.clone())),
             actions: ActionService::new(TessariActions::new(pool.clone())),
             usage: UsageService::new(TessariUsage::new(regional.clone())),
-            users: UserService::new(TessariUsers::new(pool.clone()), spaces.clone()),
+            users: UserService::new(
+                TessariUsers::new(pool.clone()),
+                spaces.clone(),
+                groups.clone(),
+            ),
+            groups,
             identities: IdentityService::new(TessariIdentities::new(pool.clone())),
+            keys,
             spaces,
             objects,
             shards,
@@ -170,6 +188,12 @@ impl Storage {
         &self.cluster
     }
 
+    /// The encryption keys this node holds, sealed until an operator unseals them.
+    #[must_use]
+    pub fn keys(&self) -> &KeyService {
+        &self.keys
+    }
+
     /// Which nodes an operator admitted to the cluster, and which were removed.
     #[must_use]
     pub const fn members(&self) -> &MembershipService {
@@ -191,6 +215,12 @@ impl Storage {
             self.objects.clone(),
             self.multipart.clone(),
         )
+    }
+
+    /// The region's access log: one record per S3 request.
+    #[must_use]
+    pub fn audit(&self) -> AuditService {
+        AuditService::new(TessariAudit::new(self.regional.clone()))
     }
 
     /// Delivery of bucket event notifications to the operator's declared destinations.
@@ -254,6 +284,12 @@ impl Storage {
     #[must_use]
     pub const fn users(&self) -> &UserService {
         &self.users
+    }
+
+    /// The groups of each space and what they grant their members.
+    #[must_use]
+    pub const fn groups(&self) -> &GroupService {
+        &self.groups
     }
 
     /// Console sign-ins in flight to the identity provider, and which user each provider identity is.

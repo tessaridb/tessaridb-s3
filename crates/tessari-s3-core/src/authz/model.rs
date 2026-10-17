@@ -1,6 +1,9 @@
 //! The evaluator's inputs: who is asking, what they want to do, and to which bucket.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use super::policy::{BucketPolicy, PolicyError, PublicAccessBlock, SessionPolicy};
 
 /// A space's name: the tenant buckets and users belong to.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,6 +57,24 @@ impl UserName {
     }
 }
 
+/// A group's name, unique within its space; the same rule as a user's name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GroupName(String);
+
+impl GroupName {
+    /// The group called `name`; names are 1-63 lowercase letters, digits and inner hyphens.
+    #[must_use]
+    pub fn new(name: &str) -> Option<Self> {
+        is_node_name(name).then(|| Self(name.to_owned()))
+    }
+
+    /// The name as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A user's role inside their space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -70,6 +91,17 @@ pub struct Access {
     pub read: bool,
     /// Writing and deleting objects.
     pub write: bool,
+}
+
+impl Access {
+    /// What either grant allows: a user's own grant on a bucket joined with those of their groups.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            read: self.read || other.read,
+            write: self.write || other.write,
+        }
+    }
 }
 
 /// A signed-in user as the evaluator sees them: resolved from the store, never from the request.
@@ -103,6 +135,56 @@ pub struct UploadPrincipal {
     pub key: String,
 }
 
+/// Temporary credentials a user was issued through the identity provider: the user's authority and nothing more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionPrincipal {
+    /// The user, as the principal every decision of the session is taken for.
+    as_user: Box<Principal>,
+    /// The session policy it was issued with, which every allowed request must also satisfy.
+    policy: Option<Arc<SessionPolicy>>,
+}
+
+impl SessionPrincipal {
+    /// A session of `user`, resolved afresh like any user: disabling them or taking a grant binds the session too.
+    #[must_use]
+    pub fn new(user: UserPrincipal) -> Self {
+        Self {
+            as_user: Box::new(Principal::User(user)),
+            policy: None,
+        }
+    }
+
+    /// A session of `user` narrowed by `policy`: it may do only what both its user and the policy allow.
+    #[must_use]
+    pub fn narrowed(user: UserPrincipal, policy: Arc<SessionPolicy>) -> Self {
+        Self {
+            as_user: Box::new(Principal::User(user)),
+            policy: Some(policy),
+        }
+    }
+
+    /// The session policy, when it was issued with one.
+    #[must_use]
+    pub fn policy(&self) -> Option<&SessionPolicy> {
+        self.policy.as_deref()
+    }
+
+    /// The user the session acts as.
+    #[must_use]
+    pub fn as_user(&self) -> &Principal {
+        &self.as_user
+    }
+
+    /// The user, as a creator or a space is named for.
+    #[must_use]
+    pub fn user(&self) -> Option<&UserPrincipal> {
+        match self.as_user.as_ref() {
+            Principal::User(user) => Some(user),
+            _ => None,
+        }
+    }
+}
+
 /// Who is asking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Principal {
@@ -112,6 +194,10 @@ pub enum Principal {
     User(UserPrincipal),
     /// A one-key upload credential.
     Upload(UploadPrincipal),
+    /// Temporary credentials from the identity provider.
+    Session(SessionPrincipal),
+    /// A request that carried no credentials: reaches only what a bucket policy grants everyone.
+    Anonymous,
 }
 
 impl Principal {
@@ -132,9 +218,16 @@ impl Principal {
                     .collect(),
             },
             Self::Root => Visible::All,
+            Self::Session(session) => session.as_user().visible(),
             // A one-key credential lists nothing: no user is called "", and it is granted no bucket.
             Self::Upload(upload) => Visible::Reachable {
                 space: upload.parent.space.clone(),
+                user: String::new(),
+                granted: Vec::new(),
+            },
+            // Nobody lists every bucket anonymously; listing is refused before it gets here.
+            Self::Anonymous => Visible::Reachable {
+                space: SpaceName::default_space(),
                 user: String::new(),
                 granted: Vec::new(),
             },
@@ -169,6 +262,10 @@ pub struct BucketResource {
     pub space: SpaceName,
     /// The user who created it, when a user did.
     pub creator: Option<String>,
+    /// Its policy, parsed when the bucket was read; `Err` when the stored text no longer parses.
+    pub policy: Option<Arc<Result<BucketPolicy, PolicyError>>>,
+    /// Its Block Public Access switches, as in force (every one on while none is stored).
+    pub public_access: PublicAccessBlock,
 }
 
 /// A user as the evaluator needs it when somebody manages them: who they are, where, and with what authority.
@@ -218,4 +315,20 @@ pub enum Action {
     ManageUser(UserResource),
     /// Create and remove spaces, set quotas, read every space, change the cluster's layout.
     Operate,
+}
+
+impl Action {
+    /// The bucket the action is on, if it is on one.
+    #[must_use]
+    pub const fn bucket(&self) -> Option<&BucketResource> {
+        match self {
+            Self::DeleteBucket(bucket)
+            | Self::ConfigureBucket(bucket)
+            | Self::ReadBucket(bucket)
+            | Self::ReadObject(bucket)
+            | Self::WriteObject(bucket)
+            | Self::Upload { bucket, .. } => Some(bucket),
+            _ => None,
+        }
+    }
 }

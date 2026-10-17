@@ -1,6 +1,7 @@
 //! An object's bytes on their way into a data file, or on a cluster member into k+m shards. The data id is queued
 //! for reclamation before any byte is written, so whatever happens to the process from here on leaves at worst
-//! bytes the queue names.
+//! bytes the queue names. A sealed upload seals the bytes before either sink sees them, and reports the size and
+//! digests of what the client sent rather than of what was stored.
 
 use std::sync::Arc;
 
@@ -8,6 +9,8 @@ use tessari_s3_core::objects::checksum::Digests;
 
 use crate::Result;
 use crate::data::DataWriter;
+use crate::encryption::WrappedKey;
+use crate::encryption::stream::Sealer;
 use crate::erasure::{ErasureUpload, ErasureWrites};
 
 /// Where the bytes go.
@@ -23,6 +26,7 @@ enum Sink {
 pub struct Upload {
     id: [u8; 16],
     sink: Sink,
+    sealer: Option<(Sealer, WrappedKey)>,
 }
 
 /// Durable data, not yet referenced by any object.
@@ -34,6 +38,17 @@ pub struct Uploaded {
     pub size: u64,
     /// The object's MD5 and checksums, computed as the bytes were written.
     pub digests: Digests,
+    /// The wrapped data key the bytes are sealed under; none when they were written plain.
+    pub encryption: Option<WrappedKey>,
+}
+
+impl Sink {
+    async fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        match self {
+            Self::File(writer) => writer.append(bytes).await,
+            Self::Erasure { upload, .. } => upload.append(bytes).await,
+        }
+    }
 }
 
 impl Upload {
@@ -41,6 +56,7 @@ impl Upload {
         Self {
             id,
             sink: Sink::File(writer),
+            sealer: None,
         }
     }
 
@@ -52,7 +68,15 @@ impl Upload {
         Self {
             id,
             sink: Sink::Erasure { upload, writes },
+            sealer: None,
         }
+    }
+
+    /// The same upload with every byte sealed by `sealer` before it reaches the sink, under the data key `wrapped`
+    /// holds.
+    pub(crate) fn sealing(mut self, sealer: Sealer, wrapped: WrappedKey) -> Self {
+        self.sealer = Some((sealer, wrapped));
+        self
     }
 
     /// The data id.
@@ -65,11 +89,18 @@ impl Upload {
     ///
     /// # Errors
     /// The drive's failure, or on a cluster member too few shards left for the write quorum; the upload is then over.
-    pub async fn append(&mut self, bytes: &[u8]) -> Result<()> {
-        match &mut self.sink {
-            Sink::File(writer) => writer.append(bytes).await,
-            Sink::Erasure { upload, .. } => upload.append(bytes).await,
+    pub async fn append(&mut self, mut bytes: &[u8]) -> Result<()> {
+        let Some((sealer, _)) = &mut self.sealer else {
+            return self.sink.append(bytes).await;
+        };
+        while !bytes.is_empty() {
+            let (sealed, rest) = sealer.take(bytes).await?;
+            if let Some(block) = sealed {
+                self.sink.append(&block).await?;
+            }
+            bytes = rest;
         }
+        Ok(())
     }
 
     /// Makes the bytes durable: the file under its final name, or at least the write quorum of shards — and when
@@ -77,7 +108,26 @@ impl Upload {
     ///
     /// # Errors
     /// The drive's failure, a failed sync included (never retried), too few durable shards, or the store's.
-    pub async fn finish(self) -> Result<Uploaded> {
+    pub async fn finish(mut self) -> Result<Uploaded> {
+        let Some((sealer, wrapped)) = self.sealer.take() else {
+            return self.finish_sink().await;
+        };
+        let size = sealer.declared();
+        let (last, digests) = sealer.finish().await?;
+        if let Some(block) = last {
+            self.sink.append(&block).await?;
+        }
+        let stored = self.finish_sink().await?;
+        Ok(Uploaded {
+            id: stored.id,
+            size,
+            digests,
+            encryption: Some(wrapped),
+        })
+    }
+
+    /// Makes what reached the sink durable, as [`Self::finish`] describes.
+    async fn finish_sink(self) -> Result<Uploaded> {
         match self.sink {
             Sink::File(writer) => {
                 let finished = writer.finish().await?;
@@ -85,6 +135,7 @@ impl Upload {
                     id: self.id,
                     size: finished.size,
                     digests: finished.digests,
+                    encryption: None,
                 })
             }
             Sink::Erasure { upload, writes } => {
@@ -96,6 +147,7 @@ impl Upload {
                     id: self.id,
                     size: written.size,
                     digests: written.digests,
+                    encryption: None,
                 })
             }
         }

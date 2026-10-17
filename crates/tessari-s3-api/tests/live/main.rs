@@ -10,6 +10,7 @@ mod access;
 mod access_crossing;
 mod access_probe;
 mod access_window;
+mod audit;
 #[path = "../wire/authority.rs"]
 mod authority;
 mod buckets;
@@ -20,8 +21,10 @@ mod confined_account;
 mod console;
 mod console_admin;
 mod console_break_glass;
+mod console_encryption;
 mod console_explorer;
 mod console_fresh_auth;
+mod console_groups;
 mod console_keys;
 mod console_layout;
 mod console_logout;
@@ -33,6 +36,7 @@ mod console_store;
 mod console_users;
 mod copy;
 mod copy_part;
+mod cors;
 mod delete_many;
 mod erasure;
 mod erasure_heals;
@@ -40,7 +44,9 @@ mod erasure_moves;
 mod erasure_pacing;
 mod erasure_reads;
 mod erasure_retires;
+mod groups;
 mod identities;
+mod keys_vault;
 mod large;
 mod lifecycle;
 mod listing;
@@ -48,6 +54,7 @@ mod media;
 mod members;
 mod meta_pool;
 mod metadata;
+mod metrics;
 mod multipart;
 mod namespaces;
 mod namespaces_dropped;
@@ -63,6 +70,11 @@ mod objects;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod oidc_provider;
+mod policy;
+mod policy_enforced;
+mod policy_probe;
+mod post_object;
+mod public_access;
 mod quota;
 mod quota_window;
 mod reclaim;
@@ -73,6 +85,7 @@ mod replication;
 mod replication_regions;
 mod replication_send;
 mod replication_tasks;
+mod sessions;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,
@@ -80,6 +93,16 @@ mod replication_tasks;
 )]
 mod signer;
 mod spaces;
+mod sse;
+mod sse_c;
+mod sse_c_custody;
+mod sse_default;
+mod sse_erasure;
+mod sse_kms;
+mod sse_media;
+mod sse_replication;
+mod sse_rotation;
+mod sts;
 mod tagging;
 mod tagging_carried;
 mod upload_keys;
@@ -382,6 +405,46 @@ pub(crate) async fn call_as(
     headers: Vec<(&str, &str)>,
     body: &[u8],
 ) -> Seen {
+    send(
+        state,
+        signed(state, credential, method, path, query, headers, body),
+    )
+    .await
+}
+
+/// As [`call_with`], arriving over TLS — marked as the S3 listener marks a request whose connection completed a
+/// handshake.
+pub(crate) async fn call_tls(
+    state: &ApiState,
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Seen {
+    let mut request = signed(
+        state,
+        (ACCESS_KEY, SECRET),
+        method,
+        path,
+        query,
+        headers,
+        body,
+    );
+    request.extensions_mut().insert(tessari_s3_api::OverTls);
+    send(state, request).await
+}
+
+/// One request carrying `body`, signed with `credential` and declared by its SHA-256.
+fn signed(
+    state: &ApiState,
+    credential: (&str, &str),
+    method: &str,
+    path: &str,
+    query: Vec<(&str, Option<&str>)>,
+    headers: Vec<(&str, &str)>,
+    body: &[u8],
+) -> Request<Body> {
     let (access_key, secret) = credential;
     let amz_date = amz_now_for_tests();
     let unsigned = signer::Unsigned {
@@ -401,7 +464,11 @@ pub(crate) async fn call_as(
     for (name, value) in &headers {
         builder = builder.header(name.as_str(), value.as_str());
     }
-    let request = builder.body(Body::from(body.to_vec())).expect("request");
+    builder.body(Body::from(body.to_vec())).expect("request")
+}
+
+/// Sends `request` through the S3 router and reads the whole answer.
+pub(crate) async fn send(state: &ApiState, request: Request<Body>) -> Seen {
     let response = router(state.clone())
         .oneshot(request)
         .await

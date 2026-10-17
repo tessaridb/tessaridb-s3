@@ -3,6 +3,7 @@
 //! the condition, so a change made in between is refused rather than lost.
 
 use std::collections::BTreeMap;
+use tessari_s3_core::authz::policy::Context;
 
 use axum::Json;
 use axum::body::Bytes;
@@ -22,7 +23,7 @@ use tessari_s3_storage::objects::{
 use tessari_s3_types::ObjectKey;
 
 use super::ConsoleState;
-use super::access::on_bucket;
+use super::access::{Caller, on_bucket};
 use super::actions::record;
 use super::buckets::bucket_name;
 use super::error::ConsoleError;
@@ -89,12 +90,21 @@ pub(super) const fn no_such_key() -> ConsoleError {
 pub(super) async fn list(
     State(state): State<ConsoleState>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     query: Result<Query<ListQuery>, QueryRejection>,
 ) -> Result<Json<Objects>, ConsoleError> {
     let Query(query) = query.map_err(|_| ConsoleError::bad_request("limit is a whole number"))?;
     let bucket = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &bucket, Action::ReadBucket).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &bucket,
+        Action::ReadBucket,
+        ("s3:ListBucket", None),
+    )
+    .await?;
     let spec = ListSpec {
         prefix: query.prefix.unwrap_or_default(),
         delimiter: query.delimiter.filter(|delimiter| !delimiter.is_empty()),
@@ -162,12 +172,21 @@ struct Retention {
 pub(super) async fn detail(
     State(state): State<ConsoleState>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     query: Result<Query<KeyQuery>, QueryRejection>,
 ) -> Result<Json<Detail>, ConsoleError> {
     let Query(query) = query.map_err(|_| ConsoleError::bad_request("key is required"))?;
     let bucket = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &bucket, Action::ReadObject).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &bucket,
+        Action::ReadObject,
+        ("s3:GetObject", query.key.as_deref()),
+    )
+    .await?;
     let key = object_key(query.key.as_deref())?;
     let object = match state.storage().objects().get(&bucket, &key).await? {
         Err(()) => return Err(no_such_bucket()),
@@ -233,7 +252,7 @@ pub(super) struct Delete {
 pub(super) async fn delete(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
-    Extension(principal): Extension<Principal>,
+    Extension(Caller { principal, context }): Extension<Caller>,
     Path(bucket): Path<String>,
     query: Result<Query<KeyQuery>, QueryRejection>,
     headers: HeaderMap,
@@ -246,7 +265,15 @@ pub(super) async fn delete(
     } = json(&headers, &body, "expected etag and reason")?;
     let why = reason(given, true)?;
     let bucket = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &bucket, Action::WriteObject).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &bucket,
+        Action::WriteObject,
+        ("s3:DeleteObject", query.key.as_deref()),
+    )
+    .await?;
     super::regions::writable(&state).await?;
     let key = object_key(query.key.as_deref())?;
     let removed = state

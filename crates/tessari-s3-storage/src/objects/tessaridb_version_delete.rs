@@ -12,8 +12,11 @@ use crate::answers::{bucket_read, first_record};
 use crate::{Error, Result};
 
 /// A version's fields, as a read of it projects them.
+/// Every field a version brings back when it becomes current again — its wrapped data key included, or a sealed
+/// version promoted from here could not be opened.
 const FIELDS: &str = "bucket_name, key, incarnation, size, etag, modified, headers, metadata, tags, checksums, data, \
-                      upload, parts, version_id, seq, marker";
+                      upload, parts, version_id, seq, marker, sse_alg, sse_kek, sse_nonce, sse_key, sse_c_salt, \
+                      sse_c_verifier";
 
 const fn malformed(reason: &'static str) -> Error {
     Error::Malformed {

@@ -6,7 +6,7 @@ use tessari_s3_core::authz::{Access, UserName, Visible};
 use tessari_s3_types::BucketName;
 
 use super::entity::{AccessKeyEntity, GrantEntity, IssueEntity, KeyListedEntity, UserEntity};
-use super::model::{IssueToken, KeyScope, NewUser};
+use super::model::{IssueToken, KeyScope, NewSession, NewUser};
 use super::sealer::Sealed;
 use crate::Result;
 
@@ -41,6 +41,15 @@ pub(crate) trait UserRepository: Send + Sync {
         user: &UserName,
         sealed: &Sealed,
         scope: Option<&KeyScope>,
+    ) -> impl Future<Output = Result<bool>> + Send;
+    /// Writes new, enabled temporary credentials `id` for `user`, dropped by the store at `session.expires`; `false`
+    /// when that id is taken.
+    fn insert_session_key(
+        &self,
+        id: &str,
+        user: &UserName,
+        sealed: &Sealed,
+        session: &NewSession,
     ) -> impl Future<Output = Result<bool>> + Send;
     /// Writes a new, enabled full access key `id` for `user` and records that `token` issued it, both or neither,
     /// the token remembered for `token_secs`; `false` when that id or that token is taken, or a concurrent write won.

@@ -12,8 +12,10 @@ use std::future::Future;
 use std::sync::Arc;
 
 use scc::TreeIndex;
-use tessari_s3_core::authz::{Principal, UploadPrincipal, UserPrincipal};
-use tessari_s3_storage::users::{KeyScope, UserService};
+use tessari_s3_core::authz::policy::SessionPolicy;
+use tessari_s3_core::authz::{Principal, SessionPrincipal, UploadPrincipal, UserPrincipal};
+use tessari_s3_storage::identities::IdentityService;
+use tessari_s3_storage::users::{KeyScope, SessionScope, UserService};
 use tessari_s3_types::SecretKey;
 
 /// How long a resolution is believed, in seconds: the published revocation window.
@@ -22,14 +24,7 @@ pub(crate) const WINDOW_SECS: i64 = 5;
 /// What looking a key up in the store answered.
 pub(crate) enum Fetched {
     /// The key and its user are enabled.
-    Live {
-        /// The user, with its grants.
-        principal: UserPrincipal,
-        /// The key's secret.
-        secret: SecretKey,
-        /// A one-key credential's scope; `None` for a full key.
-        scope: Option<KeyScope>,
-    },
+    Live(Box<Live>),
     /// No such key, or it or its user is disabled.
     Unknown,
 }
@@ -43,12 +38,25 @@ pub(crate) struct Live {
     pub(crate) secret: SecretKey,
     /// A one-key credential's scope; `None` for a full key.
     pub(crate) scope: Option<KeyScope>,
+    /// Temporary credentials' session; `None` for any other key.
+    pub(crate) session: Option<SessionScope>,
+    /// The session's policy, parsed once when the key was resolved; `None` for none.
+    pub(crate) policy: Option<Arc<SessionPolicy>>,
 }
 
 /// Who signs with a live key at `now` (seconds): its user for a full key; for a one-key credential, its issuer narrowed
-/// to its key, until the moment it expires. The expiry is judged here, on every request, and not when the key was
-/// cached, so a cached credential stops at its expiry rather than up to a window later.
+/// to its key, and for temporary credentials a session of their user — each until the moment it expires. The expiry
+/// is judged here, on every request, and not when the key was cached, so a cached credential stops at its expiry
+/// rather than up to a window later.
 pub(crate) fn principal_of(live: Live, now: i64) -> Option<Principal> {
+    if let Some(session) = &live.session {
+        return (now < session.expires).then(|| {
+            Principal::Session(match live.policy {
+                Some(policy) => SessionPrincipal::narrowed(live.principal, policy),
+                None => SessionPrincipal::new(live.principal),
+            })
+        });
+    }
     match live.scope {
         None => Some(Principal::User(live.principal)),
         Some(scope) if now < scope.expires => Some(Principal::Upload(UploadPrincipal {
@@ -104,20 +112,11 @@ impl Principals {
                 return Ok(Some(entry.live.clone()));
             }
         }
-        let Fetched::Live {
-            principal,
-            secret,
-            scope,
-        } = fetch().await?
-        else {
+        let Fetched::Live(live) = fetch().await? else {
             self.entries.remove_async(id).await;
             return Ok(None);
         };
-        let live = Live {
-            principal,
-            secret,
-            scope,
-        };
+        let live = *live;
         let entry = Arc::new(Entry {
             resolved_at: now,
             live: live.clone(),
@@ -128,13 +127,15 @@ impl Principals {
 }
 
 /// User key `id` resolved through `cache` at `now`: its user (for a one-key credential, its issuer), with grants, and
-/// its secret while both are enabled.
+/// its secret while both are enabled — and, for temporary credentials, while the identity they were issued to still
+/// signs in as that user and the provider has not signed the user out since they were issued.
 ///
 /// # Errors
 /// The store's failure; nothing cached past its window is served in its place.
 pub(crate) async fn resolve_user_key(
     cache: &Principals,
     users: &UserService,
+    identities: &IdentityService,
     id: &str,
     now: i64,
 ) -> Result<Option<Live>, tessari_s3_storage::Error> {
@@ -143,16 +144,51 @@ pub(crate) async fn resolve_user_key(
             let Some(resolved) = users.resolve(id).await? else {
                 return Ok(Fetched::Unknown);
             };
+            if let Some(session) = &resolved.session
+                && !session_stands(identities, &resolved.user.name, session).await?
+            {
+                return Ok(Fetched::Unknown);
+            }
+            // A stored policy that no longer parses decides nothing: the key resolves to nothing, and says why.
+            let policy = match resolved.session.as_ref().and_then(|session| session.policy.as_deref()) {
+                None => None,
+                Some(text) => match SessionPolicy::parse(text) {
+                    Ok(policy) => Some(Arc::new(policy)),
+                    Err(error) => {
+                        tracing::warn!(key = id, error = %error, "a session's stored policy does not parse");
+                        return Ok(Fetched::Unknown);
+                    }
+                },
+            };
             Ok(match users.principal(&resolved.user.name).await? {
-                Some(principal) => Fetched::Live {
+                Some(principal) => Fetched::Live(Box::new(Live {
                     principal,
                     secret: resolved.secret,
                     scope: resolved.scope,
-                },
+                    session: resolved.session,
+                    policy,
+                })),
                 None => Fetched::Unknown,
             })
         })
         .await
+}
+
+/// Whether temporary credentials of `user` still stand: their identity is still linked to `user`, and no provider
+/// logout of `user` came at or after their issue.
+async fn session_stands(
+    identities: &IdentityService,
+    user: &tessari_s3_core::authz::UserName,
+    session: &SessionScope,
+) -> Result<bool, tessari_s3_storage::Error> {
+    let linked = identities
+        .user_for(&session.issuer, &session.subject)
+        .await?;
+    if linked.as_ref() != Some(user) {
+        return Ok(false);
+    }
+    let ended = identities.sessions_ended(user).await?;
+    Ok(ended.is_none_or(|at| at < session.issued))
 }
 
 #[cfg(test)]

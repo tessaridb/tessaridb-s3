@@ -2,13 +2,17 @@
 
 pub mod actions;
 mod answers;
+pub mod audit;
 mod backoff;
 pub mod buckets;
 pub mod cluster;
 pub mod data;
+pub mod encryption;
 pub mod erasure;
 mod error;
+pub mod groups;
 pub mod identities;
+pub mod keys;
 pub mod lifecycle;
 pub mod media;
 pub mod members;

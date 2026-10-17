@@ -46,7 +46,7 @@ pub enum Deleted {
 /// Bucket operations.
 #[derive(Clone)]
 pub struct BucketService {
-    repository: TessariBuckets,
+    pub(super) repository: TessariBuckets,
 }
 
 impl BucketService {
@@ -149,6 +149,24 @@ impl BucketService {
         Ok(true)
     }
 
+    /// Sets `name`'s CORS rules (already validated), or removes them with `None`; `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_cors(
+        &self,
+        name: &BucketName,
+        rules: Option<&[tessari_s3_core::cors::Rule]>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_cors(name, rules.map(super::cors::to_value))
+            .await?;
+        Ok(true)
+    }
+
     /// Sets `name`'s lifecycle rules (already validated), or removes them with `None`; `false` when there is no such
     /// bucket.
     ///
@@ -192,6 +210,39 @@ impl BucketService {
         } else {
             Ok(LockSet::NotVersioned)
         }
+    }
+
+    /// Sets `name`'s policy text (already validated), or removes it with `None`; `false` when there is no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_policy(&self, name: &BucketName, policy: Option<&str>) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_policy(name, policy.map(str::to_owned))
+            .await?;
+        Ok(true)
+    }
+
+    /// Sets `name`'s Block Public Access switches, or removes the configuration with `None`; `false` when there is
+    /// no such bucket.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn set_public_access(
+        &self,
+        name: &BucketName,
+        block: Option<tessari_s3_core::authz::policy::PublicAccessBlock>,
+    ) -> Result<bool> {
+        if self.repository.get(name).await?.is_none() {
+            return Ok(false);
+        }
+        self.repository
+            .set_public_access(name, super::public_access::to_text(block))
+            .await?;
+        Ok(true)
     }
 
     /// Replaces `name`'s tags (already validated); an empty set removes them. `false` when there is no such bucket.

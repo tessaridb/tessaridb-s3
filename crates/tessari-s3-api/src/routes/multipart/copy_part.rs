@@ -15,8 +15,13 @@ use tessari_s3_types::{ErrorCode, ObjectKey, Timestamp};
 use super::{no_such_upload, part_number, upload_id};
 use crate::pipeline::call::Call;
 use crate::pipeline::response::xml_response;
+use crate::routes::objects::customer::{
+    admit_key, admit_read, answer_customer, read_customer, read_source_customer,
+};
+use crate::routes::objects::data::Seal;
 use crate::routes::objects::headers::read_integrity;
 use crate::routes::objects::source;
+use crate::routes::objects::sse::{etag_for, opaque_etag};
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -58,7 +63,8 @@ fn wanted(call: &Call<'_>, size: u64) -> Result<(u64, u64, u64)> {
 pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let number = part_number(call)?;
-    source::refuse_encrypted_source(call.headers)?;
+    let source_customer = read_source_customer(call.headers)?;
+    let customer = read_customer(call.headers)?;
     let integrity = read_integrity(call.headers)?;
     if integrity.content_md5.is_some() || integrity.checksum.is_some() {
         return Err(Error::new(
@@ -72,8 +78,11 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
     let Some(declared) = storage.multipart().find(bucket, key, id).await? else {
         return Err(no_such_upload());
     };
+    // The part is sealed under the upload's key, which the request brings beside the source's.
+    admit_key(call, declared.customer.as_ref(), customer.as_ref())?;
     let objects = storage.objects();
     let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
+    admit_read(call, &object, source_customer.as_ref())?;
     let (first, last, length) = wanted(call, object.size)?;
     if length > SINGLE_PUT_MAX {
         return Err(Error::new(
@@ -82,9 +91,18 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
         ));
     }
     quota::admit(call, bucket, None, length).await?;
-    let stream = source::bytes(objects, &object, first, last).await?;
-    let uploaded = source::into_file(objects, stream, length).await?;
-    let etag = format!("\"{}\"", uploaded.digests.md5_hex);
+    let source_key_held = source_customer.as_ref().map(|customer| &customer.key);
+    let stream = source::bytes(objects, &object, source_key_held, first, last).await?;
+    let seal = match (&declared.customer, &customer) {
+        (Some(seal), Some(customer)) => Seal::Customer(&customer.key, seal),
+        _ => declared.encryption.as_ref().into(),
+    };
+    let uploaded = source::into_file(objects, stream, length, seal).await?;
+    let etag = if declared.customer.is_some() {
+        opaque_etag()?
+    } else {
+        etag_for(&uploaded.digests.md5_hex, declared.encryption.as_ref())?
+    };
     let part = NewPart {
         data: uploaded.id,
         size: uploaded.size,
@@ -99,6 +117,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
                 )
             })
             .collect(),
+        encryption: uploaded.encryption,
     };
     match storage
         .multipart()
@@ -128,7 +147,11 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
                 ));
             }
             out.push_str("</CopyPartResult>");
-            Ok(xml_response(StatusCode::OK, out))
+            let mut response = xml_response(StatusCode::OK, out);
+            if let Some(customer) = &customer {
+                answer_customer(response.headers_mut(), customer);
+            }
+            Ok(response)
         }
         PartWritten::NoSuchUpload => Err(no_such_upload()),
         PartWritten::DataReclaimed => Err(Error::new(

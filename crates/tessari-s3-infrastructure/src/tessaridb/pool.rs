@@ -15,6 +15,10 @@ use tokio::sync::Semaphore;
 use super::error::{MetaError, MetaResult};
 use super::settings::{MetaSettings, Replication, regional_database};
 
+#[path = "vault.rs"]
+mod vault;
+pub use vault::VaultLink;
+
 /// A cheaply cloned handle to the pool. Handles made by [`MetaPool::regional`] share the connections and differ only
 /// in the database their units of work select.
 #[derive(Clone)]

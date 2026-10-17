@@ -104,7 +104,7 @@ pub(crate) fn verify(
 }
 
 /// The check an ID-token refusal names; a key id the console does not hold is told apart, so it can refresh.
-fn reason(error: &ClaimsVerificationError) -> &'static str {
+pub(crate) fn reason(error: &ClaimsVerificationError) -> &'static str {
     match error {
         ClaimsVerificationError::SignatureVerification(
             SignatureVerificationError::NoMatchingKey,

@@ -32,7 +32,7 @@ impl ShardService {
         self.files.drive().await
     }
 
-    /// Starts shard `index` of data `id`: `size` bytes in blocks of `block_size`.
+    /// Starts shard `index` of data `id`: `size` bytes in blocks of `block_size`, a sealed shard when `sealed`.
     ///
     /// # Errors
     /// [`Error::InvalidShard`] for a block size of zero or past [`DATA_BLOCK_SIZE`] or an index past the widest
@@ -43,6 +43,7 @@ impl ShardService {
         index: u16,
         block_size: u32,
         size: u64,
+        sealed: bool,
     ) -> Result<ShardWrite> {
         check_index(index)?;
         if block_size == 0 || block_size > DATA_BLOCK_SIZE {
@@ -50,7 +51,10 @@ impl ShardService {
                 reason: "block size of zero or past a data block",
             });
         }
-        let writer = self.files.create_shard(id, index, block_size).await?;
+        let writer = self
+            .files
+            .create_shard(id, index, block_size, sealed)
+            .await?;
         Ok(ShardWrite {
             writer,
             declared: size,
@@ -58,14 +62,21 @@ impl ShardService {
         })
     }
 
-    /// Opens shard `index` of data `id`, which must hold `size` bytes; every block is verified as it is read.
+    /// Opens shard `index` of data `id`, which must hold `size` bytes and be a sealed shard exactly when `sealed`;
+    /// every block is verified as it is read.
     ///
     /// # Errors
-    /// [`Error::InvalidShard`], [`Error::Corrupt`] or the drive's failure (a missing
-    /// shard is `NotFound`).
-    pub async fn open(&self, id: [u8; 16], index: u16, size: u64) -> Result<DataReader> {
+    /// [`Error::InvalidShard`], [`Error::Corrupt`] (a sealed shard opened as plain, or the reverse, included) or the
+    /// drive's failure (a missing shard is `NotFound`).
+    pub async fn open(
+        &self,
+        id: [u8; 16],
+        index: u16,
+        size: u64,
+        sealed: bool,
+    ) -> Result<DataReader> {
         check_index(index)?;
-        self.files.open_shard(id, index, size).await
+        self.files.open_shard(id, index, size, sealed).await
     }
 
     /// Up to `limit` shards on this node last written more than `age` ago, as (data id, index); none without a data

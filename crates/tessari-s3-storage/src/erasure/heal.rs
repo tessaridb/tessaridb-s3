@@ -93,7 +93,7 @@ impl ErasureWrites {
         let Some((set, sources)) = self.sources_of(id).await? else {
             return Ok(Outcome::Whole);
         };
-        let reader = ErasureReader::new(Arc::clone(self), id, set.size, sources.clone())?;
+        let reader = ErasureReader::new(Arc::clone(self), id, set, sources.clone())?;
         let mut broken = Vec::new();
         for shard in 0..sources.len() {
             if !reader.intact(shard).await {
@@ -128,6 +128,7 @@ impl ErasureWrites {
         let shape = ShardShape {
             block_len,
             size: reader.shard_size(),
+            sealed: reader.sealed(),
         };
         let stripes = reader.stripes().stripe_count(reader.size());
         let budget = self

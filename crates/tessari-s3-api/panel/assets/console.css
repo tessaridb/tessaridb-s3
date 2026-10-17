@@ -760,10 +760,20 @@ table {
 th,
 td {
   text-align: start;
-  padding: 0 var(--card-inset);
+  padding: 0 var(--s-4);
   block-size: var(--row-height);
   border-block-end: 1px solid var(--border);
   vertical-align: middle;
+}
+
+/* The card's inset at the table's two edges only; between columns a narrower gap, so a row of eight columns and its
+   actions fits a card at a laptop width instead of scrolling them out of view. */
+:where(th, td):first-child {
+  padding-inline-start: var(--card-inset);
+}
+
+:where(th, td):last-child {
+  padding-inline-end: var(--card-inset);
 }
 
 tbody tr:last-child td {
@@ -805,6 +815,24 @@ a.name .icon {
 
 a.name:hover .icon {
   color: var(--accent-text);
+}
+
+/* A bucket's settings opened together under its row: one form after another, each set apart. */
+.settings > form + form {
+  margin-block-start: var(--s-6);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--border);
+}
+
+/* A second task inside a card, set apart from what comes before it. */
+.card-part {
+  margin-block-start: var(--s-6);
+  padding-block-start: var(--s-5);
+  border-block-start: 1px solid var(--border);
+}
+
+a.name + .chip {
+  margin-inline-start: var(--s-2);
 }
 
 tr.asking td,
@@ -899,6 +927,58 @@ tr.asking:hover td {
   gap: var(--s-2);
   margin-block-end: var(--s-5);
   max-inline-size: 32rem;
+}
+
+/* A value and its unit (or its lifetime) side by side: the choice follows the input on one row. */
+.field:has(> input + .segmented) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.field:has(> input + .segmented) > :not(input, .segmented) {
+  grid-column: 1 / -1;
+}
+
+/* A few choices as one control: the radios stay focusable for the arrow keys, the labels are the segments. */
+.segmented {
+  display: inline-flex;
+  min-block-size: var(--control-height);
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: 0;
+}
+
+.segmented label {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--s-3);
+  border-radius: calc(var(--control-radius) - 3px);
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented input:checked + label {
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.12);
+}
+
+.segmented input:focus-visible + label {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 label {
@@ -1107,6 +1187,27 @@ button.icon-action.danger {
 .check input {
   min-block-size: auto;
   accent-color: var(--accent);
+}
+
+/* One option of a radio group: the control beside its explanation, on the explanation's first line. */
+.choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: var(--s-2);
+  margin-block-end: var(--s-3);
+  max-inline-size: 48rem;
+}
+
+.choice input {
+  margin: 0;
+  padding: 0;
+  min-block-size: auto;
+  accent-color: var(--accent);
+}
+
+.choice label {
+  font-weight: 450;
 }
 
 /* A secret shown once: set apart so it is not mistaken for ordinary output. */

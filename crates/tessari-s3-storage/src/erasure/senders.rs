@@ -7,15 +7,9 @@ use bytes::Bytes;
 use tokio::sync::mpsc::Receiver;
 
 use crate::Result;
+pub(super) use crate::peers::ShardShape;
 use crate::peers::{PeerAt, RemoteShards, ShardRef};
 use crate::shards::ShardService;
-
-/// The shape every shard of one upload shares.
-#[derive(Debug, Clone, Copy)]
-pub(super) struct ShardShape {
-    pub(super) block_len: u32,
-    pub(super) size: u64,
-}
 
 /// Writes the shard to this node's drive. A queue that closes early leaves a short shard, which is abandoned.
 pub(super) async fn local(
@@ -25,7 +19,13 @@ pub(super) async fn local(
     mut blocks: Receiver<Bytes>,
 ) -> Result<()> {
     let mut write = shards
-        .write(shard.id, shard.index, shape.block_len, shape.size)
+        .write(
+            shard.id,
+            shard.index,
+            shape.block_len,
+            shape.size,
+            shape.sealed,
+        )
         .await?;
     while let Some(block) = blocks.recv().await {
         if let Err(error) = write.append(&block).await {
@@ -50,7 +50,5 @@ pub(super) async fn remote(
     let body = futures_util::stream::unfold(blocks, |mut blocks| async move {
         blocks.recv().await.map(|block| (Ok(block), blocks))
     });
-    peers
-        .put(&endpoint, shard, shape.block_len, shape.size, body, budget)
-        .await
+    peers.put(&endpoint, shard, shape, body, budget).await
 }

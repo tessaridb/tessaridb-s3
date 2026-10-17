@@ -25,6 +25,7 @@ pub struct PresignedQuery {
     expires_secs: i64,
     signed_headers: Vec<String>,
     signature: String,
+    security_token: Option<String>,
 }
 
 impl PresignedQuery {
@@ -35,6 +36,7 @@ impl PresignedQuery {
     /// [`AuthError::PresignExpiresOutOfRange`].
     pub fn parse(raw_query: &str) -> AuthResult<Option<Self>> {
         let mut found: [Option<String>; 6] = Default::default();
+        let mut security_token = None;
         const NAMES: [&str; 6] = [
             "X-Amz-Algorithm",
             "X-Amz-Credential",
@@ -47,11 +49,17 @@ impl PresignedQuery {
             let (raw_name, raw_value) = parameter.split_once('=').unwrap_or((parameter, ""));
             let name = percent_decode(raw_name)?;
             if name == b"X-Amz-Security-Token" {
-                // No temporary credentials are issued, so a session token cannot be checked; refuse rather than
-                // let a URL outlive a session nobody can see.
-                return Err(AuthError::Malformed {
-                    reason: "temporary credentials are not supported",
-                });
+                let value = String::from_utf8(percent_decode(raw_value)?).map_err(|_| {
+                    AuthError::Malformed {
+                        reason: "presign parameter is not UTF-8",
+                    }
+                })?;
+                if security_token.replace(value).is_some() {
+                    return Err(AuthError::Malformed {
+                        reason: "presign parameter repeated",
+                    });
+                }
+                continue;
             }
             let Some(index) = NAMES
                 .iter()
@@ -113,6 +121,7 @@ impl PresignedQuery {
             expires_secs,
             signed_headers,
             signature,
+            security_token,
         }))
     }
 
@@ -120,6 +129,12 @@ impl PresignedQuery {
     #[must_use]
     pub fn access_key(&self) -> &str {
         &self.access_key
+    }
+
+    /// The `X-Amz-Security-Token` the URL carries: temporary credentials sign with one, every other key without.
+    #[must_use]
+    pub fn security_token(&self) -> Option<&str> {
+        self.security_token.as_deref()
     }
 }
 

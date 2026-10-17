@@ -27,6 +27,8 @@ pub struct BucketEntity {
     pub versioning: Option<String>,
     /// The lifecycle rules as stored; absent while none are set.
     pub lifecycle: Option<Vec<Value>>,
+    /// The CORS rules as stored; absent while none are set.
+    pub cors: Option<Vec<Value>>,
     /// The notification configuration as stored; absent while none is set.
     pub notify: Option<Value>,
     /// The replication configuration as stored; absent while none is set.
@@ -37,6 +39,12 @@ pub struct BucketEntity {
     pub media: Option<Vec<Value>>,
     /// The tags as stored; absent while none are set.
     pub tags: Option<Value>,
+    /// The default encryption as stored; absent while the bucket has none.
+    pub encryption: Option<Value>,
+    /// The bucket policy's JSON text; absent while none is set.
+    pub policy: Option<String>,
+    /// The Block Public Access switches as four `0`/`1` flags, empty once removed; absent while never set.
+    pub public_access: Option<String>,
     /// `local` when the bucket's writes are acknowledged by its region's majority alone; absent otherwise.
     pub acknowledge: Option<String>,
 }
@@ -89,6 +97,11 @@ impl BucketEntity {
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("lifecycle")),
         };
+        let cors = match fields.get("cors") {
+            None | Some(Value::None) => None,
+            Some(Value::Array(rules)) => Some(rules.clone()),
+            Some(_) => return Err(malformed("cors")),
+        };
         let replication = match fields.get("replication") {
             None | Some(Value::None) => None,
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
@@ -104,6 +117,11 @@ impl BucketEntity {
             Some(tags @ Value::Object(_)) => Some(tags.clone()),
             Some(_) => return Err(malformed("tags")),
         };
+        let encryption = match fields.get("encryption") {
+            None | Some(Value::None) => None,
+            Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
+            Some(_) => return Err(malformed("encryption")),
+        };
         let notify = match fields.get("notify") {
             None | Some(Value::None) => None,
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
@@ -113,6 +131,16 @@ impl BucketEntity {
             None | Some(Value::None) => None,
             Some(Value::Array(rules)) => Some(rules.clone()),
             Some(_) => return Err(malformed("media")),
+        };
+        let policy = match fields.get("policy") {
+            None | Some(Value::None) => None,
+            Some(Value::String(text)) => Some(text.clone()),
+            Some(_) => return Err(malformed("policy")),
+        };
+        let public_access = match fields.get("public_access") {
+            None | Some(Value::None) => None,
+            Some(Value::String(text)) => Some(text.clone()),
+            Some(_) => return Err(malformed("public_access")),
         };
         let acknowledge = match fields.get("acknowledge") {
             None | Some(Value::None) => None,
@@ -135,11 +163,15 @@ impl BucketEntity {
             max_objects: limit("max_objects")?,
             versioning,
             lifecycle,
+            cors,
             notify,
             replication,
             object_lock,
             media,
             tags,
+            encryption,
+            policy,
+            public_access,
             acknowledge,
         })
     }

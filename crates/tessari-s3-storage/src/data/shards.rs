@@ -1,5 +1,6 @@
-//! Shards of erasure-coded objects on this node's drive: each a data file of its own (format 2) whose header names its
-//! index, so a shard can never be read as another shard of the same data or as a whole object.
+//! Shards of erasure-coded objects on this node's drive: each a data file of its own (format 2, or 4 for the shards
+//! of sealed data) whose header names its index, so a shard can never be read as another shard of the same data, as
+//! a whole object, or as plain bytes when it holds sealed ones.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -16,24 +17,28 @@ impl DataFiles {
         self.piece_paths(id, Piece::Shard(index)).0
     }
 
-    /// Starts writing shard `index` of data `id` in blocks of `block_size` bytes (the erasure block length).
+    /// Starts writing shard `index` of data `id` in blocks of `block_size` bytes (the erasure block length), a sealed
+    /// shard when `sealed`.
     pub(crate) async fn create_shard(
         &self,
         id: [u8; 16],
         index: u16,
         block_size: u32,
+        sealed: bool,
     ) -> Result<DataWriter> {
-        self.create_piece(id, Piece::Shard(index), block_size).await
+        self.create_piece(id, Piece::Shard(index), block_size, sealed)
+            .await
     }
 
-    /// Opens shard `index` of data `id`, which must hold `size` bytes.
+    /// Opens shard `index` of data `id`, which must hold `size` bytes and be a sealed shard exactly when `sealed`.
     pub(crate) async fn open_shard(
         &self,
         id: [u8; 16],
         index: u16,
         size: u64,
+        sealed: bool,
     ) -> Result<DataReader> {
-        self.open_piece(id, Piece::Shard(index), size).await
+        self.open_piece(id, Piece::Shard(index), size, sealed).await
     }
 
     /// Removes shard `index` of data `id`; a missing shard is not an error.

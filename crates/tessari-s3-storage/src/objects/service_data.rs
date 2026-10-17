@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use tessari_s3_constants::DATA_BLOCK_SIZE;
+
 use super::ObjectService;
 use crate::data::hex;
 use crate::objects::ObjectReader;
@@ -18,9 +20,23 @@ impl ObjectService {
     /// # Errors
     /// [`Error::NoLayout`], the metadata store's refusal or outage, or the drive's.
     pub async fn upload(&self, size: u64) -> Result<Upload> {
-        let id = *uuid::Uuid::new_v4().as_bytes();
+        self.start(*uuid::Uuid::new_v4().as_bytes(), size, false)
+            .await
+    }
+
+    /// Bytes per stored block: an erasure stripe on a cluster member, else a data file block.
+    pub(super) fn stored_block(&self) -> u32 {
+        if self.erasure.is_some() {
+            DATA_BLOCK_SIZE
+        } else {
+            self.data.block_size()
+        }
+    }
+
+    /// Starts writing `size` stored bytes under data id `id`, a sealed file's header when `sealed`.
+    pub(super) async fn start(&self, id: [u8; 16], size: u64, sealed: bool) -> Result<Upload> {
         if let Some(writes) = &self.erasure {
-            return match writes.start(id, size).await {
+            return match writes.start(id, size, sealed).await {
                 Ok(upload) => Ok(Upload::erasure(id, upload, Arc::clone(writes))),
                 Err(error) => {
                     self.release_logged(id).await;
@@ -29,7 +45,12 @@ impl ObjectService {
             };
         }
         self.repository.queue(id).await?;
-        match self.data.create(id).await {
+        let created = if sealed {
+            self.data.create_sealed(id).await
+        } else {
+            self.data.create(id).await
+        };
+        match created {
             Ok(writer) => Ok(Upload::new(id, writer)),
             Err(error) => {
                 self.release_logged(id).await;
@@ -186,12 +207,27 @@ impl ObjectService {
     /// member that includes a forgotten shard set) or the drive's failure; for erasure-coded data the store's refusal
     /// or a layout this node does not hold, and per block [`Error::Unreadable`].
     pub async fn open(&self, id: [u8; 16], size: u64) -> Result<ObjectReader> {
+        self.open_stored(id, size, false).await
+    }
+
+    /// Opens data `id` holding `size` stored bytes, a sealed file's header expected when `sealed`.
+    pub(super) async fn open_stored(
+        &self,
+        id: [u8; 16],
+        size: u64,
+        sealed: bool,
+    ) -> Result<ObjectReader> {
         if let Some(writes) = &self.erasure
-            && let Some(reader) = writes.open(id, size).await?
+            && let Some(reader) = writes.open(id, size, sealed).await?
         {
             return Ok(ObjectReader::Erasure(reader));
         }
-        match self.data.open(id, size).await {
+        let opened = if sealed {
+            self.data.open_sealed(id, size).await
+        } else {
+            self.data.open(id, size).await
+        };
+        match opened {
             Ok(reader) => Ok(ObjectReader::File(reader)),
             // Only committed objects are opened here, so missing data is loss, never absence.
             Err(Error::DataIo {

@@ -4,15 +4,18 @@
 use axum::BoxError;
 use axum::body::Body;
 use axum::http::Response;
+use tessari_s3_observability::Metrics;
 use tessari_s3_types::ErrorCode;
 
 use super::response::{error_response, new_request_id};
 use crate::Error;
 
-/// The response for a request the service stack refused: `SlowDown` when shed, `InternalError` otherwise.
-pub async fn refused(error: BoxError) -> Response<Body> {
+/// The response for a request the service stack refused: `SlowDown` when shed, counted in `metrics`;
+/// `InternalError` otherwise.
+pub fn refused(metrics: &Metrics, error: &BoxError) -> Response<Body> {
     let request_id = new_request_id();
     let error = if error.is::<tower::load_shed::error::Overloaded>() {
+        metrics.shed();
         tracing::warn!(request_id = %request_id, "request shed: in-flight limit reached");
         Error::new(ErrorCode::SlowDown, "please reduce your request rate")
     } else {

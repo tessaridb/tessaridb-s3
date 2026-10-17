@@ -165,6 +165,8 @@ pub(super) struct Capabilities {
     view_cluster: bool,
     /// Issuing one-key upload credentials: a user's, for the buckets it may write; never root's.
     issue_upload_keys: bool,
+    /// The signed-in user's own space; `None` for root, which belongs to none.
+    space: Option<String>,
 }
 
 pub(super) async fn capabilities(
@@ -175,7 +177,8 @@ pub(super) async fn capabilities(
     let administer = match &principal {
         Principal::Root => true,
         Principal::User(user) => may(&Action::ManageSpace(user.space.clone())),
-        Principal::Upload(_) => false,
+        // A session's key never signs in here; named for the match.
+        Principal::Upload(_) | Principal::Session(_) | Principal::Anonymous => false,
     };
     Json(Capabilities {
         // A person signed in through the identity provider holds no key; until the page names them its own way, this
@@ -185,6 +188,13 @@ pub(super) async fn capabilities(
         administer,
         view_cluster: may(&Action::ViewCluster),
         issue_upload_keys: matches!(principal, Principal::User(_)),
+        space: match &principal {
+            Principal::User(user) => Some(user.space.as_str().to_owned()),
+            Principal::Root
+            | Principal::Upload(_)
+            | Principal::Session(_)
+            | Principal::Anonymous => None,
+        },
     })
 }
 

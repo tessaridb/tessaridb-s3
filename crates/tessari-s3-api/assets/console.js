@@ -54,16 +54,16 @@
     if (!record(v) || !text(v["version"]) || !textOrNull(v["node"]) || !text(v["region"]) || !textOrNull(v["erasure"])) {
       return null;
     }
-    const members = v["members"] === null ? null : list(v["members"], member);
+    const members2 = v["members"] === null ? null : list(v["members"], member);
     const backlog = v["heal_backlog"];
     const heal = backlog === null ? null : record(backlog) && count(backlog["listed"]) && typeof backlog["more"] === "boolean" && count(backlog["at_risk"]) ? { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] } : void 0;
     const sent = v["replication"];
     const replication = sent === null ? null : record(sent) && count(sent["backlog"]) && count(sent["in_flight"]) && count(sent["failed"]) ? { backlog: sent["backlog"], in_flight: sent["in_flight"], failed: sent["failed"] } : void 0;
     const space2 = drive(v["drive"]);
-    if (v["members"] !== null && members === null || heal === void 0 || replication === void 0 || space2 === void 0) {
+    if (v["members"] !== null && members2 === null || heal === void 0 || replication === void 0 || space2 === void 0) {
       return null;
     }
-    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members, heal_backlog: heal, replication, drive: space2 };
+    return { version: v["version"], node: v["node"], region: v["region"], erasure: v["erasure"], members: members2, heal_backlog: heal, replication, drive: space2 };
   }
   var bucketUsage = (v) => record(v) && text(v["bucket"]) && count(v["objects"]) && count(v["bytes"]) && count(v["raw_bytes"]) ? { bucket: v["bucket"], objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] } : null;
   function readUsage(v) {
@@ -74,14 +74,34 @@
     return buckets2 === null ? null : { taken: v["taken"], stale: v["stale"], buckets: buckets2, objects: v["objects"], bytes: v["bytes"], raw_bytes: v["raw_bytes"] };
   }
   var acknowledgement = (v) => v === "majority" || v === "region";
-  var bucket = (v) => record(v) && text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) && acknowledgement(v["acknowledgement"]) ? {
-    name: v["name"],
-    created: v["created"],
-    region: v["region"],
-    maxBytes: v["max_bytes"],
-    maxObjects: v["max_objects"],
-    acknowledgement: v["acknowledgement"]
-  } : null;
+  function bucketEncryption(v) {
+    if (v === null) {
+      return null;
+    }
+    if (!record(v) || typeof v["customer_keys"] !== "boolean") {
+      return void 0;
+    }
+    const customerKeys = v["customer_keys"];
+    if (v["algorithm"] === "AES256" && v["key"] === null) {
+      return { algorithm: "AES256", customerKeys };
+    }
+    return v["algorithm"] === "aws:kms" && text(v["key"]) ? { algorithm: "aws:kms", key: v["key"], customerKeys } : void 0;
+  }
+  function bucket(v) {
+    if (!record(v)) {
+      return null;
+    }
+    const encryption = bucketEncryption(v["encryption"]);
+    return text(v["name"]) && text(v["created"]) && text(v["region"]) && countOrNull(v["max_bytes"]) && countOrNull(v["max_objects"]) && acknowledgement(v["acknowledgement"]) && encryption !== void 0 ? {
+      name: v["name"],
+      created: v["created"],
+      region: v["region"],
+      maxBytes: v["max_bytes"],
+      maxObjects: v["max_objects"],
+      acknowledgement: v["acknowledgement"],
+      encryption
+    } : null;
+  }
   function readBuckets(v) {
     return record(v) ? list(v["buckets"], bucket) : null;
   }
@@ -166,12 +186,13 @@
     return key !== null && record(v) && text(v["expires"]) ? { ...key, expires: v["expires"] } : null;
   }
   function readCapabilities(v) {
-    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) ? {
+    return record(v) && text(v["access_key_id"]) && flag(v["operate"]) && flag(v["administer"]) && flag(v["view_cluster"]) && flag(v["issue_upload_keys"]) && textOrNull(v["space"]) ? {
       access_key_id: v["access_key_id"],
       operate: v["operate"],
       administer: v["administer"],
       view_cluster: v["view_cluster"],
-      issue_upload_keys: v["issue_upload_keys"]
+      issue_upload_keys: v["issue_upload_keys"],
+      space: v["space"]
     } : null;
   }
   var names = (value) => list(value, (entry) => text(entry) ? entry : null);
@@ -187,11 +208,11 @@
     if (!record(v) || !textOrNull(v["node"]) || !textOrNull(v["erasure"]) || !record(v["metadata"])) {
       return null;
     }
-    const members = v["members"] === null ? null : list(v["members"], member);
+    const members2 = v["members"] === null ? null : list(v["members"], member);
     const placed = layout(v["layout"]);
     const backlog = v["heal_backlog"];
     const addresses = names(v["metadata"]["addresses"]);
-    if (v["members"] !== null && members === null || placed === void 0 || addresses === null) {
+    if (v["members"] !== null && members2 === null || placed === void 0 || addresses === null) {
       return null;
     }
     if (!record(backlog) || !count(backlog["listed"]) || !flag(backlog["more"]) || !count(backlog["at_risk"])) {
@@ -204,7 +225,7 @@
     return {
       node: v["node"],
       erasure: v["erasure"],
-      members,
+      members: members2,
       layout: placed,
       heal_backlog: { listed: backlog["listed"], more: backlog["more"], at_risk: backlog["at_risk"] },
       moving: { listed: moving2["listed"], more: moving2["more"] },
@@ -315,6 +336,27 @@
     }
     return { row: el("div", { class: "field" }, el("label", { for: id }, label), input, described), input };
   }
+  function segmented(id, label, options) {
+    const inputs = options.map((option, at2) => {
+      const input = el("input", { type: "radio", name: id, id: `${id}-${at2}`, value: option });
+      if (at2 === 0) {
+        input.checked = true;
+      }
+      return input;
+    });
+    const group3 = el(
+      "div",
+      { class: "segmented", role: "radiogroup", "aria-label": label },
+      ...inputs.flatMap((input) => [input, el("label", { for: input.id }, input.value)])
+    );
+    const chosen = () => inputs.find((input) => input.checked)?.value ?? "";
+    const choose = (value) => {
+      for (const input of inputs) {
+        input.checked = input.value === value;
+      }
+    };
+    return { group: group3, chosen, choose };
+  }
   function table(caption, head2, rows) {
     return el(
       "div",
@@ -391,6 +433,10 @@
         return "#/users";
       case "spaces":
         return "#/spaces";
+      case "groups":
+        return route.space === null ? "#/groups" : `#/groups/${encodeURIComponent(route.space)}`;
+      case "group":
+        return `#/groups/${encodeURIComponent(route.space)}/${encodeURIComponent(route.group)}`;
       case "cluster":
         return "#/cluster";
       case "renditions":
@@ -429,6 +475,13 @@
       }
       if (path2 === "/spaces") {
         return { kind: "spaces" };
+      }
+      if (path2 === "/groups" || path2.startsWith("/groups/")) {
+        const [space2 = "", group3 = ""] = path2.slice("/groups/".length).split("/").map(decodeURIComponent);
+        if (space2 === "") {
+          return { kind: "groups", space: null };
+        }
+        return group3 === "" ? { kind: "groups", space: space2 } : { kind: "group", space: space2, group: group3 };
       }
       if (path2 === "/cluster") {
         return { kind: "cluster" };
@@ -622,6 +675,7 @@
     users: [ring(9, 8, 3.5), "M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6", "M16 4.5a3.5 3.5 0 0 1 0 7", "M18 14c2 .6 3 2.8 3 6"],
     chevron: ["M9.5 6l6 6-6 6"],
     node: [box(3, 4, 18, 7, 2), box(3, 13, 18, 7, 2), "M7 7.5h.01", "M7 16.5h.01"],
+    group: [ring(12, 8, 2.5), ring(6, 10, 2), ring(18, 10, 2), "M7.5 19c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5", "M2.5 18c0-2 1.5-3.5 3.5-3.5", "M21.5 18c0-2-1.5-3.5-3.5-3.5"],
     members: [ring(6, 7, 2.5), ring(18, 7, 2.5), ring(12, 18, 2.5), "M8.5 7h7", "M7.3 9.2l3.4 6.6", "M16.7 9.2l-3.4 6.6"],
     layers: ["M12 3l9 5-9 5-9-5z", "M3 13l9 5 9-5"],
     pulse: ["M3 12h4l3-7 4 14 3-7h4"],
@@ -632,6 +686,7 @@
     ban: [ring(12, 12, 9), "M5.6 5.6l12.8 12.8"],
     check: [ring(12, 12, 9), "M8 12.5l2.5 2.5L16 9.5"],
     shield: ["M12 3l8 3v6c0 4.4-3.4 8.2-8 9-4.6-.8-8-4.6-8-9V6z", "M9 12l2 2 4-4"],
+    sliders: ["M4 6h9", "M17 6h3", ring(15, 6, 2), "M4 12h3", "M11 12h9", ring(9, 12, 2), "M4 18h11", "M19 18h1", ring(17, 18, 2)],
     gauge: ["M4 18a8 8 0 1 1 16 0", "M12 18l4-6", "M12 18h.01"],
     upload: ["M12 20V9", "M7.5 13.5L12 9l4.5 4.5", "M5 4h14"]
   };
@@ -791,6 +846,102 @@
     return form;
   }
 
+  // src/bucket-encryption.ts
+  //! A bucket's default encryption: how a write that asks for no encryption is
+  //! sealed — under the server's key, under a key an operator created by name, or
+  //! not at all — and, beside a default, whether a write may bring its own key
+  //! (SSE-C, blocked otherwise). The server sets it only while this node holds its
+  //! keys and, for a named key, that key; its refusal is shown as it came. Who may
+  //! configure the bucket sets it; the reason goes into the action record.
+  var KEY_NAME = /^[a-z0-9-]{1,64}$/;
+  function encryptionChip(bucket2) {
+    const sealing = bucket2.encryption;
+    if (sealing === null) {
+      return null;
+    }
+    const named = sealing.algorithm === "AES256" ? "AES256" : `aws:kms · ${sealing.key}`;
+    return el("span", { class: "chip ok", title: "Default encryption" }, sealing.customerKeys ? `${named} · SSE-C allowed` : named);
+  }
+  function encryptionForm(screen, bucket2, close) {
+    const id = `sse-${bucket2.name}`;
+    const current2 = bucket2.encryption?.algorithm ?? "none";
+    const choice = (value, label, note) => {
+      const input = el("input", { type: "radio", name: `${id}-algorithm`, id: `${id}-${value}`, value });
+      if (current2 === value) {
+        input.setAttribute("checked", "");
+      }
+      return el("div", { class: "choice" }, input, el("label", { for: `${id}-${value}` }, el("strong", {}, label), " — ", note));
+    };
+    const named = bucket2.encryption?.algorithm === "aws:kms" ? bucket2.encryption.key : "";
+    const allow = el("input", { type: "checkbox", id: `${id}-customer-keys` });
+    if (bucket2.encryption?.customerKeys === true) {
+      allow.setAttribute("checked", "");
+    }
+    const customerKeys = el(
+      "div",
+      { class: "choice" },
+      allow,
+      el("label", { for: `${id}-customer-keys` }, el("strong", {}, "Allow customer keys"), " — a write may bring its own key (SSE-C) over TLS; blocked otherwise.")
+    );
+    const key = field(`${id}-key`, "Key name", { maxlength: "64", value: named, autocomplete: "off" }, "For aws:kms: a key created on the Encryption page.");
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const save = el("button", { type: "submit", class: "primary" }, "Set");
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Default encryption: "), mono(bucket2.name)),
+      choice("none", "None", "a write is sealed only when it asks to be."),
+      choice("AES256", "Server key", "every write that asks for nothing is sealed under the server's key (SSE-S3)."),
+      choice("aws:kms", "Named key", "every write that asks for nothing is sealed under the key named below (SSE-KMS)."),
+      key.row,
+      customerKeys,
+      reason.row,
+      el("div", { class: "actions" }, save, cancel),
+      said
+    );
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const picked = form.querySelector(`input[name="${id}-algorithm"]:checked`);
+      if (picked === null) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Choose one."));
+        return;
+      }
+      const name = key.input.value.trim();
+      if (picked.value === "aws:kms" && !KEY_NAME.test(name)) {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "A key name is 1-64 lowercase letters, digits and hyphens."));
+        key.input.focus();
+        return;
+      }
+      const customer = allow.checked;
+      if (customer && picked.value === "none") {
+        fill(said, el("p", { class: "message bad", role: "alert" }, "Customer keys are allowed only beside a default."));
+        return;
+      }
+      const why = reason.input.value.trim();
+      const body = picked.value === "aws:kms" ? { algorithm: picked.value, key: name, customer_keys: customer, reason: why } : { algorithm: picked.value, customer_keys: customer, reason: why };
+      const answer = await call("PUT", `/buckets/${encodeURIComponent(bucket2.name)}/encryption`, ignored, body);
+      if (answer.ok) {
+        announce(`Set the default encryption of ${bucket2.name}.`);
+        screen.redraw();
+        return;
+      }
+      if (answer.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(answer));
+    });
+    return form;
+  }
+
   // src/bucket-quota.ts
   //! A bucket's quota: the limits as the row shows them, and the form an operator
   //! sets them with, inline under the row. Both limits are sent every time, so a
@@ -817,18 +968,18 @@
   }
   function quotaForm(screen, bucket2, close) {
     const id = `quota-${bucket2.name}`;
-    const unit = el("select", { id: `${id}-unit`, "aria-label": "Unit" }, ...Object.keys(QUOTA_UNITS).map((name) => el("option", { value: name }, name)));
+    const unit = segmented(`${id}-unit`, "Unit", Object.keys(QUOTA_UNITS));
     const bytes = field(`${id}-bytes`, "Size limit", { inputmode: "decimal", autocomplete: "off" }, "Empty: no size limit. Checked against the last measurement.");
     const objects2 = field(`${id}-objects`, "Object limit", { inputmode: "numeric", autocomplete: "off" }, "Empty: no object limit.");
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     if (bucket2.maxBytes !== null) {
-      unit.value = unitOf(bucket2.maxBytes);
+      unit.choose(unitOf(bucket2.maxBytes));
       bytes.input.value = String(bucket2.maxBytes / QUOTA_UNITS[unitOf(bucket2.maxBytes)]);
     }
     if (bucket2.maxObjects !== null) {
       objects2.input.value = String(bucket2.maxObjects);
     }
-    bytes.input.after(unit);
+    bytes.input.after(unit.group);
     const save = el("button", { type: "submit", class: "primary" }, "Set quota");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -851,7 +1002,8 @@
     });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const maxBytes = isUnit(unit.value) ? bytesOf(bytes.input.value, unit.value) : void 0;
+      const picked = unit.chosen();
+      const maxBytes = isUnit(picked) ? bytesOf(bytes.input.value, picked) : void 0;
       const written = objects2.input.value.trim();
       const maxObjects = written === "" ? null : /^\d+$/.test(written) ? Number(written) : void 0;
       const objectsWrong = maxObjects === void 0 || maxObjects !== null && !Number.isSafeInteger(maxObjects);
@@ -952,8 +1104,8 @@
       opener.focus();
     };
     const route = `/users/${encodeURIComponent(user2.name)}/keys`;
-    const done4 = el("button", { type: "button", class: "quiet" }, "Close");
-    done4.addEventListener("click", back);
+    const done5 = el("button", { type: "button", class: "quiet" }, "Close");
+    done5.addEventListener("click", back);
     const revoke = (key, button) => {
       const ask = el("div", {});
       button.after(ask);
@@ -986,12 +1138,12 @@
       if (!answer.ok) {
         const shown = settle(screen, answer);
         if (shown !== null) {
-          fill(region, refusal(shown), done4);
+          fill(region, refusal(shown), done5);
         }
         return;
       }
       if (answer.value.length === 0) {
-        fill(region, el("p", {}, `${user2.name} has no access keys.`), done4);
+        fill(region, el("p", {}, `${user2.name} has no access keys.`), done5);
         return;
       }
       const rows = answer.value.map((key) => {
@@ -999,7 +1151,7 @@
         button.addEventListener("click", () => revoke(key, button));
         return row(mono(key.access_key_id), moment(key.created), key.disabled ? "Disabled" : "Active", reach2(key), button);
       });
-      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done4);
+      fill(region, table(`Access keys of ${user2.name}`, ["Access key id", "Issued", "State", "Reach", ""], rows), done5);
     };
     void show();
   }
@@ -1010,7 +1162,7 @@
   //! sealed and will not hand it back), listing and revoking keys, disabling or
   //! enabling the user, and granting or removing access to one bucket. Every
   //! change takes a reason.
-  function shownOnce(key, done4) {
+  function shownOnce(key, done5) {
     const copy = el("button", { type: "button" }, "Copy secret");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1022,7 +1174,7 @@
         said.textContent = "Copying is not allowed here; select the secret and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -1033,9 +1185,9 @@
       said
     );
   }
-  function alreadyIssued(id, done4) {
+  function alreadyIssued(id, done5) {
     const finish = el("button", { type: "button", class: "primary" }, "Close");
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => finish.focus());
     return el(
       "div",
@@ -1120,7 +1272,7 @@
     const read = el("input", { id: `${id}-read`, type: "checkbox", checked: "" });
     const write = el("input", { id: `${id}-write`, type: "checkbox" });
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-    const grant = el("button", { type: "submit", class: "primary" }, "Grant");
+    const grant2 = el("button", { type: "submit", class: "primary" }, "Grant");
     const remove = el("button", { type: "button", class: "danger" }, "Remove grant");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -1131,7 +1283,7 @@
       bucket2.row,
       el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write")),
       reason.row,
-      el("div", { class: "actions" }, grant, remove, cancel),
+      el("div", { class: "actions" }, grant2, remove, cancel),
       said
     );
     const close = open(line, form);
@@ -1140,7 +1292,7 @@
       opener.focus();
     };
     const route = () => `/users/${encodeURIComponent(user2.name)}/grants/${encodeURIComponent(bucket2.input.value.trim())}`;
-    const done4 = (words) => {
+    const done5 = (words) => {
       announce(words);
       back();
     };
@@ -1160,7 +1312,7 @@
       event.preventDefault();
       const answer = await call("PUT", route(), ignored, { read: read.checked, write: write.checked, reason: reason.input.value.trim() });
       if (answer.ok) {
-        done4(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
+        done5(`Granted ${user2.name} access to ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1168,7 +1320,7 @@
     remove.addEventListener("click", async () => {
       const answer = await call("DELETE", route(), ignored, { reason: reason.input.value.trim() });
       if (answer.ok) {
-        done4(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
+        done5(`Removed ${user2.name}'s grant on ${bucket2.input.value.trim()}.`);
       } else {
         show(answer);
       }
@@ -1197,9 +1349,9 @@
   function uploadKeyForm(screen, bucket2, close) {
     const id = `upload-${bucket2.name}`;
     const key = field(`${id}-key`, "Object key", { autocomplete: "off", required: "" }, "The one key it may upload, exactly as written.");
-    const lasts = el("select", { id: `${id}-lasts`, "aria-label": "Lasts" }, ...Object.keys(LIFETIMES).map((name) => el("option", { value: name }, name)));
+    const lasts = segmented(`${id}-lasts`, "Lasts", Object.keys(LIFETIMES));
     const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
-    key.input.after(lasts);
+    key.input.after(lasts.group);
     const issue = el("button", { type: "submit", class: "primary" }, "Issue upload key");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     const said = el("div", { "aria-live": "polite" });
@@ -1224,7 +1376,8 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const wanted = key.input.value;
-      if (wanted === "" || !isLifetime(lasts.value)) {
+      const lifetime = lasts.chosen();
+      if (wanted === "" || !isLifetime(lifetime)) {
         key.input.setAttribute("aria-invalid", "true");
         fill(said, el("p", { class: "message bad", role: "alert" }, "Name the key it may upload."));
         return;
@@ -1232,7 +1385,7 @@
       key.input.removeAttribute("aria-invalid");
       const answer = await call("POST", `/buckets/${encodeURIComponent(bucket2.name)}/upload-keys`, readUploadKey, {
         key: wanted,
-        expires_in: LIFETIMES[lasts.value],
+        expires_in: LIFETIMES[lifetime],
         reason: reason.input.value.trim()
       });
       if (answer.ok) {
@@ -1520,40 +1673,41 @@
   var numeric = (text2) => el("span", { class: "numeric" }, text2);
   function bucketRow(screen, bucket2, usage) {
     const remove = iconAction("trash", "Delete…", `Delete bucket ${bucket2.name}`, "danger");
-    const quota = screen.may?.operate === true ? iconAction("gauge", "Quota…", `Quota of ${bucket2.name}`) : null;
-    const acknowledge = screen.may?.operate === true ? iconAction("shield", "Acknowledgement…", `Write acknowledgement of ${bucket2.name}`) : null;
     const upload = screen.may?.issue_upload_keys === true ? iconAction("upload", "Upload key…", `Upload key for ${bucket2.name}`) : null;
     const media = iconAction("image", "Media…", `Media rules of ${bucket2.name}`);
+    const settings = iconAction("sliders", "Settings…", `Settings of ${bucket2.name}`);
     const held = figures(usage, bucket2);
     const line = row(
-      el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket2.name)),
+      el(
+        "span",
+        {},
+        el("a", { class: "name", href: format({ kind: "objects", bucket: bucket2.name, prefix: "", cursor: null, key: null, filter: "" }) }, icon("buckets"), mono(bucket2.name)),
+        encryptionChip(bucket2)
+      ),
       numeric(held === null ? "—" : amount(held.objects)),
       numeric(held === null ? "—" : size(held.bytes)),
       numeric(held === null ? "—" : size(held.raw_bytes)),
       numeric(limits(bucket2)),
       moment(bucket2.created),
       bucket2.acknowledgement === "region" ? el("span", {}, mono(bucket2.region), " · region majority") : mono(bucket2.region),
-      el("div", { class: "actions" }, upload, media, quota, acknowledge, remove)
+      el("div", { class: "actions" }, upload, media, settings, remove)
     );
-    acknowledge?.addEventListener("click", () => {
+    settings.addEventListener("click", () => {
       const cell = el("td", { colspan: "8" });
       const region = el("tr", { class: "asking" }, cell);
+      const close = () => {
+        region.remove();
+        settings.focus();
+      };
+      const operate = screen.may?.operate === true;
       cell.append(
-        acknowledgementForm(screen, bucket2, () => {
-          region.remove();
-          acknowledge.focus();
-        })
-      );
-      line.after(region);
-    });
-    quota?.addEventListener("click", () => {
-      const cell = el("td", { colspan: "8" });
-      const region = el("tr", { class: "asking" }, cell);
-      cell.append(
-        quotaForm(screen, bucket2, () => {
-          region.remove();
-          quota.focus();
-        })
+        el(
+          "div",
+          { class: "settings" },
+          encryptionForm(screen, bucket2, close),
+          operate ? quotaForm(screen, bucket2, close) : null,
+          operate ? acknowledgementForm(screen, bucket2, close) : null
+        )
       );
       line.after(region);
     });
@@ -1752,8 +1906,8 @@
     );
     return button;
   }
-  function memberRows(screen, members, region) {
-    if (members.length === 0) {
+  function memberRows(screen, members2, region) {
+    if (members2.length === 0) {
       return empty("No node has been admitted yet.");
     }
     const operate = screen.may?.operate === true;
@@ -1761,7 +1915,7 @@
     return table(
       "Cluster admission",
       head2,
-      members.map(
+      members2.map(
         (member2) => row(
           mono(member2.node),
           stateChip(member2),
@@ -1810,7 +1964,7 @@
     });
     return form;
   }
-  function shownOnce2(node, token, expires, done4) {
+  function shownOnce2(node, token, expires, done5) {
     const copy = el("button", { type: "button" }, "Copy token");
     const finish = el("button", { type: "button", class: "primary" }, "I have stored it");
     const said = el("p", { class: "hint", "aria-live": "polite" });
@@ -1822,7 +1976,7 @@
         said.textContent = "Copying is not allowed here; select the token and copy it by hand.";
       }
     });
-    finish.addEventListener("click", done4);
+    finish.addEventListener("click", done5);
     queueMicrotask(() => copy.focus());
     return el(
       "div",
@@ -1866,16 +2020,16 @@
   async function admissionCard(screen) {
     const answer = await call("GET", BASE, readMembers);
     const region = el("div", {});
-    const card = el("section", { class: "card" }, el("h2", {}, "Admission"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Admission"));
     if (answer.ok) {
-      card.append(memberRows(screen, answer.value, region), region);
+      card2.append(memberRows(screen, answer.value, region), region);
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(admitForm(screen), tokenForm(screen));
+      card2.append(admitForm(screen), tokenForm(screen));
     }
-    return card;
+    return card2;
   }
 
   // src/layout-model.ts
@@ -2003,18 +2157,18 @@
   }
   async function stagingCard(screen) {
     const answer = await call("GET", STAGED, readStaged);
-    const card = el("section", { class: "card" }, el("h2", {}, "Layout change"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Layout change"));
     if (answer.ok) {
-      card.append(stagedPart(screen, answer.value));
+      card2.append(stagedPart(screen, answer.value));
     } else if (answer.code === "nothing_staged") {
-      card.append(el("p", { class: "muted" }, "Nothing is staged."));
+      card2.append(el("p", { class: "muted" }, "Nothing is staged."));
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(stageForm(screen));
+      card2.append(stageForm(screen));
     }
-    return card;
+    return card2;
   }
 
   // src/regions-model.ts
@@ -2159,16 +2313,16 @@
   async function regionsCard(screen) {
     const answer = await call("GET", BASE2, readRegions);
     const area = el("div", {});
-    const card = el("section", { class: "card" }, el("h2", {}, "Regions"));
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Regions"));
     if (answer.ok) {
-      card.append(regionRows(screen, answer.value, area), area);
+      card2.append(regionRows(screen, answer.value, area), area);
     } else {
-      card.append(refusal(answer));
+      card2.append(refusal(answer));
     }
     if (screen.may?.operate === true) {
-      card.append(failOverForm(screen, area));
+      card2.append(failOverForm(screen, area));
     }
-    return card;
+    return card2;
   }
 
   // src/meter.ts
@@ -2198,6 +2352,229 @@
       bar,
       el("span", { class: "gauge-text" }, `${size(taken)} of ${size(drive2.capacity)}`, el("span", { class: "muted" }, ` · ${share(taken, drive2.capacity)}`))
     );
+  }
+
+  // src/encryption-model.ts
+  //! This node's encryption keys as the console sees them: not yet created,
+  //! sealed, or held — and then which key new objects are wrapped under, and
+  //! the keys operators created by name for `aws:kms`.
+  function readBehind(v) {
+    if (record(v) && text(v["id"]) && count(v["remaining"])) {
+      return { id: v["id"], remaining: v["remaining"] };
+    }
+    return null;
+  }
+  function readKeys2(v) {
+    if (!record(v)) {
+      return null;
+    }
+    const state2 = v["state"];
+    if (state2 === "uninitialised" || state2 === "sealed") {
+      return { state: state2 };
+    }
+    const named = list(v["named"], (name) => text(name) ? name : null);
+    const behind = list(v["behind"], readBehind);
+    if (state2 === "unsealed" && text(v["active"]) && count(v["keys"]) && named !== null && behind !== null) {
+      return { state: state2, active: v["active"], keys: v["keys"], named, behind };
+    }
+    return null;
+  }
+
+  // src/encryption.ts
+  //! The encryption keys of this node, for an operator: whether they are held,
+  //! the form that unseals them with the keys passphrase (the first unseal
+  //! creates them), sealing them again, and the keys created by name that
+  //! objects can be sealed under with `aws:kms`, and rotating the server key. Each node holds its own keys,
+  //! so this acts on the node serving the console; other nodes hold a new named
+  //! key after their next unseal. The server wants a recent sign-in and records
+  //! every attempt without the passphrase.
+  var BASE3 = "/encryption";
+  function done4(screen, failure, said) {
+    if (failure === null) {
+      announce(said);
+      screen.redraw();
+      return null;
+    }
+    if (failure.status === 401) {
+      screen.signIn();
+      return null;
+    }
+    return failure;
+  }
+  function stateLine(keys2) {
+    switch (keys2.state) {
+      case "uninitialised":
+        return el("p", {}, el("span", { class: "chip warn" }, "Not created"), " The first unseal creates the keys under the passphrase you give.");
+      case "sealed":
+        return el("p", {}, el("span", { class: "chip bad" }, "Sealed"), " This node cannot read or write encrypted objects until the keys are unsealed.");
+      case "unsealed":
+        return el("p", {}, el("span", { class: "chip ok" }, "Unsealed"), " New objects are wrapped under ", mono(keys2.active), `; ${keys2.keys.toLocaleString()} held.`);
+    }
+  }
+  function unsealForm(screen, keys2) {
+    const first = keys2.state === "uninitialised";
+    const hint = first ? "At least 15 characters, without quotes or backslashes. It becomes the keys passphrase: there is no recovering it." : "The keys passphrase. Wrong ones in a row make the next try wait.";
+    const passphrase = field("keys-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, hint);
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": "keys-unseal-title" },
+      el("p", { id: "keys-unseal-title" }, el("strong", {}, first ? "Create and unseal the keys" : "Unseal the keys")),
+      passphrase.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Unseal")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const answer = await call("POST", `${BASE3}/unseal`, readKeys2, { passphrase: passphrase.input.value });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, "The encryption keys are unsealed on this node.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function namedKeys(keys2) {
+    if (keys2.length === 0) {
+      return el("p", {}, "No named keys yet. A request asking for ", mono("aws:kms"), " without a key id uses the key named ", mono("aws-s3"), ".");
+    }
+    return el("p", {}, "Named keys: ", ...keys2.flatMap((name, at2) => at2 === 0 ? [mono(name)] : [", ", mono(name)]), ".");
+  }
+  function createForm2(screen) {
+    const name = field("key-name", "Key name", { autocomplete: "off", required: "", pattern: "[a-z0-9-]{1,64}" }, "1 to 64 of a-z, 0-9 and -. Names are visible to anyone who can list the keys vault; keys are never replaced.");
+    const passphrase = field("key-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+    const why = field("key-reason", "Reason", { autocomplete: "off" }, "Kept in the action record.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm card-part", novalidate: "", "aria-labelledby": "keys-create-title" },
+      el("p", { id: "keys-create-title" }, el("strong", {}, "Create a named key")),
+      name.row,
+      passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const reason = why.input.value.trim();
+      const answer = await call("POST", `${BASE3}/keys`, readKeys2, {
+        name: name.input.value.trim(),
+        passphrase: passphrase.input.value,
+        ...reason === "" ? {} : { reason }
+      });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, "The key is created and held on this node.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function rotateForm(screen, keys2) {
+    const passphrase = field("rotate-passphrase", "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+    const why = field("rotate-reason", "Reason", { autocomplete: "off" }, "Kept in the action record.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm card-part", novalidate: "", "aria-labelledby": "keys-rotate-title" },
+      el("p", { id: "keys-rotate-title" }, el("strong", {}, "Rotate the server key")),
+      el("p", {}, "New objects are wrapped under a new key in place of ", mono(keys2.active), "; objects under older keys still open. Other nodes take the new key at their next unseal."),
+      passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Rotate")),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const reason = why.input.value.trim();
+      const answer = await call("POST", `${BASE3}/rotate`, readKeys2, {
+        passphrase: passphrase.input.value,
+        ...reason === "" ? {} : { reason }
+      });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, "A new server key is active on this node.");
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function destroyForm(screen, key) {
+    const passphrase = field(`destroy-${key.id}-passphrase`, "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the keys vault for this one write.");
+    const why = field(`destroy-${key.id}-reason`, "Reason", { autocomplete: "off" }, "Kept in the action record.");
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm card-part", novalidate: "", "aria-label": `Destroy ${key.id}` },
+      el("p", {}, "No record names ", mono(key.id), " any more. Destroying it removes it from the keys vault; backups taken before still hold it until they expire."),
+      passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "danger" }, `Destroy ${key.id}`)),
+      said
+    );
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const reason = why.input.value.trim();
+      const answer = await call("POST", `${BASE3}/destroy`, readKeys2, {
+        key: key.id,
+        passphrase: passphrase.input.value,
+        ...reason === "" ? {} : { reason }
+      });
+      passphrase.input.value = "";
+      const failure = done4(screen, answer.ok ? null : answer, `${key.id} is destroyed.`);
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function olderKeys(screen, behind) {
+    return behind.map(
+      (key) => key.remaining === 0 ? destroyForm(screen, key) : el("p", {}, mono(key.id), ` still wraps ${key.remaining.toLocaleString()} data keys; the re-wrap moves them to the active key.`)
+    );
+  }
+  function sealButton(screen, region) {
+    const button = el("button", { type: "button", class: "danger" }, "Seal…");
+    button.addEventListener(
+      "click",
+      () => fill(
+        region,
+        confirmation(
+          "keys-seal",
+          el("span", {}, "the encryption keys on this node"),
+          "This node forgets its keys: encrypted objects are refused here until someone unseals them with the passphrase.",
+          "Seal",
+          async (reason) => {
+            const answer = await call("POST", `${BASE3}/seal`, readKeys2, { reason });
+            return done4(screen, answer.ok ? null : answer, "The encryption keys are sealed on this node.");
+          },
+          () => fill(region)
+        )
+      )
+    );
+    return button;
+  }
+  async function encryptionCard(screen) {
+    if (screen.may?.operate !== true) {
+      return null;
+    }
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Encryption keys"));
+    const answer = await call("GET", BASE3, readKeys2);
+    if (!answer.ok) {
+      card2.append(refusal(answer));
+      return card2;
+    }
+    const keys2 = answer.value;
+    const region = el("div", {});
+    card2.append(stateLine(keys2));
+    if (keys2.state === "unsealed") {
+      card2.append(namedKeys(keys2.named), el("div", { class: "actions" }, sealButton(screen, region)), region, createForm2(screen), rotateForm(screen, keys2), ...olderKeys(screen, keys2.behind));
+    } else {
+      card2.append(unsealForm(screen, keys2));
+    }
+    return card2;
   }
 
   // src/status.ts
@@ -2239,11 +2616,11 @@
   function state(member2) {
     return member2.answering ? el("span", { class: "chip ok" }, "Answering") : el("span", { class: "chip bad" }, "Not answering");
   }
-  function memberTable(members) {
-    return members.length === 0 ? empty("No members are registered yet.") : table(
+  function memberTable(members2) {
+    return members2.length === 0 ? empty("No members are registered yet.") : table(
       "Cluster members",
       ["Member", "Zone", "State", "Disk", "Internal address"],
-      members.map(
+      members2.map(
         (member2) => row(
           mono(member2.node),
           member2.zone === null ? "—" : mono(member2.zone),
@@ -2254,12 +2631,12 @@
       )
     );
   }
-  function membersTile(members) {
-    if (members === null) {
+  function membersTile(members2) {
+    if (members2 === null) {
       return tile("members", "Members", "—", "No cluster");
     }
-    const answering = members.filter((member2) => member2.answering).length;
-    return answering === members.length ? tile("members", "Members", String(members.length), "Registered and answering") : tile("members", "Members", String(members.length), el("span", { class: "chip bad" }, `${answering} of ${members.length} answering`));
+    const answering = members2.filter((member2) => member2.answering).length;
+    return answering === members2.length ? tile("members", "Members", String(members2.length), "Registered and answering") : tile("members", "Members", String(members2.length), el("span", { class: "chip bad" }, `${answering} of ${members2.length} answering`));
   }
   function storedTile(usage) {
     if (!usage.ok) {
@@ -2302,7 +2679,7 @@
   }
   async function status(screen) {
     loading(screen, TITLE3, "the node's status");
-    const [answer, usage] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage)]);
+    const [answer, usage, encryption] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen)]);
     if (!answer.ok) {
       failed(screen, TITLE3, answer);
       return;
@@ -2311,7 +2688,7 @@
       return;
     }
     const node = answer.value;
-    const members = node.members === null ? null : memberTable(node.members);
+    const members2 = node.members === null ? null : memberTable(node.members);
     fill(
       screen.main,
       head(TITLE3, el("span", {}, "Region ", mono(node.region), " · version ", mono(node.version))),
@@ -2328,7 +2705,8 @@
         tile("buckets", "Buckets", "Browse", "Find a bucket or an object", format({ kind: "buckets" })),
         tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
       ),
-      members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members)
+      members2 === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members2),
+      encryption
     );
   }
 
@@ -2399,6 +2777,288 @@
       layoutCard(view),
       staging
     );
+  }
+
+  // src/group-parts.ts
+  //! The two halves of a group's page: its members and the buckets it is
+  //! granted. Each lists what is there with a remove action per row, and carries
+  //! a form to add one more; every change takes a reason. A member of the group's
+  //! space and a bucket of that space are all the server accepts — anything else
+  //! is refused as missing, so a group never reaches across spaces.
+  function card(id, title, body, region, form) {
+    return el("section", { class: "card", "aria-labelledby": `${id}-title` }, el("h2", { id: `${id}-title` }, title), body, region, form);
+  }
+  function addForm(id, button, fields, act) {
+    const reason = field(`${id}-reason`, "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const go = el("button", { type: "submit", class: "primary" }, button);
+    const form = el("form", { class: "card-part", novalidate: "" }, ...fields, reason.row, el("div", { class: "actions" }, go), said);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      go.disabled = true;
+      const failure = await act(reason.input.value.trim());
+      go.disabled = false;
+      if (failure !== null) {
+        fill(said, refusal(failure));
+      }
+    });
+    return form;
+  }
+  function askRemoval(screen, region, id, what, consequence, button, route, opener, done5) {
+    const back = () => {
+      fill(region);
+      opener.focus();
+    };
+    fill(
+      region,
+      confirmation(
+        id,
+        mono(what),
+        consequence,
+        button,
+        async (reason) => {
+          const answer = await call("DELETE", route, ignored, { reason });
+          if (!answer.ok) {
+            return settle(screen, answer);
+          }
+          announce(done5);
+          screen.redraw();
+          return null;
+        },
+        back
+      )
+    );
+  }
+  function members(screen, group3, at2) {
+    const region = el("div", {});
+    const line = (user3) => {
+      const remove = iconAction("close", "Remove…", `Remove ${user3} from ${group3.name}`, "danger");
+      remove.addEventListener(
+        "click",
+        () => askRemoval(screen, region, `member-${user3}`, user3, `${user3} loses what this group is granted within five seconds; its own grants stay.`, "Remove member", at2(`/members/${encodeURIComponent(user3)}`), remove, `Removed ${user3} from ${group3.name}.`)
+      );
+      return row(mono(user3), el("div", { class: "actions" }, remove));
+    };
+    const user2 = field("add-member", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "A user of this group's space.");
+    const form = addForm("add-member", "Add member", [user2.row], async (reason) => {
+      const name = user2.input.value.trim();
+      const answer = await call("PUT", at2(`/members/${encodeURIComponent(name)}`), ignored, { reason });
+      if (!answer.ok) {
+        return settle(screen, answer);
+      }
+      announce(`Added ${name} to ${group3.name}.`);
+      screen.redraw();
+      return null;
+    });
+    const body = group3.members.length === 0 ? empty("No members yet. Add a user of this space below.") : table(`Members of ${group3.name}`, ["User", "Actions"], group3.members.map(line));
+    return card("members", `Members (${group3.members.length.toLocaleString()})`, body, region, form);
+  }
+  var yes = (granted) => el("span", { class: granted ? "chip ok" : "chip" }, granted ? "Yes" : "No");
+  function grants2(screen, group3, at2) {
+    const region = el("div", {});
+    const line = (grant2) => {
+      const remove = iconAction("close", "Remove…", `Remove ${group3.name}'s grant on ${grant2.bucket}`, "danger");
+      remove.addEventListener(
+        "click",
+        () => askRemoval(screen, region, `grant-${grant2.bucket}`, grant2.bucket, "Every member loses this group's access to the bucket within five seconds; their own grants stay.", "Remove grant", at2(`/grants/${encodeURIComponent(grant2.bucket)}`), remove, `Removed ${group3.name}'s grant on ${grant2.bucket}.`)
+      );
+      return row(mono(grant2.bucket), yes(grant2.read), yes(grant2.write), el("div", { class: "actions" }, remove));
+    };
+    const bucket2 = field("grant-bucket", "Bucket", { spellcheck: "false", autocomplete: "off", required: "" }, "A bucket of this group's space. Granting it again replaces what the grant allows.");
+    const read = el("input", { id: "grant-read", type: "checkbox" });
+    const write = el("input", { id: "grant-write", type: "checkbox" });
+    read.checked = true;
+    const access = el("fieldset", { class: "checks" }, el("legend", {}, "Access"), el("label", { class: "check", for: read.id }, read, "Read"), el("label", { class: "check", for: write.id }, write, "Write"));
+    const form = addForm("grant", "Grant bucket", [bucket2.row, access], async (reason) => {
+      const name = bucket2.input.value.trim();
+      const answer = await call("PUT", at2(`/grants/${encodeURIComponent(name)}`), ignored, { read: read.checked, write: write.checked, reason });
+      if (!answer.ok) {
+        return settle(screen, answer);
+      }
+      announce(`Granted ${group3.name} access to ${name}.`);
+      screen.redraw();
+      return null;
+    });
+    const body = group3.grants.length === 0 ? empty("No buckets granted yet. Grant one below.") : table(`Buckets granted to ${group3.name}`, ["Bucket", "Read", "Write", "Actions"], group3.grants.map(line));
+    return card("grants", `Bucket grants (${group3.grants.length.toLocaleString()})`, body, region, form);
+  }
+
+  // src/groups-model.ts
+  //! A space's groups as the console sees them: each group's name and when it was
+  //! made, and for one group its members and the buckets it is granted, with
+  //! whether each grant reads and writes.
+  var group = (v) => record(v) && text(v["name"]) && text(v["created"]) ? { name: v["name"], created: v["created"] } : null;
+  var grant = (v) => record(v) && text(v["bucket"]) && flag(v["read"]) && flag(v["write"]) ? { bucket: v["bucket"], read: v["read"], write: v["write"] } : null;
+  function readGroups(v) {
+    return record(v) ? list(v["groups"], group) : null;
+  }
+  function readGroupDetail(v) {
+    const named = group(v);
+    if (named === null || !record(v)) {
+      return null;
+    }
+    const members2 = list(v["members"], (entry) => text(entry) ? entry : null);
+    const grants3 = list(v["grants"], grant);
+    return members2 === null || grants3 === null ? null : { ...named, members: members2, grants: grants3 };
+  }
+
+  // src/group.ts
+  //! One group of a space: who is in it and which buckets it is granted, with the
+  //! forms to change either, and deleting the group — which takes every grant it
+  //! carries away from every member, so it is confirmed by name with a reason.
+  async function group2(screen, space2, name) {
+    const at2 = (rest) => `/spaces/${encodeURIComponent(space2)}/groups/${encodeURIComponent(name)}${rest}`;
+    loading(screen, name, "the group");
+    const answer = await call("GET", at2(""), readGroupDetail);
+    if (!answer.ok) {
+      failed(screen, name, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const found = answer.value;
+    const region = el("div", {});
+    const remove = el("button", { type: "button", class: "danger" }, icon("trash"), "Delete group");
+    remove.addEventListener(
+      "click",
+      () => fill(
+        region,
+        el(
+          "div",
+          { class: "card" },
+          confirmation(
+            "delete-group",
+            mono(`${space2}/${found.name}`),
+            `Every member loses what the group grants within five seconds. The ${found.members.length.toLocaleString()} memberships and ${found.grants.length.toLocaleString()} grants go with it.`,
+            "Delete group",
+            async (reason) => {
+              const gone = await call("DELETE", at2(""), ignored, { reason });
+              if (!gone.ok) {
+                return settle(screen, gone);
+              }
+              announce(`Deleted group ${found.name}.`);
+              location.hash = format({ kind: "groups", space: space2 });
+              return null;
+            },
+            () => {
+              fill(region);
+              remove.focus();
+            }
+          )
+        )
+      )
+    );
+    const lede = el("span", {}, "In space ", el("a", { href: format({ kind: "groups", space: space2 }) }, mono(space2)), ` · created ${moment(found.created)}`);
+    fill(screen.main, head(found.name, lede, remove), region, members(screen, found, at2), grants2(screen, found, at2));
+  }
+
+  // src/groups.ts
+  //! Groups: a space's named sets of users that buckets are granted to, so a
+  //! grant reaches every member at once. An operator first picks the space; a
+  //! space admin lands on its own. The server judges every route as managing the
+  //! space and answers alike for a space that is not the caller's and one that
+  //! does not exist; this page only offers. A new group takes a reason, which
+  //! goes into the action record.
+  var TITLE5 = "Groups";
+  var groupsOf = (space2) => `/spaces/${encodeURIComponent(space2)}/groups`;
+  function createForm3(screen, space2, opener) {
+    const name = field("new-group", "Group name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique in the space.");
+    const reason = field("new-group-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
+    const said = el("div", { "aria-live": "polite" });
+    const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
+    const form = el(
+      "form",
+      { id: "new-group-form", class: "card", novalidate: "", hidden: "", "aria-labelledby": "new-group-title" },
+      el("h2", { id: "new-group-title" }, "New group in ", mono(space2)),
+      name.row,
+      reason.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Create group"), cancel),
+      said
+    );
+    const close = () => {
+      form.hidden = true;
+      opener.setAttribute("aria-expanded", "false");
+      opener.focus();
+    };
+    opener.addEventListener("click", () => {
+      form.hidden = false;
+      opener.setAttribute("aria-expanded", "true");
+      name.input.focus();
+    });
+    cancel.addEventListener("click", close);
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        close();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const wanted = name.input.value.trim();
+      const answer = await call("POST", groupsOf(space2), ignored, { name: wanted, reason: reason.input.value.trim() });
+      if (!answer.ok) {
+        if (answer.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(answer));
+        return;
+      }
+      announce(`Created group ${wanted} in ${space2}.`);
+      screen.redraw();
+    });
+    return form;
+  }
+  async function ofSpace(screen, space2) {
+    loading(screen, TITLE5, "groups");
+    const answer = await call("GET", groupsOf(space2), readGroups);
+    if (!answer.ok) {
+      failed(screen, TITLE5, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-group-form" }, icon("plus"), "New group");
+    const link = (group3) => el("a", { href: format({ kind: "group", space: space2, group: group3 }) }, mono(group3));
+    fill(
+      screen.main,
+      head(TITLE5, el("span", {}, `${answer.value.length.toLocaleString()} in space `, mono(space2)), opener),
+      createForm3(screen, space2, opener),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No groups in this space yet. Create one with “New group”, add users to it, then grant it buckets.") : table(`Groups of ${space2}`, ["Name", "Created"], answer.value.map((group3) => row(link(group3.name), moment(group3.created))))
+      )
+    );
+  }
+  async function pick(screen) {
+    loading(screen, TITLE5, "spaces");
+    const answer = await call("GET", "/spaces", readSpaces);
+    if (!answer.ok) {
+      failed(screen, TITLE5, answer);
+      return;
+    }
+    if (!screen.live()) {
+      return;
+    }
+    const link = (space2) => el("a", { href: format({ kind: "groups", space: space2 }) }, mono(space2));
+    fill(
+      screen.main,
+      head(TITLE5, "Pick the space whose groups to manage."),
+      el(
+        "section",
+        { class: "card flush" },
+        answer.value.length === 0 ? empty("No spaces yet. Create one under Spaces first.") : table("Spaces", ["Space", "Created"], answer.value.map((space2) => row(link(space2.name), moment(space2.created))))
+      )
+    );
+  }
+  function groups(screen, space2) {
+    if (space2 !== null) {
+      return ofSpace(screen, space2);
+    }
+    const own = screen.may?.operate === true ? null : screen.may?.space ?? null;
+    return own === null ? pick(screen) : ofSpace(screen, own);
   }
 
   // src/object-delete.ts
@@ -2481,14 +3141,14 @@
   //! One object: what the server holds for it, a recorded download, and a delete
   //! that only goes through while the object is still the version shown here —
   //! the ETag on screen is the condition, so a rewrite in between is refused.
-  var TITLE5 = "Object";
+  var TITLE6 = "Object";
   var parent = (key) => key.slice(0, key.lastIndexOf("/") + 1);
   async function object(screen, bucket2, key) {
-    loading(screen, TITLE5, "the object");
+    loading(screen, TITLE6, "the object");
     const where = `/buckets/${encodeURIComponent(bucket2)}/object`;
     const answer = await call("GET", `${where}${search([["key", key]])}`, readDetail);
     if (!answer.ok) {
-      failed(screen, TITLE5, answer);
+      failed(screen, TITLE6, answer);
       return;
     }
     if (!screen.live()) {
@@ -2516,17 +3176,17 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${detail.etag}.`,
           "Delete object",
           async (why) => {
-            const done4 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
-            if (done4.ok) {
+            const done5 = await call("DELETE", `${where}${search([["key", key]])}`, ignored, { etag: detail.etag, reason: why });
+            if (done5.ok) {
               announce(`Deleted ${key} from ${bucket2}.`);
               location.hash = back;
               return null;
             }
-            if (done4.status === 401) {
+            if (done5.status === 401) {
               screen.signIn();
               return null;
             }
-            return deleteRefusal(done4);
+            return deleteRefusal(done5);
           },
           () => {
             fill(asking);
@@ -2581,9 +3241,9 @@
           `There is no versioning: the object is gone for every client. It is deleted only if it is still ETag ${object2.etag}.`,
           "Delete object",
           async (reason) => {
-            const done4 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
-            if (!done4.ok) {
-              const shown = settle(screen, done4);
+            const done5 = await call("DELETE", `${where}${search([["key", object2.key]])}`, ignored, { etag: object2.etag, reason });
+            if (!done5.ok) {
+              const shown = settle(screen, done5);
               return shown === null ? null : deleteRefusal(shown);
             }
             close();
@@ -2904,12 +3564,12 @@
   //! Renditions that failed for good: the tasks whose five hand-outs are spent,
   //! with the original, the output, and the last error a worker recorded. They
   //! stay listed until the original is written again; for operators.
-  var TITLE6 = "Renditions";
+  var TITLE7 = "Renditions";
   async function renditions(screen) {
-    loading(screen, TITLE6, "failed renditions");
+    loading(screen, TITLE7, "failed renditions");
     const answer = await call("GET", "/media/failed", readFailedRenditions);
     if (!answer.ok) {
-      failed(screen, TITLE6, answer);
+      failed(screen, TITLE7, answer);
       return;
     }
     if (!screen.live()) {
@@ -2927,7 +3587,7 @@
     );
     fill(
       screen.main,
-      head(TITLE6, "Renditions the workers stopped trying after five attempts, with the last error. Writing the original again plans it anew."),
+      head(TITLE7, "Renditions the workers stopped trying after five attempts, with the last error. Writing the original again plans it anew."),
       el(
         "section",
         { class: "card flush" },
@@ -2986,7 +3646,7 @@
       intro: "Sign in through your organisation. Access keys do not open a session here, except this node's root key in an emergency."
     };
   }
-  function signIn(main2, done4) {
+  function signIn(main2, done5) {
     const key = field("access-key", "Access key ID", { autocomplete: "username", spellcheck: "false", required: "" });
     const secret = field("secret-key", "Secret access key", { type: "password", autocomplete: "current-password", required: "" });
     const reason = field("reason", "Reason", { autocomplete: "off" }, "Why the root key, now: it is recorded and announced.");
@@ -3022,7 +3682,7 @@
       if (answer.ok) {
         key.input.value = "";
         reason.input.value = "";
-        done4();
+        done5();
         return;
       }
       if (answer.code === "reason_required") {
@@ -3050,8 +3710,8 @@
   //! Spaces: the tenants buckets and users belong to. Only operators reach this
   //! view; anyone else is told their key does not allow it. A new space takes a
   //! reason, which goes into the action record.
-  var TITLE7 = "Spaces";
-  function createForm2(screen, opener) {
+  var TITLE8 = "Spaces";
+  function createForm4(screen, opener) {
     const name = field("new-space", "Space name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens.");
     const reason = field("new-space-reason", "Reason", { maxlength: "500", required: "" }, "Required. Recorded with your key id.");
     const said = el("div", { "aria-live": "polite" });
@@ -3099,10 +3759,10 @@
     return form;
   }
   async function spaces(screen) {
-    loading(screen, TITLE7, "spaces");
+    loading(screen, TITLE8, "spaces");
     const answer = await call("GET", "/spaces", readSpaces);
     if (!answer.ok) {
-      failed(screen, TITLE7, answer);
+      failed(screen, TITLE8, answer);
       return;
     }
     if (!screen.live()) {
@@ -3111,12 +3771,16 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-space-form" }, icon("plus"), "New space");
     fill(
       screen.main,
-      head(TITLE7, `${answer.value.length.toLocaleString()} on this store`, opener),
-      createForm2(screen, opener),
+      head(TITLE8, `${answer.value.length.toLocaleString()} on this store`, opener),
+      createForm4(screen, opener),
       el(
         "section",
         { class: "card flush" },
-        answer.value.length === 0 ? empty("No spaces yet.") : table("Spaces", ["Name", "Created"], answer.value.map((space2) => row(mono(space2.name), moment(space2.created))))
+        answer.value.length === 0 ? empty("No spaces yet.") : table(
+          "Spaces",
+          ["Name", "Created", "Groups"],
+          answer.value.map((space2) => row(mono(space2.name), moment(space2.created), el("a", { href: format({ kind: "groups", space: space2.name }) }, "Groups")))
+        )
       )
     );
   }
@@ -3166,12 +3830,12 @@
   //! Creating a user is judged by the server on the user it would be, so a space
   //! admin who asks for an administrator, an operator or a cluster viewer is told
   //! the key does not allow it. Each row's actions are in `user-actions.ts`.
-  var TITLE8 = "Users";
+  var TITLE9 = "Users";
   function check(id, label) {
     const input = el("input", { id, name: id, type: "checkbox" });
     return { row: el("label", { class: "check", for: id }, input, label), input };
   }
-  function createForm3(screen, opener) {
+  function createForm5(screen, opener) {
     const name = field("new-user", "User name", { spellcheck: "false", autocomplete: "off", required: "" }, "1-63 lowercase letters, digits and inner hyphens; unique across the store.");
     const space2 = field("new-user-space", "Space", { spellcheck: "false", autocomplete: "off", required: "" });
     const role2 = el("select", { id: "new-user-role" }, el("option", { value: "member" }, "Member"), el("option", { value: "space_admin" }, "Space admin"));
@@ -3249,10 +3913,10 @@
     return line;
   }
   async function users(screen) {
-    loading(screen, TITLE8, "users");
+    loading(screen, TITLE9, "users");
     const answer = await call("GET", "/users", readUsers);
     if (!answer.ok) {
-      failed(screen, TITLE8, answer);
+      failed(screen, TITLE9, answer);
       return;
     }
     if (!screen.live()) {
@@ -3261,8 +3925,8 @@
     const opener = el("button", { type: "button", class: "primary", "aria-expanded": "false", "aria-controls": "new-user-form" }, icon("plus"), "New user");
     fill(
       screen.main,
-      head(TITLE8, `${answer.value.length.toLocaleString()} you administer`, opener),
-      createForm3(screen, opener),
+      head(TITLE9, `${answer.value.length.toLocaleString()} you administer`, opener),
+      createForm5(screen, opener),
       el(
         "section",
         { class: "card flush" },
@@ -3282,6 +3946,7 @@
   var NEEDS = {
     users: (can) => can.administer,
     spaces: (can) => can.operate,
+    groups: (can) => can.administer,
     cluster: (can) => can.view_cluster,
     renditions: (can) => can.operate,
     actions: (can) => can.operate
@@ -3306,6 +3971,10 @@
         return users(screen);
       case "spaces":
         return spaces(screen);
+      case "groups":
+        return groups(screen, route.space);
+      case "group":
+        return group2(screen, route.space, route.group);
       case "cluster":
         return cluster(screen);
       case "renditions":
@@ -3315,7 +3984,7 @@
     }
   }
   function mark(route) {
-    const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind;
+    const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind === "group" ? "groups" : route.kind;
     for (const link of all("[data-section]")) {
       if (link.dataset["section"] === section) {
         link.setAttribute("aria-current", "page");
@@ -3372,7 +4041,7 @@
     announce("Signed out.");
     showSignIn();
   });
-  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", renditions: "image", actions: "record" };
+  var SECTION_ICONS = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", groups: "group", cluster: "members", renditions: "image", actions: "record" };
   for (const link of all("[data-section]")) {
     const name = SECTION_ICONS[link.dataset["section"] ?? ""];
     if (name !== void 0) {

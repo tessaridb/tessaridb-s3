@@ -153,16 +153,16 @@ pub fn client_config(tls: &InternalTls) -> Result<ClientConfig> {
         .map_err(|_| invalid(KEY, "does not belong to the certificate"))
 }
 
-/// The console's TLS material, read at start: its certificate chain and private key. Browsers verify the chain;
-/// there is no client certificate. The key is never printed.
+/// A listener's TLS material, read at start — the console's or the S3 API's: its certificate chain and private key.
+/// Clients verify the chain; there is no client certificate. The key is never printed.
 #[derive(Clone, PartialEq, Eq)]
-pub struct ConsoleTls {
-    /// The console's certificate chain, PEM.
+pub struct ServerTls {
+    /// The certificate chain, PEM.
     pub certificate_pem: Vec<u8>,
     key_pem: Vec<u8>,
 }
 
-impl ConsoleTls {
+impl ServerTls {
     /// The material as read.
     #[must_use]
     pub const fn new(certificate_pem: Vec<u8>, key_pem: Vec<u8>) -> Self {
@@ -173,30 +173,32 @@ impl ConsoleTls {
     }
 }
 
-impl std::fmt::Debug for ConsoleTls {
+impl std::fmt::Debug for ServerTls {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConsoleTls")
+        f.debug_struct("ServerTls")
             .field("certificate_pem", &self.certificate_pem.len())
             .field("key_pem", &"<redacted>")
             .finish()
     }
 }
 
-const CONSOLE_CERT: &str = "TESSARIDB_S3_CONSOLE_TLS_CERT";
-const CONSOLE_KEY: &str = "TESSARIDB_S3_CONSOLE_TLS_KEY";
-
-/// The console's side of TLS: its certificate, TLS 1.2 and 1.3 only, no client certificate asked for.
+/// A listener's side of TLS: its certificate, TLS 1.2 and 1.3 only, no client certificate asked for. `cert` and `key`
+/// are the variables the material was read from, named in a refusal.
 ///
 /// # Errors
 /// [`Error::InvalidConfig`] naming the file whose contents cannot be used.
-pub fn console_server_config(tls: &ConsoleTls) -> Result<Arc<ServerConfig>> {
-    let key = PrivateKeyDer::from_pem_slice(&tls.key_pem)
-        .map_err(|_| invalid(CONSOLE_KEY, "not a PEM private key"))?;
+pub fn listener_config(
+    tls: &ServerTls,
+    cert: &'static str,
+    key: &'static str,
+) -> Result<Arc<ServerConfig>> {
+    let private = PrivateKeyDer::from_pem_slice(&tls.key_pem)
+        .map_err(|_| invalid(key, "not a PEM private key"))?;
     let config = ServerConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()
-        .map_err(|_| invalid(CONSOLE_CERT, "no protocol version both sides speak"))?
+        .map_err(|_| invalid(cert, "no protocol version both sides speak"))?
         .with_no_client_auth()
-        .with_single_cert(certificates(&tls.certificate_pem, CONSOLE_CERT)?, key)
-        .map_err(|_| invalid(CONSOLE_KEY, "does not belong to the certificate"))?;
+        .with_single_cert(certificates(&tls.certificate_pem, cert)?, private)
+        .map_err(|_| invalid(key, "does not belong to the certificate"))?;
     Ok(Arc::new(config))
 }

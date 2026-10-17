@@ -63,6 +63,15 @@ impl<'a> Params<'a> {
             .transpose()
     }
 
+    /// Whether flag `name` is set: `1` sets it, `0` or no parameter leaves it clear, anything else is refused.
+    pub(super) fn flag(&self, name: &str) -> Result<bool, Refusal> {
+        match self.optional::<u8>(name)? {
+            None | Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            Some(_) => Err(Refusal::Invalid("a flag is neither 0 nor 1")),
+        }
+    }
+
     /// The decimal value of `name`, which must be present.
     pub(super) fn required<T: std::str::FromStr>(&self, name: &str) -> Result<T, Refusal> {
         self.optional(name)?

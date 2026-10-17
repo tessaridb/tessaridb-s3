@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use tessari_s3_types::Timestamp;
 
 use super::model_lock::Lock;
+use crate::encryption::{CustomerSeal, WrappedKey};
 
 /// Where an object's bytes are: always on the drives, never in the metadata record (ADR-0008).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +27,7 @@ pub struct Multipart {
 }
 
 /// One part of a multipart object.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Part {
     /// The part number it was uploaded as.
     pub number: u16,
@@ -34,6 +35,8 @@ pub struct Part {
     pub data: [u8; 16],
     /// Size in bytes.
     pub size: u64,
+    /// The wrapped data key its bytes are sealed under; none for a part stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// A new object's metadata and where its bytes are, ready to commit.
@@ -57,6 +60,8 @@ pub struct NewObject {
     pub copied: bool,
     /// What Object Lock keeps the new version under (ADR-0016); nothing for a bucket without Object Lock.
     pub lock: Lock,
+    /// The wrapped data key its bytes are sealed under; none for an object stored plain.
+    pub encryption: Option<WrappedKey>,
 }
 
 /// A stored object.
@@ -82,6 +87,22 @@ pub struct StoredObject {
     pub version: Option<String>,
     /// Its replication status (`PENDING`, `COMPLETED`, `FAILED` or `REPLICA`); none when it is not replicated.
     pub replication: Option<String>,
+    /// The wrapped data key its bytes are sealed under; none for an object stored plain.
+    pub encryption: Option<WrappedKey>,
+}
+
+impl StoredObject {
+    /// The seal of the customer's key it is sealed under: its data's, or its first sealed part's.
+    #[must_use]
+    pub fn customer_seal(&self) -> Option<&CustomerSeal> {
+        match &self.content {
+            Content::Data(_) => self.encryption.as_ref()?.customer.as_ref(),
+            Content::Parts(multipart) => multipart
+                .parts
+                .iter()
+                .find_map(|part| part.encryption.as_ref()?.customer.as_ref()),
+        }
+    }
 }
 
 /// The condition a write is made under; each is one atomic step on the key's record.
@@ -127,6 +148,15 @@ pub struct Reclaimed {
     pub kept: usize,
     /// Data ids whose shard bytes were on this node with no shard set left: their shards removed.
     pub orphans: usize,
+}
+
+/// What one re-wrap pass did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Rewrapped {
+    /// Records under an older server key that were looked at.
+    pub examined: usize,
+    /// Of those, the ones whose data key is now wrapped under the active key; the rest changed meanwhile.
+    pub rewrapped: usize,
 }
 
 /// What one healing pass did.

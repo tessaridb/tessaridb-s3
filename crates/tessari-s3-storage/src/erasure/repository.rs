@@ -7,6 +7,8 @@ use crate::Result;
 pub(crate) struct ShardSet {
     pub(crate) layout: u32,
     pub(crate) size: u64,
+    /// Whether the shards hold sealed data, written as sealed shards.
+    pub(crate) sealed: bool,
 }
 
 /// Shard-set records in the metadata store.

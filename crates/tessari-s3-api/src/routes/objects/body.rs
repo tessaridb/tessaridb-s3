@@ -6,7 +6,8 @@ use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use tessari_s3_core::objects::range::segments;
 use tessari_s3_storage::Error as StorageError;
-use tessari_s3_storage::objects::{ObjectReader, ObjectService};
+use tessari_s3_storage::encryption::{CustomerKey, WrappedKey};
+use tessari_s3_storage::objects::{ObjectReader, ObjectService, Part};
 use tessari_s3_types::ErrorCode;
 
 use super::data::len;
@@ -50,60 +51,89 @@ impl Remaining {
     }
 }
 
-/// The body for bytes `start..=end` of data `id` holding `size` bytes. The first block is read and verified before
+/// The body for bytes `start..=end` of data `id` holding `size` bytes, sealed under the data key `sealed` holds when
+/// there is one — opened with `customer`'s key when a customer's key wrapped it. The first block is read and verified before
 /// this returns, so damage there becomes an error response; damage in a later block ends the body early, which a
 /// client sees as a body shorter than its Content-Length.
 pub(crate) async fn send(
     objects: &ObjectService,
     id: [u8; 16],
     size: u64,
+    sealed: Option<&WrappedKey>,
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<Body> {
     Ok(Body::from_stream(
-        blocks(objects, id, size, start, end).await?,
+        blocks(objects, id, size, sealed, customer, start, end).await?,
     ))
 }
 
-/// The body for bytes `start..=end` of an object made of `parts` — `(data id, size)` in object order. The first part's
+/// The body for bytes `start..=end` of an object made of `parts`, in object order, each opened under its own data key
+/// when sealed — with `customer`'s key when a customer's key wrapped it. The first part's
 /// first block is verified before this returns, as for one data file; each later part's file is opened when the body
 /// reaches it, and a failure there ends the body early.
 pub(crate) async fn send_parts(
     objects: &ObjectService,
-    parts: &[([u8; 16], u64)],
+    parts: &[Part],
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<Body> {
     Ok(Body::from_stream(
-        stream_parts(objects, parts, start, end).await?,
+        stream_parts(objects, parts, customer, start, end).await?,
     ))
 }
 
 /// The verified bytes `start..=end` of an object made of `parts`, as [`send_parts`] sends them.
 pub(super) async fn stream_parts(
     objects: &ObjectService,
-    parts: &[([u8; 16], u64)],
+    parts: &[Part],
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
-    let sizes: Vec<u64> = parts.iter().map(|(_, size)| *size).collect();
+    let sizes: Vec<u64> = parts.iter().map(|part| part.size).collect();
     let mut wanted = segments(&sizes, start, end)
         .into_iter()
         .filter_map(|segment| {
             parts
                 .get(segment.index)
-                .map(|(id, size)| (*id, *size, segment.start, segment.end))
+                .map(|part| (part.clone(), segment.start, segment.end))
         });
-    let Some((id, size, from, to)) = wanted.next() else {
+    let Some((part, from, to)) = wanted.next() else {
         return Ok(futures_util::stream::empty().boxed());
     };
-    let first = blocks(objects, id, size, from, to).await?;
+    let first = blocks(
+        objects,
+        part.data,
+        part.size,
+        part.encryption.as_ref(),
+        customer,
+        from,
+        to,
+    )
+    .await?;
     let objects = objects.clone();
-    let rest: Vec<([u8; 16], u64, u64, u64)> = wanted.collect();
+    // Each later part is opened when the body reaches it, so it holds its own copy of the key.
+    let customer = customer.cloned();
+    let rest: Vec<(Part, u64, u64)> = wanted.collect();
     let later = futures_util::stream::iter(rest)
-        .then(move |(id, size, from, to)| {
+        .then(move |(part, from, to)| {
             let objects = objects.clone();
-            async move { blocks(&objects, id, size, from, to).await }
+            let customer = customer.clone();
+            async move {
+                blocks(
+                    &objects,
+                    part.data,
+                    part.size,
+                    part.encryption.as_ref(),
+                    customer.as_ref(),
+                    from,
+                    to,
+                )
+                .await
+            }
         })
         .flat_map(|opened| match opened {
             Ok(stream) => stream,
@@ -115,15 +145,27 @@ pub(super) async fn stream_parts(
     Ok(first.chain(later).boxed())
 }
 
-/// The verified blocks holding bytes `start..=end` of data `id`, the first already read.
+/// The verified blocks holding bytes `start..=end` of data `id` — opened, when `sealed` holds its data key, under
+/// this node's key or `customer`'s — the first already read.
 pub(super) async fn blocks(
     objects: &ObjectService,
     id: [u8; 16],
     size: u64,
+    sealed: Option<&WrappedKey>,
+    customer: Option<&CustomerKey>,
     start: u64,
     end: u64,
 ) -> Result<BoxStream<'static, std::io::Result<Bytes>>> {
-    let reader = objects.open(id, size).await?;
+    let reader = match (sealed, customer) {
+        (Some(wrapped), Some(key)) if wrapped.customer.is_some() => {
+            objects.open_customer(id, size, wrapped, key).await?
+        }
+        (Some(wrapped), None) if wrapped.customer.is_some() => {
+            return Err(super::customer::key_required());
+        }
+        (Some(wrapped), _) => objects.open_sealed(id, size, wrapped).await?,
+        (None, _) => objects.open(id, size).await?,
+    };
     let block_size = u64::from(reader.block_size());
     let block_of = |offset: u64| {
         offset.checked_div(block_size).ok_or_else(|| {

@@ -43,6 +43,7 @@ pub(crate) struct PartRow {
     pub(crate) number: u16,
     pub(crate) data: [u8; 16],
     pub(crate) record: tessari_s3_core::objects::multipart::PartRecord,
+    pub(crate) encryption: Option<crate::encryption::WrappedKey>,
 }
 
 /// Multipart queries.

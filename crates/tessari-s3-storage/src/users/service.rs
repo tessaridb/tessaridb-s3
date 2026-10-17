@@ -8,10 +8,13 @@ use tessari_s3_core::authz::{Access, UserName, UserPrincipal, Visible};
 use tessari_s3_types::{BucketName, IamKey};
 
 use super::credentials;
-use super::model::{IssuedKey, KeyScope, NewUser, Resolved, User, scope_of};
+use super::model::{
+    IssuedKey, KeyScope, NewUser, Resolved, SessionScope, User, scope_of, session_of,
+};
 use super::repository::{Inserted, UserRepository};
 use super::sealer::{Binding, Sealed, Sealer};
 use super::tessaridb::TessariUsers;
+use crate::groups::GroupService;
 use crate::spaces::SpaceService;
 use crate::{Error, Result};
 
@@ -20,6 +23,9 @@ const ID_ATTEMPTS: usize = 3;
 
 #[path = "service_keys.rs"]
 mod keys;
+
+#[path = "service_sessions.rs"]
+mod sessions;
 
 /// What creating a user ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,16 +43,19 @@ pub enum UserCreated {
 pub struct UserService {
     repository: TessariUsers,
     spaces: SpaceService,
+    groups: GroupService,
     sealer: Option<Arc<Sealer>>,
 }
 
 impl UserService {
-    /// The service over `repository`, checking spaces through `spaces`; it seals nothing until given a root key.
+    /// The service over `repository`, checking spaces through `spaces` and joining what `groups` grant into each
+    /// principal; it seals nothing until given a root key.
     #[must_use]
-    pub const fn new(repository: TessariUsers, spaces: SpaceService) -> Self {
+    pub const fn new(repository: TessariUsers, spaces: SpaceService, groups: GroupService) -> Self {
         Self {
             repository,
             spaces,
+            groups,
             sealer: None,
         }
     }
@@ -154,6 +163,7 @@ impl UserService {
                 user: holder.name.as_str(),
                 space: holder.space.as_str(),
                 scope: scope.map(KeyScope::binding),
+                session: None,
             };
             let sealed = sealer.seal(&secret, binding)?;
             if self
@@ -197,6 +207,7 @@ impl UserService {
             return Ok(None);
         };
         let scope = scope_of(&key)?;
+        let session = session_of(&key)?;
         let sealed = Sealed {
             ciphertext: key.secret,
             nonce: key.nonce,
@@ -208,12 +219,14 @@ impl UserService {
             user: user.name.as_str(),
             space: user.space.as_str(),
             scope: scope.as_ref().map(KeyScope::binding),
+            session: session.as_ref().map(SessionScope::binding),
         };
         let secret = self.sealer()?.open(&sealed, binding)?;
         Ok(Some(Resolved {
             user,
             secret,
             scope,
+            session,
         }))
     }
 
@@ -262,7 +275,8 @@ impl UserService {
         self.repository.remove_grant(user, bucket).await
     }
 
-    /// `name` as the access evaluator sees it, with its grants; `None` when it does not exist or is disabled.
+    /// `name` as the access evaluator sees it, with its grants and those its groups give it (per bucket, what either
+    /// allows); `None` when it does not exist or is disabled.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
@@ -270,7 +284,7 @@ impl UserService {
         let Some(user) = self.get(name).await?.filter(|user| !user.disabled) else {
             return Ok(None);
         };
-        let grants: BTreeMap<String, Access> = self
+        let mut grants: BTreeMap<String, Access> = self
             .repository
             .grants(name)
             .await?
@@ -283,6 +297,10 @@ impl UserService {
                 (grant.bucket_name, access)
             })
             .collect();
+        for received in self.groups.received(name, &user.space).await? {
+            let held = grants.entry(received.bucket).or_default();
+            *held = held.union(received.access);
+        }
         Ok(Some(UserPrincipal {
             name: user.name.as_str().to_owned(),
             space: user.space,

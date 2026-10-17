@@ -9,19 +9,24 @@
 mod console;
 mod health;
 mod internal;
+mod keys;
 mod membership;
+mod metrics;
 
 use std::time::Duration;
 
 use std::sync::Arc;
-use tessari_s3_api::{ApiState, router};
+use tessari_s3_api::{ApiState, serve_s3};
+use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
+use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
+use tessari_s3_infrastructure::tls::listener_config;
 use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
     Destination, Healer, ImageWorker, LifecycleWorker, MediaPlanner, Mover, NotifyWorker,
-    Reclaimer, Replicator, UploadReaper, UsageScanner, VideoWorker, run,
+    Reclaimer, Replicator, Rewrapper, UploadReaper, UsageScanner, VideoWorker, run,
 };
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::media::TaskQueue;
@@ -57,6 +62,9 @@ async fn main() -> anyhow::Result<()> {
     // start, rather than answering every request 503.
     storage.prepare().await?;
     tracing::info!(meta = ?config.meta.addresses, namespace = %config.meta.namespace, "metadata schema ready");
+    if let Some(passphrase) = &config.keys_passphrase {
+        keys::unseal_at_start(&storage, passphrase.expose()).await;
+    }
     // A store from before ADR-0008 holds small objects' bytes in their records; they move to data files before the
     // node serves, and the column goes.
     let converted = storage.objects().convert_inline().await?;
@@ -196,6 +204,9 @@ async fn main() -> anyhow::Result<()> {
         );
         daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
     }
+    // After a rotation, each node re-wraps what is still under an older server key it holds.
+    let rewrapper = Rewrapper::new(storage.objects().clone());
+    daemons.spawn(run(Arc::new(rewrapper), stop_rx.clone()));
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),
@@ -204,10 +215,27 @@ async fn main() -> anyhow::Result<()> {
     daemons.spawn(run(Arc::new(scanner), stop_rx.clone()));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
-    let app = router(ApiState::new(&config, ApiState::system_clock(), storage));
+    let state = ApiState::new(&config, ApiState::system_clock(), storage);
+    // People the console's identity provider vouches for may ask the S3 surface for temporary credentials.
+    if let Some(console) = &config.console
+        && let Some(settings) = &console.oidc
+    {
+        let client = OidcClient::new(settings, CONSOLE_OIDC_REFRESH_MIN_SECS)?;
+        state.accept_web_identity(client, console.sign_ins_per_minute);
+    }
+    let metrics = metrics::surface(&config, &state, stop_rx.clone()).await?;
+    if let Some(writer) = metrics::access_log(&config, &state, stop_rx.clone()) {
+        daemons.spawn(writer);
+    }
+    let tls = config
+        .tls
+        .as_ref()
+        .map(|tls| listener_config(tls, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY"))
+        .transpose()?;
     let listener = tokio::net::TcpListener::bind(config.listen).await?;
+    tracing::info!(listen = %config.listen, tls = tls.is_some(), "S3 API listening");
     let mut server_stop = stop_rx;
-    let s3 = axum::serve(listener, app).with_graceful_shutdown(async move {
+    let s3 = serve_s3(listener, state, tls, async move {
         // A closed sender also means stop: the select below has returned.
         let _closed = server_stop.changed().await;
     });
@@ -225,7 +253,13 @@ async fn main() -> anyhow::Result<()> {
                 None => Ok(()),
             }
         };
-        tokio::try_join!(s3.into_future(), internal, console).map(|_| ())
+        let metrics = async move {
+            match metrics {
+                Some(metrics) => metrics.await,
+                None => Ok(()),
+            }
+        };
+        tokio::try_join!(s3, internal, console, metrics).map(|_| ())
     };
     let mut server = std::pin::pin!(server);
     tokio::select! {

@@ -2,7 +2,7 @@
 
 use tessari_s3_api::{ApiState, ConsoleState, serve_console};
 use tessari_s3_infrastructure::S3Config;
-use tessari_s3_infrastructure::tls::console_server_config;
+use tessari_s3_infrastructure::tls::listener_config;
 use tessari_s3_storage::Storage;
 use tokio::sync::watch;
 
@@ -21,7 +21,13 @@ pub(crate) async fn surface(
     let tls = console
         .tls
         .as_ref()
-        .map(console_server_config)
+        .map(|tls| {
+            listener_config(
+                tls,
+                "TESSARIDB_S3_CONSOLE_TLS_CERT",
+                "TESSARIDB_S3_CONSOLE_TLS_KEY",
+            )
+        })
         .transpose()?;
     let listener = tokio::net::TcpListener::bind(console.listen).await?;
     if tls.is_some() {

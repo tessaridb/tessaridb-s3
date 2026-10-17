@@ -12,6 +12,7 @@ use axum::http::header::{
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_storage::actions::NewAction;
@@ -63,13 +64,22 @@ pub(super) async fn download(
     State(state): State<ConsoleState>,
     Extension(session): Extension<Session>,
     Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
     Path(bucket): Path<String>,
     query: Result<Query<DownloadQuery>, QueryRejection>,
 ) -> Result<Response, ConsoleError> {
     let Query(query) = query.map_err(|_| ConsoleError::bad_request("key is required"))?;
     let why = reason(query.reason, false)?;
     let bucket = bucket_name(&bucket)?;
-    on_bucket(&state, &principal, &bucket, Action::ReadObject).await?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &bucket,
+        Action::ReadObject,
+        ("s3:GetObject", query.key.as_deref()),
+    )
+    .await?;
     let key = object_key(query.key.as_deref())?;
     let objects = state.storage().objects();
     let object = match objects.get(&bucket, &key).await? {
@@ -77,21 +87,32 @@ pub(super) async fn download(
         Ok(None) => return Err(no_such_key()),
         Ok(Some(object)) => object,
     };
+    // The console holds no customer's key: an object sealed under one is refused before any byte is opened.
+    if object.customer_seal().is_some() {
+        return Err(ConsoleError::invalid(
+            "customer_key_required",
+            "the object is sealed under a customer-provided key, which the console never holds",
+        ));
+    }
     let last = object.size.saturating_sub(1);
     // The first block is read and verified here, so damage there is an error answer rather than a short body.
     let content = match &object.content {
         // An empty object has no byte to read back.
         _ if object.size == 0 => Body::empty(),
-        Content::Data(id) => body::send(objects, *id, object.size, 0, last)
-            .await
-            .map_err(|error| failed(&error))?,
+        Content::Data(id) => body::send(
+            objects,
+            *id,
+            object.size,
+            object.encryption.as_ref(),
+            None,
+            0,
+            last,
+        )
+        .await
+        .map_err(|error| failed(&error))?,
         Content::Parts(multipart) => {
-            let parts: Vec<([u8; 16], u64)> = multipart
-                .parts
-                .iter()
-                .map(|part| (part.data, part.size))
-                .collect();
-            body::send_parts(objects, &parts, 0, last)
+            let parts = &multipart.parts;
+            body::send_parts(objects, parts, None, 0, last)
                 .await
                 .map_err(|error| failed(&error))?
         }

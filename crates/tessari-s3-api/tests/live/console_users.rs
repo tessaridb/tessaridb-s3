@@ -320,6 +320,7 @@ async fn the_cluster_view_is_answered_only_to_who_may_see_it_and_the_session_say
         )
     );
     assert_eq!(ann_may["access_key_id"], Value::from(ann.id.clone()));
+    assert_eq!(ann_may["space"], Value::from("alpha"), "a user's own space");
     assert_eq!(me(&viewer_token).await["view_cluster"], Value::Bool(true));
     let root_may = me(&root).await;
     assert_eq!(
@@ -330,4 +331,5 @@ async fn the_cluster_view_is_answered_only_to_who_may_see_it_and_the_session_say
         ),
         (&Value::Bool(true), &Value::Bool(true), &Value::Bool(true))
     );
+    assert_eq!(root_may["space"], Value::Null, "root belongs to no space");
 }

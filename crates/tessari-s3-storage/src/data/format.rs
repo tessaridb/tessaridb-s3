@@ -1,6 +1,7 @@
 //! The data file format: a 32-byte header naming the file's data id and block size, then every block followed by its
 //! BLAKE3 hash. Format 1 holds a whole object; format 2 holds one shard of an erasure-coded object and puts the shard
-//! index where format 1 keeps zeros. The size lives in the metadata record; the layout of the rest follows from the
+//! index where format 1 keeps zeros. Formats 3 and 4 are 1 and 2 holding sealed bytes, numbered apart so a reader
+//! expecting plain bytes refuses them by format instead of serving ciphertext as an object. The size lives in the metadata record; the layout of the rest follows from the
 //! size and the block size, so a reader can check the file's length before trusting it.
 //!
 //! ```text
@@ -17,6 +18,10 @@ pub(crate) const MAGIC: [u8; 4] = *b"TS3S";
 pub(crate) const FORMAT: u16 = 1;
 /// The format of a file holding one shard of an erasure-coded object; the header's spare 16 bits hold its index.
 pub(crate) const SHARD_FORMAT: u16 = 2;
+/// Format 1 holding sealed bytes.
+pub(crate) const SEALED_FORMAT: u16 = 3;
+/// Format 2 holding sealed bytes.
+pub(crate) const SEALED_SHARD_FORMAT: u16 = 4;
 /// Header length in bytes.
 pub(crate) const HEADER_LEN: usize = 32;
 /// Length of the hash after each block.
@@ -53,12 +58,24 @@ pub(crate) enum Piece {
     Shard(u16),
 }
 
-/// The header for data `id` written in blocks of `block_size` bytes.
-pub(crate) fn encode_header(block_size: u32, id: [u8; 16], piece: Piece) -> [u8; HEADER_LEN] {
-    let (format, index) = match piece {
-        Piece::Whole => (FORMAT, 0),
-        Piece::Shard(index) => (SHARD_FORMAT, index),
-    };
+/// The format number and the header's piece index of `piece`, holding sealed bytes when `sealed`.
+const fn format_of(piece: Piece, sealed: bool) -> (u16, u16) {
+    match (piece, sealed) {
+        (Piece::Whole, false) => (FORMAT, 0),
+        (Piece::Shard(index), false) => (SHARD_FORMAT, index),
+        (Piece::Whole, true) => (SEALED_FORMAT, 0),
+        (Piece::Shard(index), true) => (SEALED_SHARD_FORMAT, index),
+    }
+}
+
+/// The header for data `id` written in blocks of `block_size` bytes, sealed when `sealed`.
+pub(crate) fn encode_header(
+    block_size: u32,
+    id: [u8; 16],
+    piece: Piece,
+    sealed: bool,
+) -> [u8; HEADER_LEN] {
+    let (format, index) = format_of(piece, sealed);
     let mut header = [0; HEADER_LEN];
     header[0..4].copy_from_slice(&MAGIC);
     header[4..6].copy_from_slice(&format.to_le_bytes());
@@ -78,19 +95,18 @@ fn header_check(header: &[u8; HEADER_LEN]) -> [u8; 4] {
     check
 }
 
-/// The block size a header declares, after checking that it is a version-1 header for data `id`.
+/// The block size a header declares, after checking that it is the header of `piece` of data `id`, sealed when
+/// `sealed`.
 pub(crate) fn decode_header(
     header: &[u8; HEADER_LEN],
     id: [u8; 16],
     piece: Piece,
+    sealed: bool,
 ) -> Result<u32, HeaderFault> {
     if header[0..4] != MAGIC {
         return Err(HeaderFault::Magic);
     }
-    let (expected, index) = match piece {
-        Piece::Whole => (FORMAT, 0),
-        Piece::Shard(index) => (SHARD_FORMAT, index),
-    };
+    let (expected, index) = format_of(piece, sealed);
     let format = u16::from_le_bytes([header[4], header[5]]);
     if format != expected {
         return Err(HeaderFault::Format(format));

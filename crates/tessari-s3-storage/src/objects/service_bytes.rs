@@ -9,6 +9,7 @@ use tessari_s3_types::{BucketName, ObjectKey};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::ObjectService;
+use crate::encryption::Sealing;
 use crate::objects::{
     Content, Lock, NewObject, StoredObject, Upload, VersionRead, WriteCondition, Written,
 };
@@ -47,8 +48,8 @@ impl ObjectService {
             .then_some(bytes))
     }
 
-    /// Writes every byte of `object` to `out`, block by block; `false`, having written nothing, when it is larger than
-    /// `max` bytes.
+    /// Writes every byte of `object` to `out`, block by block — opened, where it was sealed; `false`, having written
+    /// nothing, when it is larger than `max` bytes.
     ///
     /// # Errors
     /// A data file's or the shards' failure, or `out`'s.
@@ -62,15 +63,18 @@ impl ObjectService {
             return Ok(false);
         }
         let pieces = match &object.content {
-            Content::Data(id) => vec![(*id, object.size)],
+            Content::Data(id) => vec![(*id, object.size, object.encryption.as_ref())],
             Content::Parts(multipart) => multipart
                 .parts
                 .iter()
-                .map(|part| (part.data, part.size))
+                .map(|part| (part.data, part.size, part.encryption.as_ref()))
                 .collect(),
         };
-        for (id, size) in pieces {
-            let reader = self.open(id, size).await?;
+        for (id, size, sealed) in pieces {
+            let reader = match sealed {
+                Some(wrapped) => self.open_sealed(id, size, wrapped).await?,
+                None => self.open(id, size).await?,
+            };
             let block = u64::from(reader.block_size()).max(1);
             for index in 0..size.div_ceil(block) {
                 out.write_all(&reader.read_block(index).await?)
@@ -89,20 +93,23 @@ impl ObjectService {
     }
 
     /// Writes `bytes` at `bucket/key` as an object of `content_type`, over whatever is there, with an MD5 ETag and the
-    /// default checksum as a PUT of the same bytes would have. A write that does not commit releases its file.
+    /// default checksum as a PUT of the same bytes would have; sealed under a data key of its own, wrapped by the key
+    /// `sealing` names, when it names one. A write that does not commit releases its file.
     ///
     /// # Errors
-    /// The drive's failure, or the metadata store's refusal or outage.
+    /// The drive's failure, or the metadata store's refusal or outage; [`Error::KeysSealed`] or
+    /// [`Error::UnknownKey`] for a sealed write this node cannot seal.
     pub async fn put_bytes(
         &self,
         bucket: &BucketName,
         key: &ObjectKey,
         bytes: &[u8],
         content_type: &str,
+        sealing: Option<&Sealing>,
     ) -> Result<Written> {
         let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         let mut source = bytes;
-        self.put_reader(bucket, key, &mut source, length, content_type)
+        self.put_reader(bucket, key, &mut source, length, content_type, sealing)
             .await
     }
 
@@ -118,8 +125,12 @@ impl ObjectService {
         source: &mut (impl AsyncRead + Unpin + Send),
         length: u64,
         content_type: &str,
+        sealing: Option<&Sealing>,
     ) -> Result<Written> {
-        let mut upload = self.upload(length).await?;
+        let mut upload = match sealing {
+            Some(sealing) => self.upload_sealed(length, sealing).await?,
+            None => self.upload(length).await?,
+        };
         let id = upload.id();
         let uploaded = match fill(&mut upload, source, length).await {
             Ok(()) => upload.finish().await,
@@ -146,6 +157,7 @@ impl ObjectService {
             content: Content::Data(uploaded.id),
             copied: false,
             lock: Lock::default(),
+            encryption: uploaded.encryption,
         };
         self.put(bucket, key, &object, &WriteCondition::None).await
     }

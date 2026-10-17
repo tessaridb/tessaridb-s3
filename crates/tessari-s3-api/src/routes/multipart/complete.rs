@@ -18,7 +18,9 @@ use super::{key_text, no_such_upload, upload_id};
 use crate::pipeline::body::read_verified;
 use crate::pipeline::call::Call;
 use crate::pipeline::response::{with_version, xml_response};
+use crate::routes::objects::customer::{admit_key, answer_customer};
 use crate::routes::objects::headers::read_put_headers;
+use crate::routes::objects::sse::answer_sse;
 use crate::routes::quota::Room;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -203,6 +205,23 @@ pub(crate) async fn complete(
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let headers = read_put_headers(call.headers)?;
+    if headers.encryption.is_some() {
+        return Err(Error::new(
+            ErrorCode::NotImplemented,
+            "server-side encryption of a multipart upload is not implemented",
+        ));
+    }
+    // Completing needs no key; one that is brought must be the upload's.
+    if let Some(customer) = &headers.customer {
+        let declared = call
+            .state
+            .storage()
+            .multipart()
+            .find(call.bucket()?, key, id)
+            .await?
+            .ok_or_else(no_such_upload)?;
+        admit_key(call, declared.customer.as_ref(), Some(customer))?;
+    }
     // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
     // carried yet, and are refused rather than dropped.
     if headers.lock.asked {
@@ -270,6 +289,7 @@ pub(crate) async fn complete(
         checksum: (algorithm, value),
         composite,
         version,
+        encryption,
     } = outcome
     else {
         return Err(refused(&outcome));
@@ -282,7 +302,7 @@ pub(crate) async fn complete(
     } else {
         "FULL_OBJECT"
     };
-    Ok(with_version(
+    let mut response = with_version(
         xml_response(
             StatusCode::OK,
             format!(
@@ -294,7 +314,14 @@ pub(crate) async fn complete(
             ),
         ),
         version.as_deref(),
-    ))
+    );
+    if let Some(sealing) = &encryption {
+        answer_sse(response.headers_mut(), sealing);
+    }
+    if let Some(customer) = &headers.customer {
+        answer_customer(response.headers_mut(), customer);
+    }
+    Ok(response)
 }
 
 #[cfg(test)]

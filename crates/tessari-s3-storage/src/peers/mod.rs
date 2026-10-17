@@ -3,4 +3,4 @@
 
 mod service;
 
-pub use service::{PeerAt, RemoteShards, ShardRef};
+pub use service::{PeerAt, RemoteShards, ShardRef, ShardShape};

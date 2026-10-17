@@ -5,8 +5,9 @@
 #
 # The database is not published: only the S3 server reaches it, over the
 # compose network. S3 (9100) and the console (9101) are published on
-# 127.0.0.1; put a TLS-terminating proxy in front before exposing either,
-# because without TLS a signed-in console key crosses the network in the clear.
+# 127.0.0.1; give each its certificate (TESSARIDB_S3_TLS_CERT / _KEY,
+# TESSARIDB_S3_CONSOLE_TLS_CERT / _KEY) or put a TLS-terminating proxy in front
+# before exposing either: without TLS a console key crosses the network in the clear.
 name: tessaridb-s3
 
 services:
@@ -42,7 +43,7 @@ services:
       - ./docker/s3-account.sh:/s3-account.sh:ro
 
   s3:
-    image: tessaridb/s3:0.1.0-beta
+    image: tessaridb/s3:0.2.0-beta
     build: .
     restart: unless-stopped
     depends_on:
@@ -56,6 +57,7 @@ services:
       TESSARIDB_S3_META_USER: s3
       TESSARIDB_S3_META_PASSWORD: ${S3_META_PASSWORD}
       TESSARIDB_S3_IAM_KEY: ${S3_IAM_KEY:-}
+      TESSARIDB_S3_KEYS_PASSPHRASE: ${S3_KEYS_PASSPHRASE:-}
       TESSARIDB_S3_CONSOLE_LISTEN: 0.0.0.0:9101
     ports:
       - "127.0.0.1:${S3_PORT:-9100}:9100"

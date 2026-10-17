@@ -104,6 +104,7 @@ async fn write(cluster: &Cluster, code: Code, bytes: &[u8]) -> Result<ErasureUpl
         size: u64::try_from(bytes.len()).expect("small"),
         destinations: cluster.destinations.clone(),
         stall: STALL,
+        sealed: false,
     };
     let mut upload = ErasureUpload::start(plan, &cluster.local, &cluster.peers)?;
     for piece in bytes.chunks(1000) {
@@ -126,7 +127,7 @@ async fn shard(cluster: &Cluster, index: usize, size: u64) -> Vec<u8> {
         Destination::Local => {
             let reader = cluster
                 .local
-                .open(shard.id, shard.index, size)
+                .open(shard.id, shard.index, size, false)
                 .await
                 .expect("open");
             let mut bytes = Vec::new();
@@ -138,7 +139,7 @@ async fn shard(cluster: &Cluster, index: usize, size: u64) -> Vec<u8> {
         Destination::Remote(peer) => {
             let parts: Vec<Bytes> = cluster
                 .peers
-                .get(peer, shard, size, None, Duration::from_secs(10))
+                .get(peer, shard, size, false, None, Duration::from_secs(10))
                 .await
                 .expect("read")
                 .try_collect()

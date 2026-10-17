@@ -114,7 +114,7 @@ impl ErasureWrites {
         if !changed.is_empty() {
             let targets = self.destinations(id, current).await?;
             let sources = self.destinations(id, &old).await?;
-            let reader = ErasureReader::new(Arc::clone(self), id, set.size, sources)?;
+            let reader = ErasureReader::new(Arc::clone(self), id, set, sources)?;
             {
                 let copy = std::pin::pin!(self.rebuild(&reader, &targets, &changed, Some(pace)));
                 let renewal = std::pin::pin!(self.renew(id));
@@ -124,7 +124,7 @@ impl ErasureWrites {
                     Either::Left((copied, _)) | Either::Right((copied, _)) => copied?,
                 }
             }
-            let copies = ErasureReader::new(Arc::clone(self), id, set.size, targets)?;
+            let copies = ErasureReader::new(Arc::clone(self), id, set, targets)?;
             for &index in &changed {
                 if !copies.intact(index).await {
                     return Err(Error::InvalidShard {

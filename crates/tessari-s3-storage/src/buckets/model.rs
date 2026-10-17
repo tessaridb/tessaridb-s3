@@ -1,5 +1,6 @@
 //! A bucket as the rest of the server sees it.
 
+use tessari_s3_core::authz::policy::BucketPolicy;
 use tessari_s3_core::authz::{BucketResource, SpaceName};
 use tessari_s3_core::quota::Quota;
 use tessari_s3_core::versioning::Versioning;
@@ -34,6 +35,8 @@ pub struct Bucket {
     pub versioning: Option<Versioning>,
     /// Its lifecycle rules; `None` while none are set.
     pub lifecycle: Option<Vec<tessari_s3_core::lifecycle::Rule>>,
+    /// Its CORS rules; `None` while none are set.
+    pub cors: Option<Vec<tessari_s3_core::cors::Rule>>,
     /// Its notification rules; `None` while none are set.
     pub notification: Option<Vec<tessari_s3_core::notification::Rule>>,
     /// Its replication configuration; `None` while none is set.
@@ -46,6 +49,23 @@ pub struct Bucket {
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
     /// Who must hold an object write before it is acknowledged.
     pub acknowledgement: Acknowledgement,
+    /// How a write that asks for no encryption is sealed; `None` while the bucket has no default.
+    pub encryption: Option<BucketEncryption>,
+    /// Its policy's JSON text as written (validated then); `None` while none is set.
+    pub policy: Option<String>,
+    /// Its Block Public Access configuration.
+    pub public_access: super::PublicAccess,
+}
+
+/// A bucket's default encryption: the key a write that names none is sealed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BucketEncryption {
+    /// The server's key, or a named one.
+    pub sealing: crate::encryption::Sealing,
+    /// Whether the configuration asked for an S3 Bucket Key; recorded and answered back.
+    pub bucket_key: bool,
+    /// Whether writes may bring their own key (SSE-C): blocked unless the configuration said `NONE`.
+    pub allow_customer_keys: bool,
 }
 
 /// What turning a bucket's Object Lock on (or changing its default) ended in.
@@ -72,13 +92,18 @@ pub enum Acknowledgement {
 }
 
 impl Bucket {
-    /// The bucket as the access evaluator sees it.
+    /// The bucket as the access evaluator sees it, its policy parsed (a stored text that no longer parses is
+    /// carried as the error, which refuses everything it governs).
     #[must_use]
     pub fn resource(&self) -> BucketResource {
         BucketResource {
             name: self.name.as_str().to_owned(),
             space: self.space.clone(),
             creator: self.creator.clone(),
+            policy: self.policy.as_deref().map(|text| {
+                std::sync::Arc::new(BucketPolicy::parse(text, self.name.as_str(), &self.space))
+            }),
+            public_access: self.public_access.in_force(),
         }
     }
 }
@@ -128,6 +153,11 @@ impl TryFrom<BucketEntity> for Bucket {
             creator: entity.creator,
             quota,
             versioning,
+            cors: entity
+                .cors
+                .as_ref()
+                .map(|rules| super::cors::from_values(rules))
+                .transpose()?,
             lifecycle: entity
                 .lifecycle
                 .as_ref()
@@ -166,6 +196,13 @@ impl TryFrom<BucketEntity> for Bucket {
                 .as_ref()
                 .map(|rules| super::media::from_values(rules))
                 .transpose()?,
+            encryption: entity
+                .encryption
+                .as_ref()
+                .map(super::encryption::from_value)
+                .transpose()?,
+            policy: entity.policy,
+            public_access: super::public_access::from_text(entity.public_access.as_deref())?,
             acknowledgement: match entity.acknowledge.as_deref() {
                 None => Acknowledgement::Majority,
                 Some(LOCAL) => Acknowledgement::RegionMajority,

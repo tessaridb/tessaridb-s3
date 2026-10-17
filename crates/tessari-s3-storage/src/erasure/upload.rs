@@ -48,6 +48,8 @@ pub struct ErasurePlan {
     pub destinations: Vec<Destination>,
     /// How long a shard's node may keep its queue full before the shard is given up.
     pub stall: Duration,
+    /// Whether the bytes are sealed, and the shards written as sealed shards.
+    pub sealed: bool,
 }
 
 /// An upload that reached its write quorum.
@@ -99,6 +101,7 @@ impl ErasureUpload {
             size: stripe_count
                 .checked_mul(u64::from(block_len))
                 .ok_or(invalid("shard length overflows"))?,
+            sealed: plan.sealed,
         };
         // Every block may take a stall's time to cross; past that the call is abandoned.
         let budget = plan

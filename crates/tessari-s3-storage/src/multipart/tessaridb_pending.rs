@@ -15,6 +15,7 @@ use super::super::model::{NewUpload, OpenUpload};
 use super::super::repository::{PendingBatch, PendingRow};
 use super::strings;
 use crate::answers::{bucket_read, first_record, incarnation_of};
+use crate::encryption::Sealing;
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -103,6 +104,22 @@ pub(super) async fn create(
         .chain((!upload.tags.is_empty()).then(|| ("tags", strings(&upload.tags))))
         .map(|(k, v)| (k.to_owned(), v))
         .collect();
+    match &upload.encryption {
+        None => {}
+        Some(Sealing::Server) => {
+            record.insert("sse".to_owned(), Value::String("AES256".to_owned()));
+        }
+        Some(Sealing::Named(name)) => {
+            record.insert("sse".to_owned(), Value::String("aws:kms".to_owned()));
+            record.insert("sse_kms".to_owned(), Value::String(name.to_string()));
+        }
+    }
+    if let Some(seal) = &upload.customer {
+        record.extend(
+            crate::objects::entity::seal_fields(seal)
+                .map(|(field, value)| (field.to_owned(), value)),
+        );
+    }
     for (field, value) in [
         ("checksum_algorithm", &upload.checksum_algorithm),
         ("checksum_type", &upload.checksum_type),

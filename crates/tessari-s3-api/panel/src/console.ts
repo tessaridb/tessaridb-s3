@@ -6,6 +6,8 @@ import { actions } from "./actions.ts";
 import { call } from "./api.ts";
 import { buckets } from "./buckets.ts";
 import { cluster } from "./cluster.ts";
+import { group } from "./group.ts";
+import { groups } from "./groups.ts";
 import { all, announce, at } from "./dom.ts";
 import { installTips } from "./icon-action.ts";
 import { ignored, readCapabilities, type Capabilities } from "./models.ts";
@@ -34,6 +36,7 @@ let may: Capabilities | null = null;
 const NEEDS: Readonly<Record<string, (can: Capabilities) => boolean>> = {
   users: (can) => can.administer,
   spaces: (can) => can.operate,
+  groups: (can) => can.administer,
   cluster: (can) => can.view_cluster,
   renditions: (can) => can.operate,
   actions: (can) => can.operate,
@@ -61,6 +64,10 @@ function draw(route: Route, screen: Screen): Promise<void> {
       return users(screen);
     case "spaces":
       return spaces(screen);
+    case "groups":
+      return groups(screen, route.space);
+    case "group":
+      return group(screen, route.space, route.group);
     case "cluster":
       return cluster(screen);
     case "renditions":
@@ -72,7 +79,7 @@ function draw(route: Route, screen: Screen): Promise<void> {
 
 /** Marks the navigation link for the section `route` belongs to. */
 function mark(route: Route): void {
-  const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind;
+  const section = route.kind === "objects" || route.kind === "object" ? "buckets" : route.kind === "group" ? "groups" : route.kind;
   for (const link of all("[data-section]")) {
     if (link.dataset["section"] === section) {
       link.setAttribute("aria-current", "page");
@@ -132,7 +139,7 @@ signOut.addEventListener("click", async () => {
   announce("Signed out.");
   showSignIn();
 });
-const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", cluster: "members", renditions: "image", actions: "record" };
+const SECTION_ICONS: Readonly<Record<string, IconName>> = { status: "overview", buckets: "buckets", users: "users", spaces: "layers", groups: "group", cluster: "members", renditions: "image", actions: "record" };
 for (const link of all("[data-section]")) {
   const name = SECTION_ICONS[link.dataset["section"] ?? ""];
   if (name !== undefined) {

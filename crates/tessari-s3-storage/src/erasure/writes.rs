@@ -132,15 +132,21 @@ impl ErasureWrites {
             .collect()
     }
 
-    /// Queues data `id` with its layout, then starts writing its `size` bytes as shards.
+    /// Queues data `id` with its layout, then starts writing its `size` bytes as shards, sealed shards when `sealed`.
     ///
     /// # Errors
     /// [`Error::NoLayout`], the metadata store's refusal or outage, or a plan that does not fit the code.
-    pub(crate) async fn start(&self, id: [u8; 16], size: u64) -> Result<ErasureUpload> {
+    pub(crate) async fn start(
+        &self,
+        id: [u8; 16],
+        size: u64,
+        sealed: bool,
+    ) -> Result<ErasureUpload> {
         let layout = self.current().await?;
         let set = ShardSet {
             layout: layout.version(),
             size,
+            sealed,
         };
         self.sets.queue(id, set).await?;
         let destinations = self.destinations(id, &layout).await?;
@@ -151,6 +157,7 @@ impl ErasureWrites {
             size,
             destinations,
             stall: self.stall,
+            sealed,
         };
         ErasureUpload::start(plan, &self.shards, &self.peers)
     }
@@ -163,19 +170,29 @@ impl ErasureWrites {
         Ok(self.sets.shard_set(id).await?.map(|set| set.layout))
     }
 
-    /// A reader of data `id` holding `size` bytes when it is erasure-coded, `None` when it is a whole file.
+    /// A reader of data `id` holding `size` stored bytes, sealed ones when `sealed`, when it is erasure-coded; `None`
+    /// when it is a whole file. The shard set must say the same: plain shards are never read as sealed bytes, nor
+    /// sealed shards as plain ones.
     ///
     /// # Errors
-    /// [`Error::Malformed`] for a layout this node does not hold, [`Error::NoLayout`], or the store's refusal.
+    /// [`Error::Corrupt`] when the shard set disagrees on the size or on sealing, [`Error::Malformed`] for a layout
+    /// this node does not hold, [`Error::NoLayout`], or the store's refusal.
     pub(crate) async fn open(
         self: &Arc<Self>,
         id: [u8; 16],
         size: u64,
+        sealed: bool,
     ) -> Result<Option<ErasureReader>> {
-        let Some((_, sources)) = self.sources_of(id).await? else {
+        let Some((set, sources)) = self.sources_of(id).await? else {
             return Ok(None);
         };
-        ErasureReader::new(Arc::clone(self), id, size, sources).map(Some)
+        if set.size != size || set.sealed != sealed {
+            return Err(Error::Corrupt {
+                id: crate::data::hex(id),
+                reason: "the shard set does not hold what the object names",
+            });
+        }
+        ErasureReader::new(Arc::clone(self), id, set, sources).map(Some)
     }
 
     /// Data `id`'s shard set and where each of its shards is under the layout it names, when it is erasure-coded.

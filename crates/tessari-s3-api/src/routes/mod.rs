@@ -10,12 +10,16 @@ use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
 pub mod buckets;
+pub(crate) mod cors;
+mod encryption;
 mod lifecycle;
 pub mod listing;
 pub mod multipart;
 mod notification;
 mod object_lock;
 pub mod objects;
+mod policy;
+mod public_access;
 mod quota;
 mod replication;
 mod retention;
@@ -41,6 +45,8 @@ pub(crate) async fn route(
         Operation::HeadBucket
             | Operation::DeleteBucket
             | Operation::GetBucketVersioning
+            | Operation::GetBucketEncryption
+            | Operation::DeleteBucketEncryption
             | Operation::GetBucketLifecycleConfiguration
             | Operation::DeleteBucketLifecycle
             | Operation::GetBucketNotificationConfiguration
@@ -49,6 +55,13 @@ pub(crate) async fn route(
             | Operation::GetObjectLockConfiguration
             | Operation::GetBucketTagging
             | Operation::DeleteBucketTagging
+            | Operation::GetBucketPolicy
+            | Operation::DeleteBucketPolicy
+            | Operation::GetBucketPolicyStatus
+            | Operation::GetBucketCors
+            | Operation::DeleteBucketCors
+            | Operation::GetPublicAccessBlock
+            | Operation::DeletePublicAccessBlock
     ) {
         buckets::resident(call).await?;
     }
@@ -60,6 +73,9 @@ pub(crate) async fn route(
         Operation::GetBucketLocation => buckets::location(call).await,
         Operation::GetBucketVersioning => versioning::get(call).await,
         Operation::PutBucketVersioning => versioning::put(call, body).await,
+        Operation::GetBucketEncryption => encryption::get(call).await,
+        Operation::PutBucketEncryption => encryption::put(call, body).await,
+        Operation::DeleteBucketEncryption => encryption::delete(call).await,
         Operation::GetBucketLifecycleConfiguration => lifecycle::get(call).await,
         Operation::PutBucketLifecycleConfiguration => lifecycle::put(call, body).await,
         Operation::DeleteBucketLifecycle => lifecycle::delete(call).await,
@@ -81,6 +97,16 @@ pub(crate) async fn route(
         Operation::GetBucketTagging => tagging::get_bucket(call).await,
         Operation::PutBucketTagging => tagging::put_bucket(call, body).await,
         Operation::DeleteBucketTagging => tagging::delete_bucket(call).await,
+        Operation::GetBucketCors => cors::get(call).await,
+        Operation::PutBucketCors => cors::put(call, body).await,
+        Operation::DeleteBucketCors => cors::delete(call).await,
+        Operation::GetBucketPolicy => policy::get(call).await,
+        Operation::PutBucketPolicy => policy::put(call, body).await,
+        Operation::DeleteBucketPolicy => policy::delete(call).await,
+        Operation::GetBucketPolicyStatus => policy::status(call).await,
+        Operation::GetPublicAccessBlock => public_access::get(call).await,
+        Operation::PutPublicAccessBlock => public_access::put(call, body).await,
+        Operation::DeletePublicAccessBlock => public_access::delete(call).await,
         Operation::GetObjectLockConfiguration => object_lock::get(call).await,
         Operation::PutObjectLockConfiguration => object_lock::put(call, body).await,
         Operation::GetObjectRetention => retention::get_retention(call, objects::key(call)?).await,
