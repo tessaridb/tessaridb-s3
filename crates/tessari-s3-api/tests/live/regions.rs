@@ -184,9 +184,10 @@ async fn the_region_level_is_proved_before_it_is_set_and_then_carried_by_every_o
     let (_home, away, global, _home_db, away_db, away_console) = two_regions().await;
     assert_eq!(call(&away, "PUT", "/acked", vec![], b"").await.status, 200);
     let token = sign_in(&away_console).await;
-    // The test node is a lone store whose row names no region, so the store refuses the region level; the console
-    // shows that refusal in the store's words and leaves the bucket at the majority.
-    let refused = send(
+    // The test node is a lone store with no other voter, so it meets a region majority as it meets a majority: the
+    // probe passes and the bucket takes the level. A store that cannot count one refuses it, and the bucket's writes
+    // then refuse too; three real nodes prove that (`tessari-s3-node` processes, `acknowledge`).
+    let set = send(
         &away_console,
         "PUT",
         "/api/v1/buckets/acked/acknowledgement",
@@ -194,26 +195,19 @@ async fn the_region_level_is_proved_before_it_is_set_and_then_carried_by_every_o
         Some(r#"{"level":"region","reason":"live test"}"#),
     )
     .await;
-    assert_eq!(
-        (refused.status, refused.code().as_deref()),
-        (409, Some("acknowledgement_refused"))
-    );
-    let words = refused.json()["message"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
-    assert!(
-        words.contains("names no region"),
-        "the store's words: {words}"
-    );
+    assert_eq!(set.status, 204);
     let level = |answers: &str| answers.contains("'local'") || answers.contains("\"local\"");
     let kept = global
         .run("SELECT acknowledge FROM ONLY buckets:'acked';", Vec::new())
         .await
         .expect("read");
     assert!(
-        !level(&format!("{kept:?}")),
-        "the bucket is unchanged: {kept:?}"
+        level(&format!("{kept:?}")),
+        "the bucket took the level: {kept:?}"
+    );
+    assert_eq!(
+        call(&away, "PUT", "/acked/k", vec![], b"one").await.status,
+        200
     );
     let majority = send(
         &away_console,
@@ -224,29 +218,17 @@ async fn the_region_level_is_proved_before_it_is_set_and_then_carried_by_every_o
     )
     .await;
     assert_eq!(majority.status, 204);
-    assert_eq!(
-        call(&away, "PUT", "/acked/k", vec![], b"one").await.status,
-        200
-    );
-    // Marked by hand on the same lone store, the bucket's object writes now commit asking for the region's majority,
-    // which this store refuses: the write is not acknowledged and nothing of it is kept.
-    global
-        .run(
-            "UPDATE buckets:'acked' SET acknowledge = 'local';",
-            Vec::new(),
-        )
-        .await
-        .expect("marked");
-    let marked = global
+    let back = global
         .run("SELECT acknowledge FROM ONLY buckets:'acked';", Vec::new())
         .await
         .expect("read");
-    assert!(level(&format!("{marked:?}")), "the control: {marked:?}");
-    let put = call(&away, "PUT", "/acked/k2", vec![], b"two").await;
-    assert_ne!(put.status, 200, "{}", put.body);
-    assert_eq!(
-        count(&away_db, "objects").await,
-        1,
-        "only the first write stands"
+    assert!(
+        !level(&format!("{back:?}")),
+        "back at the majority: {back:?}"
     );
+    assert_eq!(
+        call(&away, "PUT", "/acked/k2", vec![], b"two").await.status,
+        200
+    );
+    assert_eq!(count(&away_db, "objects").await, 2, "both writes stand");
 }
