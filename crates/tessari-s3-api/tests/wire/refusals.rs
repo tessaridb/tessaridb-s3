@@ -1,6 +1,6 @@
 //! What a client sees when a request is refused before any operation runs.
 
-use crate::signer::{Unsigned, sign};
+use crate::signer::{Unsigned, presign, sign};
 use crate::{ACCESS_KEY, AMZ_DATE, NOW, SECRET, request, send, state};
 
 fn signed(
@@ -155,4 +155,86 @@ async fn a_version_2_signature_is_refused_as_an_unsupported_mechanism_in_either_
         by_query.body
     );
     assert!(by_query.body.contains(MECHANISM), "{}", by_query.body);
+}
+
+fn presigned(method: &str, path: &str, query: Vec<(&str, Option<&str>)>) -> String {
+    presign(
+        &Unsigned {
+            method,
+            host: "localhost",
+            path,
+            query,
+            headers: Vec::new(),
+            access_key: ACCESS_KEY,
+            secret: SECRET,
+            region: "us-east-1",
+            amz_date: AMZ_DATE,
+        },
+        300,
+    )
+}
+
+#[tokio::test]
+async fn a_presigned_url_carrying_what_sdks_add_is_dispatched_by_its_operation() {
+    let host = [("Host".to_owned(), "localhost".to_owned())];
+    // The payload marker, the operation name and a header the SDK moved into the signed query.
+    let target = presigned(
+        "GET",
+        "/bucket/key",
+        vec![
+            ("X-Amz-Content-Sha256", Some("UNSIGNED-PAYLOAD")),
+            ("x-amz-checksum-mode", Some("ENABLED")),
+            ("x-id", Some("GetObject")),
+        ],
+    );
+    let seen = send(state(NOW, 64), request("GET", &target, &host)).await;
+    assert_eq!(
+        (seen.status, seen.code.as_deref()),
+        (503, Some("ServiceUnavailable")),
+        "authenticated and dispatched to GetObject, which reaches the unreachable store: {}",
+        seen.body
+    );
+}
+
+#[tokio::test]
+async fn a_presigned_url_declaring_a_payload_hash_or_contradicting_a_header_is_refused() {
+    let host = [("Host".to_owned(), "localhost".to_owned())];
+    let hashed = presigned(
+        "GET",
+        "/bucket/key",
+        vec![(
+            "X-Amz-Content-Sha256",
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        )],
+    );
+    let seen = send(state(NOW, 64), request("GET", &hashed, &host)).await;
+    assert_eq!(
+        (seen.status, seen.code.as_deref()),
+        (400, Some("InvalidArgument")),
+        "a presigned body is never hashed: {}",
+        seen.body
+    );
+    assert!(seen.body.contains("UNSIGNED-PAYLOAD"), "{}", seen.body);
+    let moved = presigned(
+        "GET",
+        "/bucket/key",
+        vec![("x-amz-checksum-mode", Some("ENABLED"))],
+    );
+    let both = [
+        ("Host".to_owned(), "localhost".to_owned()),
+        ("x-amz-checksum-mode".to_owned(), "DISABLED".to_owned()),
+    ];
+    let seen = send(state(NOW, 64), request("GET", &moved, &both)).await;
+    assert_eq!(
+        (seen.status, seen.code.as_deref()),
+        (400, Some("InvalidArgument")),
+        "one header given twice with two values: {}",
+        seen.body
+    );
+    assert!(
+        seen.body
+            .contains("x-amz-checksum-mode is given both as a header and in the query"),
+        "{}",
+        seen.body
+    );
 }

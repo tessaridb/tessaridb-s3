@@ -424,3 +424,78 @@ async fn a_write_refused_by_a_broken_event_is_a_server_error_not_a_failed_condit
         put.body
     );
 }
+
+/// PUT `/sums/<key>` of `body` through a URL presigned with `query` in it, as an SDK moves headers there.
+async fn presigned_put(
+    state: &tessari_s3_api::ApiState,
+    key: &str,
+    query: Vec<(&str, Option<&str>)>,
+    body: &'static [u8],
+) -> Seen {
+    let amz_date = crate::amz_now_for_tests();
+    let path = format!("/sums/{key}");
+    let unsigned = crate::signer::Unsigned {
+        method: "PUT",
+        host: "localhost:9100",
+        path: &path,
+        query,
+        headers: vec![],
+        access_key: crate::ACCESS_KEY,
+        secret: crate::SECRET,
+        region: state.region(),
+        amz_date: &amz_date,
+    };
+    let request = axum::http::Request::builder()
+        .method("PUT")
+        .uri(crate::signer::presign(&unsigned, 300))
+        .header("host", "localhost:9100")
+        .header("content-length", body.len())
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    crate::send(state, request).await
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_checksum_signed_into_a_presigned_url_is_validated_and_kept() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    bucket(&state, "sums").await;
+    let sdk = |sum| {
+        vec![
+            ("X-Amz-Content-Sha256", Some("UNSIGNED-PAYLOAD")),
+            ("x-amz-checksum-crc32", Some(sum)),
+            ("x-amz-sdk-checksum-algorithm", Some("CRC32")),
+            ("x-id", Some("PutObject")),
+        ]
+    };
+    let good = presigned_put(&state, "k", sdk("NhCmhg=="), b"hello").await;
+    assert_eq!(good.status, 200, "{}", good.body);
+    let read = call_with(
+        &state,
+        "HEAD",
+        "/sums/k",
+        vec![],
+        vec![("x-amz-checksum-mode", "ENABLED")],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        header(&read, "x-amz-checksum-crc32"),
+        Some("NhCmhg=="),
+        "kept for reads"
+    );
+    // The checksum of an empty body, as an SDK signs one before it knows the body.
+    let empty = presigned_put(&state, "bad", sdk("AAAAAA=="), b"hello").await;
+    assert_eq!(
+        (empty.status, empty.code.as_deref()),
+        (400, Some("BadDigest")),
+        "{}",
+        empty.body
+    );
+    assert_eq!(
+        call(&state, "GET", "/sums/bad", vec![], b"").await.status,
+        404,
+        "a refused body stores nothing"
+    );
+}

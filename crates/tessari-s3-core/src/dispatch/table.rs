@@ -17,9 +17,9 @@ pub struct DispatchRequest<'a> {
     pub header_names: &'a [&'a str],
 }
 
-/// Query parameters every request may carry whatever its operation: SigV4 presign parameters, and `x-id`, the
-/// operation name some AWS SDKs append to the query.
-const UNIVERSAL_QUERY: [&str; 8] = [
+/// Query parameters every request may carry whatever its operation: SigV4 presign parameters, the payload marker
+/// SDKs add to them, and `x-id`, the operation name some AWS SDKs append to the query.
+const UNIVERSAL_QUERY: [&str; 9] = [
     "X-Amz-Algorithm",
     "X-Amz-Credential",
     "X-Amz-Date",
@@ -27,6 +27,7 @@ const UNIVERSAL_QUERY: [&str; 8] = [
     "X-Amz-SignedHeaders",
     "X-Amz-Signature",
     "X-Amz-Security-Token",
+    "X-Amz-Content-Sha256",
     "x-id",
 ];
 

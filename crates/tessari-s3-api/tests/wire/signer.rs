@@ -117,10 +117,6 @@ pub(crate) fn sign_with_body(
 
 /// A presigned request target (`path?query` carrying the signature) valid for `expires_secs`, signing `host` only;
 /// `request.headers` is not used, and any query the request carries — a session token included — is signed with it.
-#[allow(
-    dead_code,
-    reason = "the live tests presign; the wire tests use the published vector"
-)]
 pub(crate) fn presign(request: &Unsigned<'_>, expires_secs: u32) -> String {
     let date = &request.amz_date[..8];
     let scope = format!("{date}/{}/s3/aws4_request", request.region);
