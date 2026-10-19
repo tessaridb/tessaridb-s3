@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::http::Response;
-use tessari_s3_core::auth::SignedRequest;
+use tessari_s3_core::auth::{AuthError, SignedRequest};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::dispatch::{DispatchRequest, Method, dispatch, is_implemented};
@@ -187,6 +187,12 @@ async fn serve(
         )
     })?;
     let query = decode_query(raw_query)?;
+    // A version 2 presigned URL names its key in `AWSAccessKeyId`: it is refused as the mechanism it is, before
+    // dispatch would read that parameter as merely unknown.
+    if query.iter().any(|(name, _)| name == "AWSAccessKeyId") {
+        state.metrics().auth_refused(AuthRefusal::Malformed);
+        return Err(AuthError::UnsupportedAlgorithm.into());
+    }
     let query_refs: Vec<(&str, Option<&str>)> = query
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_deref()))

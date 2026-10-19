@@ -14,8 +14,10 @@ pub enum AuthError {
         /// Which part is malformed.
         reason: &'static str,
     },
-    /// An algorithm other than `AWS4-HMAC-SHA256`.
-    #[error("unsupported signature algorithm")]
+    /// An algorithm other than `AWS4-HMAC-SHA256`, a version 2 signature among them, in a header or a URL.
+    #[error(
+        "The authorization mechanism you have provided is not supported. Please use AWS4-HMAC-SHA256."
+    )]
     UnsupportedAlgorithm,
     /// A `%` escape in the request target that is not `%` and two hex digits.
     #[error("invalid percent-encoding in the request target")]
@@ -79,7 +81,8 @@ impl AuthError {
             Self::Malformed { .. }
             | Self::InvalidPercentEncoding
             | Self::PresignExpiresOutOfRange => ErrorCode::InvalidArgument,
-            Self::UnsupportedAlgorithm => ErrorCode::UnsupportedSignature,
+            // AWS answers an older signature version InvalidRequest, naming the one it takes.
+            Self::UnsupportedAlgorithm => ErrorCode::InvalidRequest,
             Self::InvalidDate | Self::HeaderNotSigned { .. } | Self::PresignExpired => {
                 ErrorCode::AccessDenied
             }

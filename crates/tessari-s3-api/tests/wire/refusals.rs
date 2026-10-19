@@ -124,3 +124,35 @@ async fn markup_in_the_path_cannot_break_out_of_the_error_envelope() {
         seen.body
     );
 }
+
+#[tokio::test]
+async fn a_version_2_signature_is_refused_as_an_unsupported_mechanism_in_either_form() {
+    const MECHANISM: &str = "The authorization mechanism you have provided is not supported. Please use AWS4-HMAC-SHA256.";
+    let header = [
+        ("Host".to_owned(), "localhost".to_owned()),
+        (
+            "Authorization".to_owned(),
+            format!("AWS {ACCESS_KEY}:c2lnbmF0dXJl"),
+        ),
+    ];
+    let by_header = send(state(NOW, 64), request("GET", "/bucket/key", &header)).await;
+    assert_eq!(
+        (by_header.status, by_header.code.as_deref()),
+        (400, Some("InvalidRequest")),
+        "{}",
+        by_header.body
+    );
+    assert!(by_header.body.contains(MECHANISM), "{}", by_header.body);
+
+    let host = [("Host".to_owned(), "localhost".to_owned())];
+    let target =
+        format!("/bucket/key?AWSAccessKeyId={ACCESS_KEY}&Expires=1893456000&Signature=c2ln");
+    let by_query = send(state(NOW, 64), request("GET", &target, &host)).await;
+    assert_eq!(
+        (by_query.status, by_query.code.as_deref()),
+        (400, Some("InvalidRequest")),
+        "{}",
+        by_query.body
+    );
+    assert!(by_query.body.contains(MECHANISM), "{}", by_query.body);
+}
