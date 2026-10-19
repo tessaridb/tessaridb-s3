@@ -194,9 +194,10 @@ pub(crate) trait ObjectRepository: Send + Sync {
     fn queue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Takes data `id` off the reclamation queue, after its file was removed.
     fn unqueue(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
-    /// Takes and holds the next queue entry past its grace, with whether a reclaimer already marked it; `None` when
-    /// none is due. A hold this node does not finish lapses and the entry is handed out again.
-    fn claim_next(&self) -> impl Future<Output = Result<Option<([u8; 16], bool)>>> + Send;
+    /// Takes and holds up to `limit` queue entries past their grace, each with whether a reclaimer already marked it;
+    /// empty when none is due. A hold this node does not finish lapses and the entry is handed out again.
+    fn claim_due(&self, limit: usize)
+    -> impl Future<Output = Result<Vec<([u8; 16], bool)>>> + Send;
     /// Hands held data `id` back to the queue, not to be handed out again for a while.
     fn defer(&self, id: [u8; 16]) -> impl Future<Output = Result<()>> + Send;
     /// Whether any object or multipart part record references data `id`.

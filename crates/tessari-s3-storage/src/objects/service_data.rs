@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use tessari_s3_constants::{DATA_BLOCK_SIZE, RECLAIM_WORKERS};
+use futures_util::StreamExt;
+use tessari_s3_constants::{DATA_BLOCK_SIZE, RECLAIM_CLAIM_BATCH, RECLAIM_WORKERS};
 
 use super::ObjectService;
 use crate::data::hex;
@@ -12,6 +13,16 @@ use crate::objects::model::{HealBacklog, Healed, MoveBacklog, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
 use crate::{Error, Result};
+
+/// What reclaiming one entry came to.
+enum Settled {
+    /// Its bytes and its entry are gone.
+    Removed,
+    /// An object references it: the entry is gone, the bytes kept.
+    Kept,
+    /// A commit took it, or another node holds it: the entry stays for later.
+    Left,
+}
 
 impl ObjectService {
     /// Starts writing `size` bytes under a new data id: the id is queued for reclamation first (on a cluster member
@@ -109,21 +120,31 @@ impl ObjectService {
     /// The metadata store's or the drive's failure; the entries this pass held go back to the queue when their
     /// hold lapses.
     pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
-        // Each worker claims its own entries, so no entry is worked on twice; a worker's refusal ends only its share.
-        let share = limit.div_ceil(RECLAIM_WORKERS);
-        let shares =
-            futures_util::future::join_all((0..RECLAIM_WORKERS).map(|_| self.reclaim_share(share)))
-                .await;
         let mut done = Reclaimed::default();
         let mut refused = None;
-        for share in shares {
-            match share {
-                Ok(part) => {
-                    done.examined = done.examined.saturating_add(part.examined);
-                    done.removed = done.removed.saturating_add(part.removed);
-                    done.kept = done.kept.saturating_add(part.kept);
+        // Entries are claimed a batch at a time in one statement, so a pass meets the other nodes' claims and the
+        // writers queuing beside them a few times rather than once per entry; the batch is worked
+        // `RECLAIM_WORKERS` at a time. A refusal ends the pass after its batch; the entry it hit is held until its
+        // hold lapses.
+        while done.examined < limit && refused.is_none() {
+            let batch = self
+                .repository
+                .claim_due(RECLAIM_CLAIM_BATCH.min(limit.saturating_sub(done.examined)))
+                .await?;
+            if batch.is_empty() {
+                break;
+            }
+            done.examined = done.examined.saturating_add(batch.len());
+            let mut settled = futures_util::stream::iter(batch)
+                .map(|(id, marked)| self.reclaim_one(id, marked))
+                .buffer_unordered(RECLAIM_WORKERS);
+            while let Some(outcome) = settled.next().await {
+                match outcome {
+                    Ok(Settled::Removed) => done.removed = done.removed.saturating_add(1),
+                    Ok(Settled::Kept) => done.kept = done.kept.saturating_add(1),
+                    Ok(Settled::Left) => {}
+                    Err(error) => refused = refused.or(Some(error)),
                 }
-                Err(error) => refused = refused.or(Some(error)),
             }
         }
         if let Some(error) = refused {
@@ -135,42 +156,31 @@ impl ObjectService {
         Ok(done)
     }
 
-    /// One worker's part of a pass: up to `limit` entries, claimed one at a time.
-    async fn reclaim_share(&self, limit: usize) -> Result<Reclaimed> {
-        let mut done = Reclaimed::default();
-        // One entry at a time: a share cut short by a refusal leaves at most the entry in hand held until its hold
-        // lapses, never a batch.
-        while done.examined < limit {
-            let Some((id, marked)) = self.repository.claim_next().await? else {
-                break;
-            };
-            done.examined = done.examined.saturating_add(1);
-            let data = uuid::Uuid::from_bytes(id);
-            if self.repository.referenced(id).await? {
-                // Not a state this server writes; keep the bytes and say so.
-                tracing::warn!(%data, "a queued data file is referenced by an object; kept");
-                self.repository.unqueue(id).await?;
-                done.kept = done.kept.saturating_add(1);
-                continue;
-            }
-            // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false
-            // mark means the commit got there first.
-            if !marked && !self.repository.mark(id).await? {
-                continue;
-            }
-            match self.remove_data(id).await {
-                // Another node is healing it; the entry stays marked and goes back to the queue for a later pass,
-                // behind the entries waiting after it.
-                Err(Error::Held) => {
-                    self.repository.defer(id).await?;
-                    continue;
-                }
-                removed => removed?,
-            }
+    /// Reclaims one held entry: its bytes and then the entry, unless an object references it or a commit took it.
+    async fn reclaim_one(&self, id: [u8; 16], marked: bool) -> Result<Settled> {
+        let data = uuid::Uuid::from_bytes(id);
+        if self.repository.referenced(id).await? {
+            // Not a state this server writes; keep the bytes and say so.
+            tracing::warn!(%data, "a queued data file is referenced by an object; kept");
             self.repository.unqueue(id).await?;
-            done.removed = done.removed.saturating_add(1);
+            return Ok(Settled::Kept);
         }
-        Ok(done)
+        // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false mark
+        // means the commit got there first.
+        if !marked && !self.repository.mark(id).await? {
+            return Ok(Settled::Left);
+        }
+        match self.remove_data(id).await {
+            // Another node is healing it; the entry stays marked and goes back to the queue for a later pass, behind
+            // the entries waiting after it.
+            Err(Error::Held) => {
+                self.repository.defer(id).await?;
+                return Ok(Settled::Left);
+            }
+            removed => removed?,
+        }
+        self.repository.unqueue(id).await?;
+        Ok(Settled::Removed)
     }
 
     /// Rewrites the missing or damaged shards of up to `limit` data ids listed for healing.

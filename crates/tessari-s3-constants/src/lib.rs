@@ -308,6 +308,10 @@ pub const RECLAIM_BATCH: usize = 1000;
 /// node, so one at a time leaves a pass bound by round trips and slower than steady overwrites queue data.
 pub const RECLAIM_WORKERS: usize = 8;
 
+/// Entries one claim takes from the reclaims queue. Claiming one at a time put every worker of every node on the
+/// queue's head at once, and the collisions grew with the backlog.
+pub const RECLAIM_CLAIM_BATCH: usize = 32;
+
 /// Seconds a queued data id a pass could not finish (another node holds its shards) waits before it is handed out
 /// again, so it leaves the head of the queue.
 pub const RECLAIM_RETRY_SECS: u64 = 15;
