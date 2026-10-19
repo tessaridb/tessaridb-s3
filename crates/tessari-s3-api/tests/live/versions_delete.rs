@@ -337,3 +337,74 @@ async fn version_deletes_racing_writes_leave_the_newest_version_current() {
         "the object read is the newest version kept"
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn every_version_of_a_key_deleted_at_once_leaves_no_current_object() {
+    let _why = IGNORED;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    assert_eq!(call(&state, "PUT", "/files", vec![], b"").await.status, 200);
+    set_versioning(&state, "files", "Enabled").await;
+    for round in 0..6_u8 {
+        // One batch naming both versions of a key: its removals run side by side.
+        let batched = format!("batch{round}");
+        let path = format!("/files/{batched}");
+        let mut ids = Vec::new();
+        for body in [&b"old"[..], b"new"] {
+            ids.push(version_header(&put(&state, &path, body).await).expect("an id"));
+        }
+        let objects: String = ids
+            .iter()
+            .map(|id| format!("<Object><Key>{batched}</Key><VersionId>{id}</VersionId></Object>"))
+            .collect();
+        let deleted = crate::delete_many::delete_many(
+            &state,
+            "files",
+            &format!("<Delete>{objects}</Delete>"),
+        )
+        .await;
+        assert_eq!(deleted.status, 200, "{}", deleted.body);
+        assert_eq!(
+            deleted.body.matches("<Deleted>").count(),
+            2,
+            "{}",
+            deleted.body
+        );
+
+        // Single deletes of every version of a key, sent at once.
+        let raced = format!("raced{round}");
+        let path = format!("/files/{raced}");
+        let mut ids = Vec::new();
+        for body in [&b"a"[..], b"b", b"c", b"d"] {
+            ids.push(version_header(&put(&state, &path, body).await).expect("an id"));
+        }
+        let mut racing = tokio::task::JoinSet::new();
+        for id in ids {
+            let state = state.clone();
+            let path = path.clone();
+            racing.spawn(async move { delete_version(&state, &path, &id).await.status });
+        }
+        while let Some(done) = racing.join_next().await {
+            assert_eq!(done.expect("ran"), 204, "a version delete answers 204");
+        }
+
+        for key in [batched, raced] {
+            assert!(
+                versions(&planter, "files", &key).await.is_empty(),
+                "{key}: every version went"
+            );
+            let read = call(&state, "GET", &format!("/files/{key}"), vec![], b"").await;
+            assert_eq!(
+                read.status, 404,
+                "{key}: no current object is left: {}",
+                read.body
+            );
+        }
+    }
+    let emptied = call(&state, "DELETE", "/files", vec![], b"").await;
+    assert_eq!(
+        emptied.status, 204,
+        "a bucket whose versions all went is empty: {}",
+        emptied.body
+    );
+}
