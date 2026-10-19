@@ -408,3 +408,44 @@ async fn every_version_of_a_key_deleted_at_once_leaves_no_current_object() {
         emptied.body
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn one_batch_naming_many_versions_of_a_key_deletes_every_one() {
+    let _why = IGNORED;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    assert_eq!(call(&state, "PUT", "/files", vec![], b"").await.status, 200);
+    set_versioning(&state, "files", "Enabled").await;
+    for round in 0..5_u8 {
+        // A batch does not contend with itself: the versions of one key it names go one after another.
+        let key = format!("many{round}");
+        let path = format!("/files/{key}");
+        let mut objects = String::new();
+        for count in 0..12_u8 {
+            let id = version_header(&put(&state, &path, &[count]).await).expect("an id");
+            objects.push_str(&format!(
+                "<Object><Key>{key}</Key><VersionId>{id}</VersionId></Object>"
+            ));
+        }
+        let deleted = crate::delete_many::delete_many(
+            &state,
+            "files",
+            &format!("<Delete>{objects}</Delete>"),
+        )
+        .await;
+        assert_eq!(deleted.status, 200, "{}", deleted.body);
+        assert_eq!(
+            (
+                deleted.body.matches("<Deleted>").count(),
+                deleted.body.matches("<Error>").count()
+            ),
+            (12, 0),
+            "round {round}: {}",
+            deleted.body
+        );
+        assert!(
+            versions(&planter, "files", &key).await.is_empty(),
+            "{key}: every version went"
+        );
+    }
+}
