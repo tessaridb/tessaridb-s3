@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, REPLICATION_IN_FLIGHT, REPLICATION_POLL_SECS};
+use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, REPLICATION_POLL_SECS, REPLICATION_TAKE};
 use tessari_s3_core::auth::{SignedRequest, amz_date, sign_header, uri_encode};
 use tessari_s3_core::authz::UserName;
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
@@ -244,10 +244,7 @@ impl Daemon for Replicator {
     fn run_once(&self) -> DaemonFuture<'_> {
         Box::pin(async move {
             let replication = self.storage.replication();
-            let tasks = replication
-                .next(REPLICATION_IN_FLIGHT)
-                .await
-                .map_err(failed)?;
+            let tasks = replication.next(REPLICATION_TAKE).await.map_err(failed)?;
             let (mut sent, mut retried) = (0_u64, 0_u64);
             for task in &tasks {
                 match self.send(task).await {

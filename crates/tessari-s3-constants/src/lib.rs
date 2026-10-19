@@ -4,13 +4,19 @@ pub mod access;
 mod keys;
 pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_INTERVAL_SECS};
 pub mod multipart;
+mod notify;
 pub mod observability;
+pub use notify::{
+    NOTIFY_ACK_DEADLINE_SECS, NOTIFY_BATCH, NOTIFY_CONCURRENCY, NOTIFY_DELIVERIES,
+    NOTIFY_DELIVERY_TIMEOUT_SECS, NOTIFY_IN_FLIGHT, NOTIFY_POLL_SECS, NOTIFY_RETRY_MAX_SECS,
+    NOTIFY_RETRY_STEP_SECS,
+};
 mod replication;
 mod versions;
 pub use replication::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_CONNECT_TIMEOUT_SECS, REPLICATION_DELIVERIES,
     REPLICATION_IN_FLIGHT, REPLICATION_POLL_SECS, REPLICATION_RETRY_MAX_SECS,
-    REPLICATION_RETRY_STEP_SECS,
+    REPLICATION_RETRY_STEP_SECS, REPLICATION_TAKE,
 };
 pub use versions::{
     VERSION_WRITE_ATTEMPTS, VERSION_WRITE_BACKOFF_FIRST_MS, VERSION_WRITE_BACKOFF_MAX_MS,
@@ -302,34 +308,6 @@ pub const LIFECYCLE_BATCH: usize = 100;
 /// Seconds after a lifecycle pass before the same bucket is due again. A rule's period is whole days rounded to the
 /// next day boundary, so an hour late is the most an action waits.
 pub const LIFECYCLE_INTERVAL_SECS: u64 = 3600;
-
-/// Seconds a delivery worker holds an event before the group hands it out again — longer than one delivery may take.
-pub const NOTIFY_ACK_DEADLINE_SECS: u64 = 60;
-
-/// Hand-outs of one event before it is given up and kept in the `object_events_dead` topic.
-pub const NOTIFY_DELIVERIES: u32 = 8;
-
-/// Events a destination's group holds in flight at once.
-pub const NOTIFY_IN_FLIGHT: usize = 64;
-
-/// Events one delivery run reads at most.
-pub const NOTIFY_BATCH: usize = 64;
-
-/// Deliveries one run sends at once to its destination.
-pub const NOTIFY_CONCURRENCY: usize = 8;
-
-/// Seconds a delivery may take before it counts as failed.
-pub const NOTIFY_DELIVERY_TIMEOUT_SECS: u64 = 10;
-
-/// Seconds before a failed delivery is tried again after its first hand-out; doubled per hand-out, at most
-/// [`NOTIFY_RETRY_MAX_SECS`].
-pub const NOTIFY_RETRY_STEP_SECS: u64 = 2;
-
-/// Longest wait between two tries of one delivery.
-pub const NOTIFY_RETRY_MAX_SECS: u64 = 300;
-
-/// Seconds between delivery runs when the last found nothing.
-pub const NOTIFY_POLL_SECS: u64 = 1;
 
 /// How long the media group holds a handed-out object before giving it to another worker: longer than the slowest
 /// rendition a worker may take, so a live worker is not raced.
