@@ -129,7 +129,22 @@ async fn mixed_traffic_for_hours_loses_nothing_and_drains_its_queues() {
         eprintln!("soak not run: set TESSARIDB_S3_SOAK_SECS (7200 for the two-hour soak)");
         return;
     };
-    let cluster = Cluster::start(meta_from_env()).await;
+    let mut cluster = Cluster::start(meta_from_env()).await;
+    // Replaced data is reclaimed within about a minute, so the run measures a steady state rather than the drive
+    // filling with a default 24 hours of overwrites.
+    for index in 0..cluster.nodes.len() {
+        crate::disk::kill(cluster.nodes[index].child.id().expect("running")).await;
+        let _reaped = cluster.nodes[index].child.wait().await;
+        cluster
+            .restart_with(
+                index,
+                &[
+                    ("TESSARIDB_S3_RECLAIM_GRACE_SECS", "60"),
+                    ("TESSARIDB_S3_RECLAIM_INTERVAL_SECS", "10"),
+                ],
+            )
+            .await;
+    }
     assert_eq!(call(&cluster.nodes[0], "PUT", "/soak", b"").await.0, 200);
     let started = Instant::now();
     let deadline = started
