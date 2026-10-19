@@ -3,6 +3,25 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.3.0-beta: 2026-10-19
+
+Metadata on TessariDB `0.36.2`.
+
+- Object Lock headers on CreateMultipartUpload: the completed version keeps the mode, retain-until date and legal
+  hold its upload asked for.
+- GET and HEAD answer a locked version's Object Lock headers.
+- A GOVERNANCE retention changes mode only with the bypass; anyone allowed to set retention may still extend it.
+- Presigned URLs from current SDKs: the payload marker and the `x-amz-*` headers an SDK signs into the query are read.
+- Signature version 2 is refused as S3 refuses it.
+- DeleteObjects removes the versions of one key one after another and no longer answers `ServiceUnavailable` for them.
+- Two versions of one key removed at once no longer leave the key pointing at a deleted version.
+- Many parts uploaded at once all commit.
+- An owner re-creating a bucket in `us-east-1` gets `200`.
+- A missing bucket is named missing to whoever may create buckets, and `AccessDenied` to anyone else.
+- A read naming `x-amz-server-side-encryption` is refused; a copied part answers the upload's encryption; a
+  completion may repeat its upload's encryption.
+- Dates with microseconds (any fraction) are read.
+
 ## 0.2.1-beta — 2026-10-17
 
 Metadata on TessariDB `0.36.0`, which runs on its own storage engine, TessariKV.
