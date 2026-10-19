@@ -3,6 +3,7 @@
 pub mod access;
 mod keys;
 pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_INTERVAL_SECS};
+pub mod multipart;
 pub mod observability;
 mod replication;
 pub use replication::{

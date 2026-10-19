@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use tessari_s3_constants::MULTIPART_MAX_PARTS;
+use tessari_s3_constants::multipart::{PART_COMMIT_ATTEMPTS, PART_COMMIT_BACKOFF_MS};
 use tessari_s3_core::objects::upload_listing::UploadAnchor;
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey, PartNumber, Timestamp, UploadId};
@@ -248,11 +249,24 @@ impl MultipartRepository for TessariMultipart {
         let script = "BEGIN; UPDATE uploads:$upload SET last_part = time::now() RETURN AFTER; \
                       UPSERT parts:$id = object::merge($part, { modified: time::now() }); \
                       UPDATE reclaims:$data SET data = $data WHERE reclaiming = NONE; DELETE reclaims:$data; COMMIT;";
-        match self.pool.run(script, parameters).await {
-            Ok(_) => Ok(true),
-            // The upload is gone (`conflict`); anything else is a fault, not an answer.
-            Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
-            Err(error) => Err(error.into()),
+        // Every part writes the upload's record — that is what makes a part and the Complete or Abort ending its upload
+        // exclude each other — so sibling parts committing at once answer `retry`, and a refused commit wrote nothing.
+        let mut attempt: u32 = 1;
+        loop {
+            match self.pool.run(script, parameters.clone()).await {
+                Ok(_) => return Ok(true),
+                Err(error)
+                    if error.is_class(RefusalClass::Retry) && attempt < PART_COMMIT_ATTEMPTS =>
+                {
+                    tracing::debug!(attempt, error = %error, "a part met a sibling's commit; asking again");
+                    tokio::time::sleep(crate::backoff::backoff(attempt, PART_COMMIT_BACKOFF_MS))
+                        .await;
+                    attempt = attempt.saturating_add(1);
+                }
+                // The upload is gone (`conflict`); anything else is a fault, not an answer.
+                Err(error) if error.is_class(RefusalClass::Conflict) => return Ok(false),
+                Err(error) => return Err(error.into()),
+            }
         }
     }
 
