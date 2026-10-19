@@ -4,10 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use tessari_s3_constants::VERSION_WRITE_ATTEMPTS;
 use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::attempts::Attempts;
 use super::super::model_lock::LockOutcome;
 use super::super::model_tags::TagsOutcome;
 use super::super::version_id::NULL;
@@ -80,7 +80,8 @@ impl TessariObjects {
                     .collect(),
             )
         };
-        for _ in 0..VERSION_WRITE_ATTEMPTS {
+        let mut attempts = Attempts::new();
+        while attempts.next().await {
             let found = match self.addressed(bucket, key, version).await? {
                 Err(outcome) => return Ok(absent(outcome)),
                 Ok(found) if found.marker => return Ok(TagsOutcome::Marker),

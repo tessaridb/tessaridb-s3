@@ -1,9 +1,10 @@
 //! Deleting objects: each removal changes the key's versions as its bucket's versioning state asks (ADR-0010) and is
 //! planned again while another writer of the key keeps committing first.
 
-use tessari_s3_constants::{DELETE_OBJECTS_CONCURRENCY, VERSION_WRITE_ATTEMPTS};
+use tessari_s3_constants::DELETE_OBJECTS_CONCURRENCY;
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::attempts::Attempts;
 use super::super::model::{Deleted, Removed, RemovedIf, VersionRemoved};
 use super::super::repository::{Guard, ObjectRepository, Removal, Snapshot};
 use super::super::tessaridb::TessariObjects;
@@ -23,7 +24,8 @@ async fn remove_named(
     let Some(named) = parse(version_id) else {
         return Ok(VersionRemoved::Malformed);
     };
-    for _ in 0..VERSION_WRITE_ATTEMPTS {
+    let mut attempts = Attempts::new();
+    while attempts.next().await {
         let Some(target) = repository
             .version_target(bucket, key, named, version_id)
             .await?
@@ -194,7 +196,8 @@ impl ObjectService {
             return Ok(RemovedIf::NoSuchBucket);
         };
         let guard = Guard::Etag(etag.to_owned());
-        for _ in 0..VERSION_WRITE_ATTEMPTS {
+        let mut attempts = Attempts::new();
+        while attempts.next().await {
             let plan = versions::plan(&self.repository.head(bucket, key).await?, key, true)?;
             if self
                 .repository
@@ -240,7 +243,8 @@ impl ObjectService {
         let Some(incarnation) = self.repository.incarnation(bucket).await? else {
             return Ok(false);
         };
-        for _ in 0..VERSION_WRITE_ATTEMPTS {
+        let mut attempts = Attempts::new();
+        while attempts.next().await {
             let mut plan = versions::plan(&self.repository.head(bucket, key).await?, key, true)?;
             plan.removal = Removal::Lifecycle;
             // A delete marker a lifecycle rule adds is not replicated (S3 ref 11 M4: only a request's marker is).

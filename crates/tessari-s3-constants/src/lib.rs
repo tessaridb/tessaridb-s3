@@ -6,10 +6,15 @@ pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_IN
 pub mod multipart;
 pub mod observability;
 mod replication;
+mod versions;
 pub use replication::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_CONNECT_TIMEOUT_SECS, REPLICATION_DELIVERIES,
     REPLICATION_IN_FLIGHT, REPLICATION_POLL_SECS, REPLICATION_RETRY_MAX_SECS,
     REPLICATION_RETRY_STEP_SECS,
+};
+pub use versions::{
+    VERSION_WRITE_ATTEMPTS, VERSION_WRITE_BACKOFF_FIRST_MS, VERSION_WRITE_BACKOFF_MAX_MS,
+    VERSION_WRITE_DEADLINE_MS,
 };
 
 /// Shortest bucket name, in bytes. AWS general purpose bucket naming rules.
@@ -417,11 +422,6 @@ pub const COMPLETE_MULTIPART_BODY_MAX: usize = 10_000 * 512;
 /// Reads of a multipart object's key before giving up when it is overwritten between reading the object and its parts
 /// every time.
 pub const MULTIPART_READ_ATTEMPTS: u32 = 3;
-
-/// Attempts of one write or delete of a key before giving up when another writer of the same key commits first every
-/// time; each attempt reads the key's newest version again (ADR-0010). One writer wins each round, so with n writers of
-/// one key the last of them needs n attempts; past this bound the request is answered as contended (503 SlowDown).
-pub const VERSION_WRITE_ATTEMPTS: u32 = 32;
 
 /// Most parts one ListParts page carries, and the default.
 pub const LIST_PARTS_MAX: usize = 1000;

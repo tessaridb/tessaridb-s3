@@ -3,11 +3,11 @@
 //! record, so a writer of the same key that commits first makes this one's commit refuse; the plan is then read again,
 //! a bounded number of times.
 
-use tessari_s3_constants::VERSION_WRITE_ATTEMPTS;
 use tessari_s3_core::replication::matching;
 use tessari_s3_core::versioning::Versioning;
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::attempts::Attempts;
 use super::super::repository::{Head, NewVersion, ObjectRepository, Removal, VersionPlan};
 use super::super::tessaridb::TessariObjects;
 use super::super::version_id::{NULL, named};
@@ -80,7 +80,8 @@ pub(super) async fn remove_key(
     key: &ObjectKey,
     incarnation: [u8; 16],
 ) -> Result<Option<String>> {
-    for _ in 0..VERSION_WRITE_ATTEMPTS {
+    let mut attempts = Attempts::new();
+    while attempts.next().await {
         let head = repository.head(bucket, key).await?;
         let plan = plan(&head, key, true)?;
         if repository.remove(bucket, key, incarnation, &plan).await? {

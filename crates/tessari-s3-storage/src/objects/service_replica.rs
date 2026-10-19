@@ -3,9 +3,9 @@
 //! lands as a noncurrent version. A replica is stamped `REPLICA` and never replicated again — the loop guard of a
 //! two-way setup. Sending the same version twice writes nothing the second time.
 
-use tessari_s3_constants::VERSION_WRITE_ATTEMPTS;
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::super::attempts::Attempts;
 use super::super::model::{Content, NewObject, Replicated};
 use super::super::repository::{
     Guard, Head, NewVersion, ObjectRepository, Removal, VersionPlan, Wrote,
@@ -112,7 +112,8 @@ impl ObjectService {
         let Some(incarnation) = self.repository.incarnation(bucket).await? else {
             return Ok(Replicated::NoSuchBucket);
         };
-        for _ in 0..VERSION_WRITE_ATTEMPTS {
+        let mut attempts = Attempts::new();
+        while attempts.next().await {
             let head = self.repository.head(bucket, key).await?;
             let existing = self.repository.version_id_at(bucket, key, seq).await?;
             let (plan, current) = match replica_plan(&head, existing.as_deref(), version_id, seq) {
