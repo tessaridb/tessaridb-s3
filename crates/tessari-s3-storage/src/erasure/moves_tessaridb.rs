@@ -35,10 +35,13 @@ impl LayoutMoveRepository for TessariShardSets {
             ),
             ("limit".to_owned(), count(limit)),
         ];
+        // The planner's estimate for this range can count the whole table (every id on the one layout there is), and
+        // its scan guard then declines the index; the read is bounded by its limit, so walking the index is never the
+        // costly path (Q-S3-94).
         let answers = self
             .pool
             .run(
-                "SELECT layout FROM shard_sets WHERE layout < $current LIMIT $limit USING INDEX by_layout;",
+                "SELECT layout FROM shard_sets WHERE layout < $current LIMIT $limit WITHOUT SCAN GUARD USING INDEX by_layout;",
                 parameters,
             )
             .await?;
