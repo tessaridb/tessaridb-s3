@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::http::Response;
-use tessari_s3_core::auth::SignedRequest;
+use tessari_s3_core::auth::{AuthError, SignedRequest, is_signature_parameter};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::dispatch::{DispatchRequest, Method, dispatch, is_implemented};
@@ -138,7 +138,7 @@ async fn serve(
     trail: &mut Trail,
     request_id: &str,
 ) -> Result<Response<Body>> {
-    let (parts, body) = request.into_parts();
+    let (mut parts, body) = request.into_parts();
     let mut headers = Vec::with_capacity(parts.headers.len());
     for (name, value) in &parts.headers {
         let value = value.to_str().map_err(|_| {
@@ -187,11 +187,24 @@ async fn serve(
         )
     })?;
     let query = decode_query(raw_query)?;
+    // A version 2 presigned URL names its key in `AWSAccessKeyId`: it is refused as the mechanism it is, before
+    // dispatch would read that parameter as merely unknown.
+    if query.iter().any(|(name, _)| name == "AWSAccessKeyId") {
+        state.metrics().auth_refused(AuthRefusal::Malformed);
+        return Err(AuthError::UnsupportedAlgorithm.into());
+    }
+    let moved = moved_headers(&parts.headers, &query)?;
     let query_refs: Vec<(&str, Option<&str>)> = query
         .iter()
+        .filter(|(name, _)| {
+            !moved
+                .iter()
+                .any(|(moved, _)| moved.as_str().eq_ignore_ascii_case(name))
+        })
         .map(|(name, value)| (name.as_str(), value.as_deref()))
         .collect();
-    let header_names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
+    let mut header_names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
+    header_names.extend(moved.iter().map(|(name, _)| name.as_str()));
     let spec = dispatch(&DispatchRequest {
         method,
         target: addressed.target,
@@ -206,6 +219,10 @@ async fn serve(
         headers: &headers,
     };
     let (verified, principal) = authenticate(&state, &signed).await?;
+    // Signed with the query, they are the request's headers from here on.
+    for (name, value) in moved {
+        parts.headers.insert(name, value);
+    }
     if trail.logged {
         trail.principal = Some(if verified.is_anonymous() {
             "anonymous".to_owned()
@@ -266,6 +283,46 @@ async fn serve(
         }
         (answered, _) => answered,
     }
+}
+
+/// The `x-amz-*` headers (any case) a presigned URL carries in its signed query, as the headers they stand for;
+/// empty for any other request.
+///
+/// # Errors
+/// `InvalidArgument` for one that is also a header with another value, or that is no header at all.
+fn moved_headers(
+    headers: &axum::http::HeaderMap,
+    query: &[(String, Option<String>)],
+) -> Result<Vec<(axum::http::HeaderName, axum::http::HeaderValue)>> {
+    if !query.iter().any(|(name, _)| name == "X-Amz-Signature") {
+        return Ok(Vec::new());
+    }
+    let mut moved = Vec::new();
+    for (name, value) in query {
+        let header_like = name
+            .get(..6)
+            .is_some_and(|start| start.eq_ignore_ascii_case("x-amz-"));
+        if !header_like || is_signature_parameter(name) {
+            continue;
+        }
+        let refused = || {
+            Error::new(
+                ErrorCode::InvalidArgument,
+                format!("{name} is not a header"),
+            )
+        };
+        let header = axum::http::HeaderName::from_bytes(name.as_bytes()).map_err(|_| refused())?;
+        let value = axum::http::HeaderValue::from_str(value.as_deref().unwrap_or(""))
+            .map_err(|_| refused())?;
+        if headers.get(&header).is_some_and(|given| given != value) {
+            return Err(Error::new(
+                ErrorCode::InvalidArgument,
+                format!("{name} is given both as a header and in the query"),
+            ));
+        }
+        moved.push((header, value));
+    }
+    Ok(moved)
 }
 
 /// What a bucket policy's conditions read of this request: its transport, peer, time, how it was signed, the

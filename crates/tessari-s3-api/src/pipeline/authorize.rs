@@ -46,7 +46,7 @@ pub async fn authorize_operation(
     // A batch delete on a bucket with a policy, or by a session with one, is asked key by key by its handler
     // (`may_delete`); otherwise the bucket's grant decides every key at once, as it always has.
     if operation == Operation::DeleteObjects {
-        let resource = bucket(state, addressed.bucket.as_ref()).await?;
+        let resource = bucket(state, principal, addressed.bucket.as_ref()).await?;
         let narrowed =
             matches!(principal, Principal::Session(session) if session.policy().is_some());
         if resource.policy.is_some() || narrowed {
@@ -64,7 +64,7 @@ pub async fn authorize_operation(
     // A one-key credential asks to upload the key it addresses; anything else it asks is judged as asked, and refused.
     if let (Principal::Upload(_), true, Some(key)) = (principal, needs.upload, key) {
         let action = Action::Upload {
-            bucket: bucket(state, addressed.bucket.as_ref()).await?,
+            bucket: bucket(state, principal, addressed.bucket.as_ref()).await?,
             key: key.to_owned(),
         };
         return allowed(principal, &action, asked_action.map(asked).as_ref());
@@ -72,18 +72,26 @@ pub async fn authorize_operation(
     let action = match needs.primary {
         Need::ListBuckets => Action::ListBuckets,
         Need::CreateBucket => Action::CreateBucket(home(principal).ok_or_else(denied)?),
-        Need::DeleteBucket => Action::DeleteBucket(bucket(state, addressed.bucket.as_ref()).await?),
-        Need::ConfigureBucket => {
-            Action::ConfigureBucket(bucket(state, addressed.bucket.as_ref()).await?)
+        Need::DeleteBucket => {
+            Action::DeleteBucket(bucket(state, principal, addressed.bucket.as_ref()).await?)
         }
-        Need::ReadBucket => Action::ReadBucket(bucket(state, addressed.bucket.as_ref()).await?),
-        Need::ReadObject => Action::ReadObject(bucket(state, addressed.bucket.as_ref()).await?),
-        Need::WriteObject => Action::WriteObject(bucket(state, addressed.bucket.as_ref()).await?),
+        Need::ConfigureBucket => {
+            Action::ConfigureBucket(bucket(state, principal, addressed.bucket.as_ref()).await?)
+        }
+        Need::ReadBucket => {
+            Action::ReadBucket(bucket(state, principal, addressed.bucket.as_ref()).await?)
+        }
+        Need::ReadObject => {
+            Action::ReadObject(bucket(state, principal, addressed.bucket.as_ref()).await?)
+        }
+        Need::WriteObject => {
+            Action::WriteObject(bucket(state, principal, addressed.bucket.as_ref()).await?)
+        }
     };
     allowed(principal, &action, asked_action.map(asked).as_ref())?;
     if needs.source_read {
         let (source, source_key) = source_of(headers)?;
-        let read = Action::ReadObject(bucket(state, Some(&source)).await?);
+        let read = Action::ReadObject(bucket(state, principal, Some(&source)).await?);
         let asked = Asked {
             action: "s3:GetObject",
             key: Some(source_key.as_str()),
@@ -160,7 +168,7 @@ pub async fn may_bypass(
     if matches!(principal, Principal::Root) {
         return Ok(true);
     }
-    let action = Action::ConfigureBucket(bucket(state, Some(name)).await?);
+    let action = Action::ConfigureBucket(bucket(state, principal, Some(name)).await?);
     let asked = Asked {
         action: "s3:BypassGovernanceRetention",
         key: Some(key.as_str()),
@@ -203,10 +211,32 @@ async fn reachable(state: &ApiState, name: &BucketName) -> Result<Option<BucketR
         .map(|bucket| bucket.resource()))
 }
 
-/// The bucket `name` as the evaluator needs it; a missing bucket is refused like one the caller may not reach.
-async fn bucket(state: &ApiState, name: Option<&BucketName>) -> Result<BucketResource> {
+/// The bucket `name` as the evaluator needs it. A missing bucket is refused like one the caller may not reach, except
+/// to a caller who may create buckets: bucket names are global, so CreateBucket already tells it a name is taken.
+async fn bucket(
+    state: &ApiState,
+    principal: &Principal,
+    name: Option<&BucketName>,
+) -> Result<BucketResource> {
     let name = name.ok_or_else(denied)?;
-    reachable(state, name).await?.ok_or_else(denied)
+    match reachable(state, name).await? {
+        Some(resource) => Ok(resource),
+        None if may_create(principal) => Err(Error::new(
+            ErrorCode::NoSuchBucket,
+            "The specified bucket does not exist",
+        )),
+        None => Err(denied()),
+    }
+}
+
+/// Whether `principal` may create a bucket in its own space.
+fn may_create(principal: &Principal) -> bool {
+    home(principal).is_some_and(|space| {
+        matches!(
+            authorize(principal, &Action::CreateBucket(space)),
+            Decision::Allow
+        )
+    })
 }
 
 fn allowed(principal: &Principal, action: &Action, asked: Option<&Asked<'_>>) -> Result<()> {

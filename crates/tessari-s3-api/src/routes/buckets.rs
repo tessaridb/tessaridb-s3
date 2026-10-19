@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{HeaderValue, Response, StatusCode, header};
 use tessari_s3_core::authz::{Principal, SpaceName};
 use tessari_s3_storage::buckets::{Bucket, Created, Deleted};
-use tessari_s3_types::ErrorCode;
+use tessari_s3_types::{BucketName, ErrorCode};
 
 use crate::pipeline::body::{CONTROL_BODY_LIMIT, read_verified};
 use crate::pipeline::call::Call;
@@ -61,13 +61,7 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
         .create(name, region, &space, creator, object_lock)
         .await?
     {
-        Created::Created(_) => {
-            let mut response = empty_response(StatusCode::OK);
-            if let Ok(location) = HeaderValue::from_str(&format!("/{}", name.as_str())) {
-                response.headers_mut().insert(header::LOCATION, location);
-            }
-            Ok(response)
-        }
+        Created::Created(_) => Ok(created(name)),
         // Names are global: a bucket of the caller's space (every bucket, for root) is the caller's; one of another
         // space is somebody else's.
         Created::Exists => match buckets.get(name).await? {
@@ -79,12 +73,24 @@ pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>
                     "the requested bucket name is not available",
                 ))
             }
+            // S3 answers its owner's re-create of a us-east-1 bucket with 200, for legacy compatibility, and changes
+            // nothing (CreateBucket, BucketAlreadyOwnedByYou).
+            Some(existing) if existing.region == "us-east-1" => Ok(created(name)),
             _ => Err(Error::new(
                 ErrorCode::BucketAlreadyOwnedByYou,
                 "the bucket you tried to create already exists, and you own it",
             )),
         },
     }
+}
+
+/// The answer to a CreateBucket that leaves the bucket in place.
+fn created(name: &BucketName) -> Response<Body> {
+    let mut response = empty_response(StatusCode::OK);
+    if let Ok(location) = HeaderValue::from_str(&format!("/{}", name.as_str())) {
+        response.headers_mut().insert(header::LOCATION, location);
+    }
+    response
 }
 
 /// `HEAD /{bucket}` — whether it exists, and its region.

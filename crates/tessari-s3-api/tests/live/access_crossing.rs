@@ -88,7 +88,9 @@ async fn nothing_reaches_into_another_space() {
     .await;
     assert_eq!(
         (own.status, own.code.as_deref()),
-        (409, Some("BucketAlreadyOwnedByYou"))
+        (200, None),
+        "{}",
+        own.body
     );
 }
 

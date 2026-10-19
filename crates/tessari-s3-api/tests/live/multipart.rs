@@ -262,3 +262,44 @@ async fn list_parts_pages_by_part_number_marker() {
         assert_eq!(texts(&listed.body, "Part", "PartNumber"), expected, "{id}");
     }
 }
+
+/// G021: clients upload an object's parts in parallel (the AWS CLI sends ten at once), and every part of one upload
+/// commits — a sibling part committing at the same moment is not a reason to answer `503`.
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn parts_uploaded_at_once_all_commit() {
+    let (state, _) = fresh().await;
+    assert_eq!(
+        call(&state, "PUT", "/racing", vec![], b"").await.status,
+        200
+    );
+    let upload = create(&state, "/racing/k").await;
+    let numbers: Vec<String> = (1..=12).map(|number| number.to_string()).collect();
+    let sent = futures_util::future::join_all(
+        numbers
+            .iter()
+            .map(|number| part(&state, "/racing/k", &upload, number, number.as_bytes())),
+    )
+    .await;
+    let statuses: Vec<u16> = sent.iter().map(|seen| seen.status).collect();
+    assert_eq!(
+        statuses,
+        vec![200; 12],
+        "{:?}",
+        sent.iter().map(|seen| &seen.body).collect::<Vec<_>>()
+    );
+    let listed = call(
+        &state,
+        "GET",
+        "/racing/k",
+        vec![("uploadId", Some(upload.as_str()))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        texts(&listed.body, "Part", "PartNumber").len(),
+        12,
+        "{}",
+        listed.body
+    );
+}

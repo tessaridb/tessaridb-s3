@@ -2,9 +2,12 @@
 
 use std::collections::BTreeMap;
 
+use tessari_s3_core::object_lock::Mode;
 use tessari_s3_infrastructure::tessaridb::{Number, Value};
+use tessari_s3_types::Timestamp;
 
 use super::model::{Content, Multipart, NewObject, ObjectSummary, StoredObject};
+use super::model_lock::VersionLock;
 use super::repository::ListRow;
 use crate::encryption::{CUSTOMER_KEK_ID, CustomerSeal, WrappedKey};
 use crate::{Error, Result};
@@ -277,3 +280,22 @@ pub(crate) fn list_row(value: &Value) -> Result<ListRow> {
 #[cfg(test)]
 #[path = "entity_tests.rs"]
 mod tests;
+
+/// The Object Lock a version or an upload record holds: its retention and its legal hold.
+pub(crate) fn stored_lock(fields: &BTreeMap<String, Value>) -> Result<VersionLock> {
+    let retention = match (fields.get("lock_mode"), fields.get("retain_until")) {
+        (Some(Value::String(mode)), Some(Value::Datetime { seconds, nanos })) => Some((
+            Mode::parse(mode).ok_or(malformed("a lock mode"))?,
+            Timestamp {
+                seconds: *seconds,
+                nanos: *nanos,
+            },
+        )),
+        (None | Some(Value::None), None | Some(Value::None)) => None,
+        _ => return Err(malformed("a retention")),
+    };
+    Ok(VersionLock {
+        retention,
+        legal_hold: fields.get("legal_hold") == Some(&Value::Bool(true)),
+    })
+}

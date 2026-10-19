@@ -46,10 +46,12 @@ async fn remove_named(
 }
 
 impl ObjectService {
-    /// Removes each entry — the current object of a key, or the version it names (`bypass` lets a GOVERNANCE retention
-    /// go; the caller has checked who may ask) — a few at a time, one outcome per
-    /// entry in order; `None` when the bucket does not exist. A missing key or version is removed successfully, as in
-    /// S3.
+    /// Removes each entry, the current object of a key or the version it names (`bypass` lets a GOVERNANCE retention
+    /// go; the caller has checked who may ask), a few keys at a time, one outcome per entry in order; `None` when the
+    /// bucket does not exist. A missing key or version is removed successfully, as in S3.
+    ///
+    /// The entries naming one key are removed one after another: run side by side they would fence each other (each
+    /// removal guards the version its plan read) and the request would contend with itself.
     ///
     /// # Errors
     /// The metadata store's refusal or outage while reading the bucket; a key's own failure is its outcome.
@@ -63,34 +65,58 @@ impl ObjectService {
         let Some(incarnation) = self.repository.incarnation(bucket).await? else {
             return Ok(None);
         };
+        // Each key's entries with their positions, in the order the keys first appear.
+        let mut groups: Vec<Vec<(usize, Option<String>)>> = Vec::new();
+        let mut keys: Vec<ObjectKey> = Vec::new();
+        let mut slots: std::collections::HashMap<&ObjectKey, usize> =
+            std::collections::HashMap::new();
+        for (position, (key, version)) in entries.iter().enumerate() {
+            let slot = *slots.entry(key).or_insert_with(|| {
+                groups.push(Vec::new());
+                keys.push(key.clone());
+                groups.len().saturating_sub(1)
+            });
+            if let Some(group) = groups.get_mut(slot) {
+                group.push((position, version.clone()));
+            }
+        }
         // Each removal owns its inputs: a future borrowing from the iterator's closure argument is not provably
         // `Send` for every lifetime, which the server's handler future must be.
-        let removals = entries.iter().cloned().map(|(key, version)| {
+        let removals = keys.into_iter().zip(groups).map(|(key, group)| {
             let repository = self.repository.clone();
             let bucket = bucket.clone();
             async move {
-                match version {
-                    Some(version) => remove_named(
-                        &repository,
-                        &bucket,
-                        &key,
-                        &version,
-                        Removal::Request,
-                        bypass,
-                    )
-                    .await
-                    .map(Deleted::Version),
-                    None => versions::remove_key(&repository, &bucket, &key, incarnation)
+                let mut done = Vec::with_capacity(group.len());
+                for (position, version) in group {
+                    let outcome = match version {
+                        Some(version) => remove_named(
+                            &repository,
+                            &bucket,
+                            &key,
+                            &version,
+                            Removal::Request,
+                            bypass,
+                        )
                         .await
-                        .map(|marker| Deleted::Current { marker }),
+                        .map(Deleted::Version),
+                        None => versions::remove_key(&repository, &bucket, &key, incarnation)
+                            .await
+                            .map(|marker| Deleted::Current { marker }),
+                    };
+                    done.push((position, outcome));
                 }
+                done
             }
         });
-        let outcomes = futures_util::stream::iter(removals)
-            .buffered(DELETE_OBJECTS_CONCURRENCY)
+        let mut outcomes: Vec<(usize, Result<Deleted>)> = futures_util::stream::iter(removals)
+            .buffer_unordered(DELETE_OBJECTS_CONCURRENCY)
+            .flat_map(futures_util::stream::iter)
             .collect()
             .await;
-        Ok(Some(outcomes))
+        outcomes.sort_unstable_by_key(|(position, _)| *position);
+        Ok(Some(
+            outcomes.into_iter().map(|(_, outcome)| outcome).collect(),
+        ))
     }
 
     /// Removes the object at `bucket/key`; deleting a missing key succeeds, as in S3.

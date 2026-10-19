@@ -16,6 +16,24 @@ use super::time::AmzDateTime;
 use super::verified::{PayloadHash, Verified};
 use super::{AuthError, AuthResult};
 
+/// Whether `name` is one of the parameters that carry a presigned URL's signature, in any case, as against an
+/// `x-amz-*` header an SDK moved into the signed query.
+#[must_use]
+pub fn is_signature_parameter(name: &str) -> bool {
+    [
+        "X-Amz-Algorithm",
+        "X-Amz-Credential",
+        "X-Amz-Date",
+        "X-Amz-Expires",
+        "X-Amz-SignedHeaders",
+        "X-Amz-Signature",
+        "X-Amz-Security-Token",
+        "X-Amz-Content-Sha256",
+    ]
+    .iter()
+    .any(|known| known.eq_ignore_ascii_case(name))
+}
+
 /// The `X-Amz-*` parameters of a presigned URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresignedQuery {
@@ -48,6 +66,16 @@ impl PresignedQuery {
         for parameter in raw_query.split('&').filter(|p| !p.is_empty()) {
             let (raw_name, raw_value) = parameter.split_once('=').unwrap_or((parameter, ""));
             let name = percent_decode(raw_name)?;
+            // SDKs name the payload a presigned URL signs; it is never hashed, so any other value is a digest nobody
+            // would check.
+            if name == b"X-Amz-Content-Sha256" {
+                if percent_decode(raw_value)? != b"UNSIGNED-PAYLOAD" {
+                    return Err(AuthError::Malformed {
+                        reason: "a presigned request's payload is UNSIGNED-PAYLOAD",
+                    });
+                }
+                continue;
+            }
             if name == b"X-Amz-Security-Token" {
                 let value = String::from_utf8(percent_decode(raw_value)?).map_err(|_| {
                     AuthError::Malformed {

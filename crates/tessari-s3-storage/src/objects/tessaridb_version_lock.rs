@@ -6,6 +6,7 @@ use tessari_s3_core::object_lock::Mode;
 use tessari_s3_infrastructure::tessaridb::Value;
 use tessari_s3_types::{BucketName, ObjectKey, Timestamp};
 
+use super::super::entity::stored_lock;
 use super::super::model_lock::{LockOutcome, VersionLock};
 use super::super::version_id::{NULL, Naming, key_prefix, parse, record_id};
 use super::version_delete::null_seq;
@@ -30,24 +31,6 @@ pub(super) struct Addressed {
     lock: VersionLock,
     /// Whether its retention has not passed, by the store's clock.
     retained: bool,
-}
-
-fn stored_lock(fields: &std::collections::BTreeMap<String, Value>) -> Result<VersionLock> {
-    let retention = match (fields.get("lock_mode"), fields.get("retain_until")) {
-        (Some(Value::String(mode)), Some(Value::Datetime { seconds, nanos })) => Some((
-            Mode::parse(mode).ok_or(malformed("a lock mode"))?,
-            Timestamp {
-                seconds: *seconds,
-                nanos: *nanos,
-            },
-        )),
-        (None | Some(Value::None), None | Some(Value::None)) => None,
-        _ => return Err(malformed("a retention")),
-    };
-    Ok(VersionLock {
-        retention,
-        legal_hold: fields.get("legal_hold") == Some(&Value::Bool(true)),
-    })
 }
 
 impl TessariObjects {
@@ -129,8 +112,9 @@ impl TessariObjects {
         })
     }
 
-    /// Sets the version's retention (`None` removes it). A change that would shorten or remove a retention still
-    /// keeping it — COMPLIANCE always, GOVERNANCE unless `bypass` — is [`LockOutcome::Locked`].
+    /// Sets the version's retention (`None` removes it). While a retention keeps the version only an extension in its
+    /// own mode is free; any other change (COMPLIANCE always, GOVERNANCE unless `bypass`) is
+    /// [`LockOutcome::Locked`] (S3 user guide, Object Lock retention modes).
     pub(crate) async fn set_retention(
         &self,
         bucket: &BucketName,
@@ -147,9 +131,7 @@ impl TessariObjects {
         if let (true, Some((mode, until))) = (found.retained, found.lock.retention) {
             let releases = match retention {
                 None => true,
-                Some((new_mode, new_until)) => {
-                    new_until < until || (mode == Mode::Compliance && new_mode != Mode::Compliance)
-                }
+                Some((new_mode, new_until)) => new_until < until || new_mode != mode,
             };
             if releases && (mode == Mode::Compliance || !bypass) {
                 return Ok(LockOutcome::Locked);

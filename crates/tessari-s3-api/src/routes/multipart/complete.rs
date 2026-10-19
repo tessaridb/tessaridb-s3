@@ -205,14 +205,8 @@ pub(crate) async fn complete(
 ) -> Result<Response<Body>> {
     let id = upload_id(call)?;
     let headers = read_put_headers(call.headers)?;
-    if headers.encryption.is_some() {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "server-side encryption of a multipart upload is not implemented",
-        ));
-    }
-    // Completing needs no key; one that is brought must be the upload's.
-    if let Some(customer) = &headers.customer {
+    // Completing needs no key or encryption; one that is named must be the upload's, fixed when it was created.
+    if headers.customer.is_some() || headers.encryption.is_some() {
         let declared = call
             .state
             .storage()
@@ -220,14 +214,21 @@ pub(crate) async fn complete(
             .find(call.bucket()?, key, id)
             .await?
             .ok_or_else(no_such_upload)?;
-        admit_key(call, declared.customer.as_ref(), Some(customer))?;
+        if let Some(customer) = &headers.customer {
+            admit_key(call, declared.customer.as_ref(), Some(customer))?;
+        }
+        if headers.encryption.is_some() && headers.encryption != declared.encryption {
+            return Err(Error::new(
+                ErrorCode::InvalidRequest,
+                "the upload's server-side encryption was fixed by CreateMultipartUpload; this names another",
+            ));
+        }
     }
-    // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
-    // carried yet, and are refused rather than dropped.
+    // The upload's lock was fixed when it was created; one asked for now would be dropped, so it is refused.
     if headers.lock.asked {
         return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "Object Lock headers on a multipart upload are not implemented; the bucket's default retention applies",
+            ErrorCode::InvalidRequest,
+            "Object Lock headers are given to CreateMultipartUpload, not to its completion",
         ));
     }
     let size = call

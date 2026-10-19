@@ -54,16 +54,18 @@ impl Timestamp {
         format!("{weekday}, {day:02} {month_name} {year:04} {hour:02}:{minute:02}:{second:02} GMT")
     }
 
-    /// Parses `2009-10-12T17:50:30Z` or `2009-10-12T17:50:30.000Z` (UTC, whole seconds or milliseconds); anything
-    /// else is `None`.
+    /// Parses `2009-10-12T17:50:30Z` or the same with a fraction of one to nine digits (`.000Z`, `.123456Z`), in
+    /// UTC; anything else is `None`.
     #[must_use]
     pub fn parse_iso8601(text: &str) -> Option<Self> {
         let text = text.trim().strip_suffix('Z')?;
-        let (clock, millis) = match text.split_once('.') {
+        let (clock, nanos) = match text.split_once('.') {
             Some((clock, fraction))
-                if fraction.len() == 3 && fraction.bytes().all(|b| b.is_ascii_digit()) =>
+                if (1..=9).contains(&fraction.len())
+                    && fraction.bytes().all(|b| b.is_ascii_digit()) =>
             {
-                (clock, fraction.parse::<u32>().ok()?)
+                let padded = format!("{fraction:0<9}");
+                (clock, padded.parse::<u32>().ok()?)
             }
             Some(_) => return None,
             None => (text, 0),
@@ -91,10 +93,7 @@ impl Timestamp {
             .checked_add(hour.checked_mul(3_600)?)?
             .checked_add(minute.checked_mul(60)?)?
             .checked_add(second)?;
-        Some(Self {
-            seconds,
-            nanos: millis.checked_mul(1_000_000)?,
-        })
+        Some(Self { seconds, nanos })
     }
 
     /// Parses an IMF-fixdate (`Mon, 12 Oct 2009 17:50:30 GMT`), the form HTTP requires senders to use; anything else
@@ -216,83 +215,5 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Timestamp;
-
-    #[test]
-    fn an_iso8601_instant_reads_back_with_or_without_milliseconds() {
-        let instant = Timestamp {
-            seconds: 1_255_369_830,
-            nanos: 0,
-        };
-        assert_eq!(
-            Timestamp::parse_iso8601("2009-10-12T17:50:30Z"),
-            Some(instant)
-        );
-        assert_eq!(
-            Timestamp::parse_iso8601("2009-10-12T17:50:30.000Z"),
-            Some(instant)
-        );
-        assert_eq!(Timestamp::parse_iso8601("2009-10-12 17:50:30Z"), None);
-        assert_eq!(Timestamp::parse_iso8601("2009-13-12T17:50:30Z"), None);
-        assert_eq!(Timestamp::parse_iso8601("2009-10-12T17:50:30"), None);
-    }
-
-    #[test]
-    fn known_instants_render_in_both_forms() {
-        let cases = [
-            (
-                0,
-                0,
-                "1970-01-01T00:00:00.000Z",
-                "Thu, 01 Jan 1970 00:00:00 GMT",
-            ),
-            (
-                1_255_369_830,
-                123_456_789,
-                "2009-10-12T17:50:30.123Z",
-                "Mon, 12 Oct 2009 17:50:30 GMT",
-            ),
-            (
-                951_782_400,
-                0,
-                "2000-02-29T00:00:00.000Z",
-                "Tue, 29 Feb 2000 00:00:00 GMT",
-            ),
-            (
-                4_102_444_799,
-                999_999_999,
-                "2099-12-31T23:59:59.999Z",
-                "Thu, 31 Dec 2099 23:59:59 GMT",
-            ),
-        ];
-        for (seconds, nanos, iso, http) in cases {
-            let at = Timestamp { seconds, nanos };
-            assert_eq!(
-                (at.iso8601_millis().as_str(), at.http_date().as_str()),
-                (iso, http),
-                "{seconds}"
-            );
-            assert_eq!(
-                Timestamp::parse_http_date(http),
-                Some(Timestamp { seconds, nanos: 0 }),
-                "{http}"
-            );
-        }
-    }
-
-    #[test]
-    fn only_imf_fixdate_parses() {
-        let refused = [
-            "",
-            "yesterday",
-            "Sunday, 06-Nov-94 08:49:37 GMT",
-            "Sun Nov  6 08:49:37 1994",
-            "Mon, 12 Oct 2009 25:00:00 GMT",
-            "Mon, 12 Oct 2009 17:50:30 UTC",
-        ];
-        for text in refused {
-            assert_eq!(Timestamp::parse_http_date(text), None, "{text}");
-        }
-    }
-}
+#[path = "timestamp_tests.rs"]
+mod tests;

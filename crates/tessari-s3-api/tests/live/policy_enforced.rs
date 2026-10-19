@@ -290,3 +290,52 @@ async fn a_deny_binds_the_console_as_it_binds_the_s3_router() {
     .await;
     assert_eq!(download.status, 403);
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn listing_versions_is_its_own_action_a_policy_can_deny() {
+    let _why = IGNORED;
+    let (state, _pool) = fresh().await;
+    let storage = state.storage();
+    let ann = user_with_key(storage, "ann", "default", Role::Member, false).await;
+    assert_eq!(
+        call(&state, "PUT", "/history", vec![], b"").await.status,
+        200
+    );
+    grant(
+        storage,
+        "ann",
+        "history",
+        Access {
+            read: true,
+            write: false,
+        },
+    )
+    .await;
+    let deny = policy(
+        r#"{"Effect":"Deny","Principal":"*","Action":"s3:ListBucketVersions","Resource":"arn:aws:s3:::history"}"#,
+    );
+    assert_eq!(put_policy(&state, "history", &deny).await.status, 204);
+    let listed = call_as(&state, ann.pair(), "GET", "/history", vec![], vec![], b"").await;
+    assert_eq!(
+        listed.status, 200,
+        "s3:ListBucket is not denied: {}",
+        listed.body
+    );
+    let versions = call_as(
+        &state,
+        ann.pair(),
+        "GET",
+        "/history",
+        vec![("versions", None)],
+        vec![],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        (versions.status, versions.code.as_deref()),
+        (403, Some("AccessDenied")),
+        "ListObjectVersions asks s3:ListBucketVersions: {}",
+        versions.body
+    );
+}

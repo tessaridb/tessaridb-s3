@@ -29,7 +29,7 @@ pub use error::{AuthError, AuthResult};
 pub use header::{AuthorizationHeader, verify_header};
 pub use payload::{PayloadVerifier, parse_payload_hash, verify_payload_digest};
 pub use post_policy::{PostPolicy, PostPolicyError, post_signature, verify_post};
-pub use presign::{PresignedQuery, verify_presigned};
+pub use presign::{PresignedQuery, is_signature_parameter, verify_presigned};
 pub use session_token::{
     compose as compose_session_token, digest as session_token_digest,
     expiry as session_token_expiry, matches as session_token_matches,

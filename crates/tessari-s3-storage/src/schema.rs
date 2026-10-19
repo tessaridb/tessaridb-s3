@@ -214,6 +214,9 @@ DEFINE INDEX IF NOT EXISTS by_sse_kek ON objects FIELDS sse_kek;
 DEFINE INDEX IF NOT EXISTS by_sse_kek ON parts FIELDS sse_kek;
 DEFINE FIELD IF NOT EXISTS tags ON objects TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON uploads TYPE object;
+DEFINE FIELD IF NOT EXISTS lock_mode ON uploads TYPE 'COMPLIANCE' | 'GOVERNANCE';
+DEFINE FIELD IF NOT EXISTS retain_until ON uploads TYPE datetime;
+DEFINE FIELD IF NOT EXISTS legal_hold ON uploads TYPE bool;
 DEFINE EVENT OR REPLACE locked_release ON versions FOR DELETE \
 WHEN ($before.legal_hold ?? false) OR ($before.retain_until != NONE AND $before.retain_until > time::now() \
  AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false)) \
@@ -222,7 +225,7 @@ DEFINE EVENT OR REPLACE locked_change ON versions FOR UPDATE \
 WHEN ($before.retain_until != NONE AND $before.retain_until > time::now() \
   AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false) \
   AND ($after.retain_until = NONE OR $after.retain_until < $before.retain_until \
-   OR ($before.lock_mode = 'COMPLIANCE' AND $after.lock_mode != 'COMPLIANCE') \
+   OR $after.lock_mode != $before.lock_mode \
    OR $after.data != $before.data OR $after.upload != $before.upload)) \
  OR (($before.legal_hold ?? false) AND ($after.data != $before.data OR $after.upload != $before.upload)) \
 THEN THROW 'ObjectLocked: this version is under retention or a legal hold';

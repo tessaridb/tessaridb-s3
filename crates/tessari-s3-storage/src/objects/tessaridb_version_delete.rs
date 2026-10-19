@@ -84,6 +84,10 @@ pub(crate) struct Target {
     pub(crate) kept: Kept,
     /// What becomes current, when the target is the key's newest version.
     successor: Option<Successor>,
+    /// The other version the plan was read beside (the newest when the target is not, else the next newest), as its
+    /// sequence and id: the removal fences it, so a concurrent removal of that version and this one cannot both commit
+    /// on what each read before the other.
+    neighbour: Option<(u64, String)>,
     /// Whether the bucket notifies, read with the target.
     notify: bool,
     /// Whether the bucket's writes are acknowledged by its region's majority alone.
@@ -105,6 +109,13 @@ fn seq(fields: &Fields) -> Result<u64> {
             u64::try_from(*seq).map_err(|_| malformed("a negative sequence"))
         }
         _ => Err(malformed("seq")),
+    }
+}
+
+fn id_of(fields: &Fields) -> Result<String> {
+    match fields.get("version_id") {
+        Some(Value::String(id)) => Ok(id.clone()),
+        _ => Err(malformed("version_id")),
     }
 }
 
@@ -187,7 +198,16 @@ impl TessariObjects {
             return Ok(None);
         }
         let kept = kept(first_record(answers.next())?)?;
-        let mut newest = of_key(answers.next(), bucket, key)?.into_iter();
+        let walked = of_key(answers.next(), bucket, key)?;
+        let newest_is_target = match walked.first() {
+            Some(first) => seq(first)? == target_seq,
+            None => false,
+        };
+        let neighbour = match walked.get(usize::from(newest_is_target)) {
+            Some(other) => Some((seq(other)?, id_of(other)?)),
+            None => None,
+        };
+        let mut newest = walked.into_iter();
         let bucket_record = first_record(answers.next())?;
         let notify = matches!(&bucket_record, Some(Value::Object(fields))
             if !matches!(fields.get("notify"), None | Some(Value::None)));
@@ -211,6 +231,7 @@ impl TessariObjects {
             kept,
             version_id: version_id.to_owned(),
             successor,
+            neighbour,
             notify,
             local,
         }))
@@ -263,6 +284,21 @@ impl TessariObjects {
             "BEGIN; {bypassing}UPDATE versions:$target SET version_id = $vid{stamp} WHERE version_id = $vid; \
              DELETE versions:$target; ",
         );
+        // The neighbour is fenced as it was read: a removal of it that committed first refuses this one, and one still
+        // running collides with it, so the loser reads the key again.
+        if let Some((neighbour_seq, neighbour_vid)) = &target.neighbour {
+            script.push_str(
+                "UPDATE versions:$neighbour SET version_id = $neighbour_vid WHERE version_id = $neighbour_vid; ",
+            );
+            parameters.push((
+                "neighbour".to_owned(),
+                Value::Bytes(record_id(&prefix, *neighbour_seq)),
+            ));
+            parameters.push((
+                "neighbour_vid".to_owned(),
+                Value::String(neighbour_vid.clone()),
+            ));
+        }
         if target.version_id == NULL {
             script.push_str("DELETE version_nulls:$key_at; ");
             parameters.push(("key_at".to_owned(), Value::Bytes(prefix)));

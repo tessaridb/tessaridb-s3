@@ -286,3 +286,149 @@ async fn a_compliance_version_survives_every_path_that_could_release_it() {
         assert!(refusal.to_string().contains(what), "{statement}: {refusal}");
     }
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_multipart_upload_carries_the_lock_its_create_asked_for() {
+    let _why = IGNORED;
+    let (state, _) = crate::fresh().await;
+    let lockable = vec![("x-amz-bucket-object-lock-enabled", "true")];
+    assert_eq!(
+        call_with(&state, "PUT", "/vault", vec![], lockable, b"")
+            .await
+            .status,
+        200
+    );
+    assert_eq!(call(&state, "PUT", "/plain", vec![], b"").await.status, 200);
+    let until = in_an_hour();
+    let asked = vec![
+        ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ("x-amz-object-lock-retain-until-date", until.as_str()),
+        ("x-amz-object-lock-legal-hold", "ON"),
+    ];
+
+    // A bucket without Object Lock refuses the headers by name, as PutObject does.
+    let plain = call_with(
+        &state,
+        "POST",
+        "/plain/big",
+        vec![("uploads", None)],
+        asked.clone(),
+        b"",
+    )
+    .await;
+    assert_eq!(
+        refused(&plain),
+        (400, Some("InvalidRequest")),
+        "{}",
+        plain.body
+    );
+    assert!(
+        plain.body.contains("Object Lock Configuration"),
+        "{}",
+        plain.body
+    );
+
+    let created = call_with(
+        &state,
+        "POST",
+        "/vault/big",
+        vec![("uploads", None)],
+        asked,
+        b"",
+    )
+    .await;
+    assert_eq!(created.status, 200, "{}", created.body);
+    let upload = crate::multipart::text(&created.body, "UploadId").expect("an upload id");
+    let uploaded =
+        crate::multipart::part(&state, "/vault/big", &upload, "1", b"locked bytes").await;
+    assert_eq!(uploaded.status, 200, "{}", uploaded.body);
+    let tag = crate::multipart::etag(&uploaded);
+    let document = crate::complete::document(&[("1", tag.as_str())]);
+    let done = crate::complete::complete(&state, "/vault/big", &upload, vec![], &document).await;
+    assert_eq!(done.status, 200, "{}", done.body);
+    let id = version_header(&done).expect("a version id");
+
+    let retention = call(&state, "GET", "/vault/big", vec![("retention", None)], b"").await;
+    assert!(
+        retention.body.contains("<Mode>GOVERNANCE</Mode>"),
+        "{}",
+        retention.body
+    );
+    let hold = call(&state, "GET", "/vault/big", vec![("legal-hold", None)], b"").await;
+    assert!(hold.body.contains("<Status>ON</Status>"), "{}", hold.body);
+    // Held: not even the governance bypass removes it.
+    let removed = call_with(
+        &state,
+        "DELETE",
+        "/vault/big",
+        vec![("versionId", Some(id.as_str()))],
+        vec![BYPASS],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        refused(&removed),
+        (403, Some("AccessDenied")),
+        "{}",
+        removed.body
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_read_of_a_locked_version_answers_its_lock() {
+    let _why = IGNORED;
+    let (state, _) = crate::fresh().await;
+    let lockable = vec![("x-amz-bucket-object-lock-enabled", "true")];
+    assert_eq!(
+        call_with(&state, "PUT", "/vault", vec![], lockable, b"")
+            .await
+            .status,
+        200
+    );
+    let until = in_an_hour();
+    locked_put(
+        &state,
+        "/vault/k",
+        "kept",
+        &[
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+            ("x-amz-object-lock-retain-until-date", until.as_str()),
+            ("x-amz-object-lock-legal-hold", "ON"),
+        ],
+    )
+    .await;
+    locked_put(&state, "/vault/free", "free", &[]).await;
+    let header = |seen: &Seen, name: &str| {
+        seen.headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    for method in ["HEAD", "GET"] {
+        let read = call(&state, method, "/vault/k", vec![], b"").await;
+        assert_eq!(read.status, 200, "{}", read.body);
+        assert_eq!(
+            header(&read, "x-amz-object-lock-mode").as_deref(),
+            Some("GOVERNANCE"),
+            "{method}"
+        );
+        assert_eq!(
+            header(&read, "x-amz-object-lock-retain-until-date"),
+            Some(until.clone()),
+            "{method}"
+        );
+        assert_eq!(
+            header(&read, "x-amz-object-lock-legal-hold").as_deref(),
+            Some("ON"),
+            "{method}"
+        );
+        let free = call(&state, method, "/vault/free", vec![], b"").await;
+        assert_eq!(
+            header(&free, "x-amz-object-lock-mode"),
+            None,
+            "{method}: nothing kept, nothing answered"
+        );
+    }
+}

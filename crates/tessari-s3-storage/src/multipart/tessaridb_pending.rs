@@ -16,6 +16,7 @@ use super::super::repository::{PendingBatch, PendingRow};
 use super::strings;
 use crate::answers::{bucket_read, first_record, incarnation_of};
 use crate::encryption::Sealing;
+use crate::objects::RetainUntil;
 use crate::{Error, Result};
 
 fn malformed(reason: &'static str) -> Error {
@@ -113,6 +114,28 @@ pub(super) async fn create(
             record.insert("sse".to_owned(), Value::String("aws:kms".to_owned()));
             record.insert("sse_kms".to_owned(), Value::String(name.to_string()));
         }
+    }
+    if let Some((mode, until)) = upload.lock.retention {
+        let RetainUntil::At(at) = until else {
+            return Err(Error::Malformed {
+                record: "upload",
+                reason: "a retention counted from the commit",
+            });
+        };
+        record.insert(
+            "lock_mode".to_owned(),
+            Value::String(mode.as_str().to_owned()),
+        );
+        record.insert(
+            "retain_until".to_owned(),
+            Value::Datetime {
+                seconds: at.seconds,
+                nanos: at.nanos,
+            },
+        );
+    }
+    if upload.lock.legal_hold {
+        record.insert("legal_hold".to_owned(), Value::Bool(true));
     }
     if let Some(seal) = &upload.customer {
         record.extend(
