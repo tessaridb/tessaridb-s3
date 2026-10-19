@@ -18,10 +18,29 @@ async fn a_bucket_lives_from_create_to_delete() {
             .and_then(|v| v.to_str().ok()),
         Some("/photos")
     );
+    assert_eq!(
+        call(&state, "PUT", "/photos/kept", vec![], b"kept")
+            .await
+            .status,
+        200
+    );
+    // In us-east-1 S3 answers its owner's re-create with 200 for legacy compatibility, and changes nothing.
     let again = call(&state, "PUT", "/photos", vec![], b"").await;
     assert_eq!(
         (again.status, again.code.as_deref()),
-        (409, Some("BucketAlreadyOwnedByYou"))
+        (200, None),
+        "{}",
+        again.body
+    );
+    assert_eq!(
+        call(&state, "GET", "/photos/kept", vec![], b"").await.body,
+        "kept"
+    );
+    assert_eq!(
+        call(&state, "DELETE", "/photos/kept", vec![], b"")
+            .await
+            .status,
+        204
     );
     let head = call(&state, "HEAD", "/photos", vec![], b"").await;
     assert_eq!(head.status, 200);
