@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use tessari_s3_constants::DATA_BLOCK_SIZE;
+use tessari_s3_constants::{DATA_BLOCK_SIZE, RECLAIM_WORKERS};
 
 use super::ObjectService;
 use crate::data::hex;
@@ -109,8 +109,36 @@ impl ObjectService {
     /// The metadata store's or the drive's failure; the entries this pass held go back to the queue when their
     /// hold lapses.
     pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
+        // Each worker claims its own entries, so no entry is worked on twice; a worker's refusal ends only its share.
+        let share = limit.div_ceil(RECLAIM_WORKERS);
+        let shares =
+            futures_util::future::join_all((0..RECLAIM_WORKERS).map(|_| self.reclaim_share(share)))
+                .await;
         let mut done = Reclaimed::default();
-        // One entry at a time: a pass cut short by a refusal leaves at most the entry in hand held until its hold
+        let mut refused = None;
+        for share in shares {
+            match share {
+                Ok(part) => {
+                    done.examined = done.examined.saturating_add(part.examined);
+                    done.removed = done.removed.saturating_add(part.removed);
+                    done.kept = done.kept.saturating_add(part.kept);
+                }
+                Err(error) => refused = refused.or(Some(error)),
+            }
+        }
+        if let Some(error) = refused {
+            return Err(error);
+        }
+        if let Some(writes) = &self.erasure {
+            done.orphans = writes.sweep(grace_secs, limit).await?;
+        }
+        Ok(done)
+    }
+
+    /// One worker's part of a pass: up to `limit` entries, claimed one at a time.
+    async fn reclaim_share(&self, limit: usize) -> Result<Reclaimed> {
+        let mut done = Reclaimed::default();
+        // One entry at a time: a share cut short by a refusal leaves at most the entry in hand held until its hold
         // lapses, never a batch.
         while done.examined < limit {
             let Some((id, marked)) = self.repository.claim_next().await? else {
@@ -141,9 +169,6 @@ impl ObjectService {
             }
             self.repository.unqueue(id).await?;
             done.removed = done.removed.saturating_add(1);
-        }
-        if let Some(writes) = &self.erasure {
-            done.orphans = writes.sweep(grace_secs, limit).await?;
         }
         Ok(done)
     }
