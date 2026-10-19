@@ -54,6 +54,7 @@ impl Daemon for UsageScanner {
                     message: error.to_string(),
                 })?;
             Ok(Report {
+                idle: measured.is_none_or(|buckets| buckets == 0),
                 message: measured.map_or_else(
                     || "another member holds the pass".to_owned(),
                     |buckets| format!("measured {buckets} buckets"),

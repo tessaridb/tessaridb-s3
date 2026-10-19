@@ -73,6 +73,7 @@ impl Daemon for LifecycleWorker {
                     "buckets {}, expired {}, noncurrent {}, markers {}, aborted {}",
                     done.buckets, done.expired, done.noncurrent, done.markers, done.aborted
                 ),
+                idle: done.buckets == 0,
             })
         })
     }

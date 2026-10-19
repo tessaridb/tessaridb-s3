@@ -11,6 +11,8 @@ use crate::Result;
 pub struct Report {
     /// One line describing what the run did.
     pub message: String,
+    /// Whether the run found nothing to do; such a run is logged at DEBUG, so an idle node stays quiet at INFO.
+    pub idle: bool,
 }
 
 /// The future one run returns.

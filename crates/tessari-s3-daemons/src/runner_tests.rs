@@ -37,10 +37,16 @@ impl Daemon for Fake {
                     tokio::time::sleep(Duration::from_secs(3600)).await;
                     Ok(Report {
                         message: "never".to_owned(),
+                        idle: false,
                     })
                 }
+                "idle" => Ok(Report {
+                    message: "nothing to do".to_owned(),
+                    idle: true,
+                }),
                 _ => Ok(Report {
                     message: "done".to_owned(),
+                    idle: false,
                 }),
             }
         })
@@ -105,4 +111,42 @@ async fn a_dropped_sender_also_stops_the_runner() {
         .expect("the runner returned")
         .expect("no panic");
     assert_eq!(runs.succeeded, 1, "the first tick ran");
+}
+
+/// What the runner logs at INFO and above while `behaviour` runs for three ticks.
+async fn logged(behaviour: &'static str) -> String {
+    let lines = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let sink = Arc::clone(&lines);
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_ansi(false)
+        .with_writer(move || Writer(Arc::clone(&sink)))
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    drive(behaviour, 3).await;
+    let bytes = lines.lock().expect("the log").clone();
+    String::from_utf8(bytes).expect("text")
+}
+
+struct Writer(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Writer {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("the log").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_run_that_found_nothing_to_do_is_not_logged_at_info() {
+    let idle = logged("idle").await;
+    assert!(!idle.contains("daemon run completed"), "{idle}");
+    let worked = logged("ok").await;
+    assert!(
+        worked.matches("daemon run completed").count() >= 3,
+        "control: a run that did something is logged at INFO: {worked}"
+    );
 }

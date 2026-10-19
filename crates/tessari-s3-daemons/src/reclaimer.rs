@@ -56,6 +56,7 @@ impl Daemon for Reclaimer {
                     "examined {}, removed {}, kept {}, orphans {}",
                     done.examined, done.removed, done.kept, done.orphans
                 ),
+                idle: done.examined == 0 && done.orphans == 0,
             })
         })
     }

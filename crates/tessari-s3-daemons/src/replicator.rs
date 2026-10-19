@@ -278,6 +278,7 @@ impl Daemon for Replicator {
             }
             Ok(Report {
                 message: format!("replicated {sent}, to retry {retried}"),
+                idle: tasks.is_empty(),
             })
         })
     }

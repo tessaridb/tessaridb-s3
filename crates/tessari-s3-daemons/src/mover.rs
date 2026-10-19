@@ -75,6 +75,7 @@ impl Daemon for Mover {
             let Some(budget) = NonZeroU64::new(self.bytes_per_sec) else {
                 return Ok(Report {
                     message: "paused".to_owned(),
+                    idle: true,
                 });
             };
             let pass = self
@@ -83,6 +84,7 @@ impl Daemon for Mover {
             let Some(done) = until_stopped(self.shutdown.clone(), pass).await else {
                 return Ok(Report {
                     message: "stopped for shutdown; the pass resumes from the store".to_owned(),
+                    idle: false,
                 });
             };
             let done = done.map_err(|error| Error::Run {
@@ -94,6 +96,7 @@ impl Daemon for Mover {
                     "examined {}, moved {}, retired {}, held elsewhere {}",
                     done.examined, done.moved, done.retired, done.held
                 ),
+                idle: done.examined == 0,
             })
         })
     }

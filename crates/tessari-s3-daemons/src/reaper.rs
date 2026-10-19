@@ -54,6 +54,7 @@ impl Daemon for UploadReaper {
                 })?;
             Ok(Report {
                 message: format!("examined {}, aborted {}", done.examined, done.aborted),
+                idle: done.examined == 0,
             })
         })
     }

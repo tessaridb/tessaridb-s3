@@ -37,7 +37,11 @@ pub async fn run(daemon: Arc<dyn Daemon>, mut shutdown: watch::Receiver<bool>) -
                 match tokio::time::timeout(timeout, daemon.run_once()).await {
                     Ok(Ok(report)) => {
                         runs.succeeded = runs.succeeded.saturating_add(1);
-                        tracing::info!(daemon = name, result = %report.message, "daemon run completed");
+                        if report.idle {
+                            tracing::debug!(daemon = name, result = %report.message, "daemon run completed");
+                        } else {
+                            tracing::info!(daemon = name, result = %report.message, "daemon run completed");
+                        }
                     }
                     Ok(Err(error)) => {
                         runs.failed = runs.failed.saturating_add(1);
