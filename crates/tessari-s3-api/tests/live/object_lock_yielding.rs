@@ -271,3 +271,83 @@ async fn a_bucket_without_object_lock_refuses_what_it_could_not_keep() {
     .await;
     assert_eq!(refused(&undigested), (400, Some("InvalidRequest")));
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn governance_settings_are_only_extended_without_the_bypass() {
+    let _why = IGNORED;
+    let (state, planter, _) = fresh_with(scratch_dir()).await;
+    let lockable = vec![("x-amz-bucket-object-lock-enabled", "true")];
+    assert_eq!(
+        call_with(&state, "PUT", "/held", vec![], lockable, b"")
+            .await
+            .status,
+        200
+    );
+    let until = in_an_hour();
+    let put = locked_put(
+        &state,
+        "/held/k",
+        "kept",
+        &[
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+            ("x-amz-object-lock-retain-until-date", until.as_str()),
+        ],
+    )
+    .await;
+    let id = version_header(&put).expect("a version id");
+    let retention = |mode: &str, at: &str| {
+        format!("<Retention><Mode>{mode}</Mode><RetainUntilDate>{at}</RetainUntilDate></Retention>")
+    };
+    // Governance keeps a version's lock settings from changing, except that its period may be extended.
+    let moved = put_document(
+        &state,
+        "/held/k",
+        "retention",
+        &retention("COMPLIANCE", &until),
+        &[],
+    )
+    .await;
+    assert_eq!(
+        refused(&moved),
+        (403, Some("AccessDenied")),
+        "{}",
+        moved.body
+    );
+    let later = from_now(7200);
+    let extended = put_document(
+        &state,
+        "/held/k",
+        "retention",
+        &retention("GOVERNANCE", &later),
+        &[],
+    )
+    .await;
+    assert_eq!(extended.status, 200, "{}", extended.body);
+    // The store's own event holds the same line against a statement that goes around the server.
+    let record = version_record(&planter, "held", "k", &id).await;
+    let direct = planter
+        .run(
+            "UPDATE versions:$target SET lock_mode = 'COMPLIANCE';",
+            vec![("target".to_owned(), Value::Bytes(record))],
+        )
+        .await
+        .expect_err("the store refused the mode change");
+    assert!(direct.to_string().contains("ObjectLocked:"), "{direct}");
+    // Who administers the bucket and asks for the bypass may change it.
+    let bypassed = put_document(
+        &state,
+        "/held/k",
+        "retention",
+        &retention("COMPLIANCE", &later),
+        &[BYPASS],
+    )
+    .await;
+    assert_eq!(bypassed.status, 200, "{}", bypassed.body);
+    let read = call(&state, "GET", "/held/k", vec![("retention", None)], b"").await;
+    assert!(
+        read.body.contains("<Mode>COMPLIANCE</Mode>"),
+        "{}",
+        read.body
+    );
+}

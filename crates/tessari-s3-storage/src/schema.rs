@@ -225,7 +225,7 @@ DEFINE EVENT OR REPLACE locked_change ON versions FOR UPDATE \
 WHEN ($before.retain_until != NONE AND $before.retain_until > time::now() \
   AND ($before.lock_mode = 'COMPLIANCE' OR ($before.lock_bypass ?? false) = false) \
   AND ($after.retain_until = NONE OR $after.retain_until < $before.retain_until \
-   OR ($before.lock_mode = 'COMPLIANCE' AND $after.lock_mode != 'COMPLIANCE') \
+   OR $after.lock_mode != $before.lock_mode \
    OR $after.data != $before.data OR $after.upload != $before.upload)) \
  OR (($before.legal_hold ?? false) AND ($after.data != $before.data OR $after.upload != $before.upload)) \
 THEN THROW 'ObjectLocked: this version is under retention or a legal hold';
