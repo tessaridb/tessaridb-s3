@@ -163,7 +163,8 @@ impl MultipartRepository for TessariMultipart {
             .pool
             .run(
                 "SELECT bucket_name, key, incarnation, headers, metadata, tags, checksum_algorithm, checksum_type, \
-                 sse, sse_kms, sse_c_salt, sse_c_verifier, initiated, position FROM ONLY uploads:$upload;",
+                 sse, sse_kms, sse_c_salt, sse_c_verifier, lock_mode, retain_until, legal_hold, initiated, position \
+                 FROM ONLY uploads:$upload;",
                 parameters,
             )
             .await?;
@@ -202,6 +203,15 @@ impl MultipartRepository for TessariMultipart {
                     _ => return Err(malformed("sse")),
                 },
                 customer: crate::objects::entity::customer_seal(&fields)?,
+                lock: {
+                    let stored = crate::objects::entity::stored_lock(&fields)?;
+                    crate::objects::Lock {
+                        retention: stored
+                            .retention
+                            .map(|(mode, until)| (mode, crate::objects::RetainUntil::At(until))),
+                        legal_hold: stored.legal_hold,
+                    }
+                },
             },
             opened: match fields.get("position") {
                 Some(Value::String(position)) => Some(OpenUpload {

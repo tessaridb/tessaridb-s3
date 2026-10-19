@@ -101,14 +101,8 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
         Some(customer) => Some(admit(call, customer).await?),
         None => None,
     };
-    // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
-    // carried yet, and are refused rather than dropped.
-    if headers.lock.asked {
-        return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "Object Lock headers on a multipart upload are not implemented; the bucket's default retention applies",
-        ));
-    }
+    // The lock asked for here is the completed version's; without one it takes the bucket's default then.
+    crate::routes::retention::admit_upload_lock(call, &headers.lock).await?;
     let (checksum_algorithm, checksum_type) = declared_checksum(call)?;
     let upload = NewUpload {
         headers: headers.system,
@@ -124,6 +118,7 @@ pub(crate) async fn create(call: &Call<'_>, key: &ObjectKey) -> Result<Response<
             }
         },
         customer,
+        lock: headers.lock.lock(),
     };
     let bucket = call.bucket()?;
     let Created::Created(id, initiated) = call

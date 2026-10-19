@@ -222,12 +222,11 @@ pub(crate) async fn complete(
             .ok_or_else(no_such_upload)?;
         admit_key(call, declared.customer.as_ref(), Some(customer))?;
     }
-    // A multipart object takes its bucket's default retention when it completes; per-upload lock headers are not
-    // carried yet, and are refused rather than dropped.
+    // The upload's lock was fixed when it was created; one asked for now would be dropped, so it is refused.
     if headers.lock.asked {
         return Err(Error::new(
-            ErrorCode::NotImplemented,
-            "Object Lock headers on a multipart upload are not implemented; the bucket's default retention applies",
+            ErrorCode::InvalidRequest,
+            "Object Lock headers are given to CreateMultipartUpload, not to its completion",
         ));
     }
     let size = call

@@ -74,6 +74,17 @@ pub(crate) async fn admit_lock(
     Ok(())
 }
 
+/// An upload's Object Lock headers are taken only by a bucket with Object Lock; its parts carry the bytes.
+pub(crate) async fn admit_upload_lock(
+    call: &Call<'_>,
+    asked: &crate::routes::objects::headers::LockAsked,
+) -> Result<()> {
+    if asked.asked && existing(call).await?.object_lock.is_none() {
+        return Err(missing_lock());
+    }
+    Ok(())
+}
+
 fn answered(outcome: LockOutcome) -> Result<(String, tessari_s3_storage::objects::VersionLock)> {
     match outcome {
         LockOutcome::Version { version_id, lock } => Ok((version_id, lock)),
