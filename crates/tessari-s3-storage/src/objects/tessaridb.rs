@@ -1,6 +1,6 @@
 //! Objects in TessariDB: one `objects` record per key, id `<bucket>/<key>`; every value is bound.
 
-use tessari_s3_constants::RECLAIM_RETRY_SECS;
+use tessari_s3_constants::{CLAIM_RETRY_ATTEMPTS, CLAIM_RETRY_BACKOFF_MS, RECLAIM_RETRY_SECS};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
@@ -154,7 +154,21 @@ impl ObjectRepository for TessariObjects {
     }
 
     async fn claim_next(&self) -> Result<Option<([u8; 16], bool)>> {
-        let answers = self.pool.run("CLAIM FROM reclaims;", Vec::new()).await?;
+        // Two reclaimers reaching for one head, or a writer queuing beside it, collide: the store answers the loser
+        // `retry` and waits for nobody, so the claim is asked again after a growing wait. A refused claim took nothing.
+        let mut attempt: u32 = 1;
+        let answers = loop {
+            match self.pool.run("CLAIM FROM reclaims;", Vec::new()).await {
+                Err(error)
+                    if error.is_class(RefusalClass::Retry) && attempt < CLAIM_RETRY_ATTEMPTS =>
+                {
+                    tokio::time::sleep(crate::backoff::backoff(attempt, CLAIM_RETRY_BACKOFF_MS))
+                        .await;
+                    attempt = attempt.saturating_add(1);
+                }
+                outcome => break outcome?,
+            }
+        };
         let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
             return Ok(None);
         };
