@@ -143,9 +143,11 @@ pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 /// Milliseconds of back-off per attempt between schema retries (20, 40, 60 … ms).
 pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
 
-/// Times a node proposes the first layout when the store answers `retry` (another proposal committed after this
-/// one's snapshot): the next attempt sees the committed layout and reads it back.
-pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
+/// Times a node proposes a layout when the store answers `retry` (another proposal committed after this one's
+/// snapshot). The committed layout is seen once its group is synced, so each attempt waits first (Q-S3-90).
+pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 8;
+/// Milliseconds per attempt a layout proposal waits before it is made again; about 0.7 s over every attempt.
+pub const LAYOUT_PROPOSE_BACKOFF_MS: u64 = 25;
 
 /// Times an action is appended to the action record when the store answers `retry` (another action committed to the
 /// record after this one's snapshot); a refused append wrote nothing, so the next attempt cannot duplicate it.

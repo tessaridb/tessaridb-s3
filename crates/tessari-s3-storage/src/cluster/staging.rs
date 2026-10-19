@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use tessari_s3_constants::LAYOUT_PROPOSE_ATTEMPTS;
+use tessari_s3_constants::{LAYOUT_PROPOSE_ATTEMPTS, LAYOUT_PROPOSE_BACKOFF_MS};
 use tessari_s3_core::erasure::{Code, Layout, LayoutError, LayoutNode};
 use tessari_s3_infrastructure::tessaridb::RefusalClass;
 use tessari_s3_types::{NodeId, Zone};
@@ -155,6 +155,8 @@ pub(super) async fn apply_of(
             {
                 tracing::debug!(attempt, error = %error, "layout apply contended; applying again");
                 attempt = attempt.saturating_add(1);
+                tokio::time::sleep(crate::backoff::backoff(attempt, LAYOUT_PROPOSE_BACKOFF_MS))
+                    .await;
             }
             outcome => break outcome?,
         }
