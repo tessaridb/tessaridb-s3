@@ -57,7 +57,8 @@ async fn main() -> anyhow::Result<()> {
         None => Storage::new(pool, &config.region, config.data_dir.clone())?,
     }
     .with_iam_key(config.iam_key.clone())
-    .with_reclaim_grace(config.reclaim_grace_secs);
+    .with_reclaim_grace(config.reclaim_grace_secs)
+    .with_data_floor(config.data_min_free_bytes);
     // The schema is applied before the listener opens: a node whose metadata store cannot be reached does not
     // start, rather than answering every request 503.
     storage.prepare().await?;

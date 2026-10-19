@@ -24,6 +24,8 @@ pub(super) enum Refusal {
     Corrupt,
     /// Past the in-flight limit.
     Shed,
+    /// The data drive is below its free-space floor.
+    DriveFull,
     /// The drive or the node failed.
     Internal,
 }
@@ -63,6 +65,11 @@ impl Refusal {
                 "slow_down",
                 "too many requests in flight",
             ),
+            Self::DriveFull => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "drive_full",
+                "the data drive is below its free-space floor",
+            ),
             Self::Internal => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal",
@@ -98,6 +105,7 @@ impl From<StorageError> for Refusal {
                 ..
             } => Self::Busy,
             StorageError::Corrupt { .. } => Self::Corrupt,
+            StorageError::DriveFull { .. } => Self::DriveFull,
             other => {
                 tracing::error!(error = %other, "internal shard request failed");
                 Self::Internal

@@ -24,6 +24,8 @@ pub(crate) struct DataFiles {
     block_size: u32,
     /// Reads of this node's data that failed verification since start: a block hash, a header or a length.
     failed: Arc<AtomicU64>,
+    /// Bytes the drive must keep available for a new file to be started (0: none); shared by every clone.
+    pub(super) floor: Arc<AtomicU64>,
 }
 
 /// An open data file whose header and length were checked. The handle is shared read-only with the blocking pool:
@@ -99,6 +101,7 @@ impl DataFiles {
             root,
             block_size,
             failed: Arc::new(AtomicU64::new(0)),
+            floor: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -178,6 +181,7 @@ impl DataFiles {
         block_size: u32,
         sealed: bool,
     ) -> Result<DataWriter> {
+        self.check_floor().await?;
         let (path, temp) = self.piece_paths(id, piece);
         let header = encode_header(block_size, id, piece, sealed);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();

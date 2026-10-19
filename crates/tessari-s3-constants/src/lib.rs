@@ -177,6 +177,10 @@ pub const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;
 /// `TESSARIDB_S3_RECLAIM_GRACE_SECS` is unset: longer than any upload and any read in flight.
 pub const DEFAULT_RECLAIM_GRACE_SECS: u64 = 24 * 60 * 60;
 
+/// Bytes a node's data drive keeps available when `TESSARIDB_S3_DATA_MIN_FREE_BYTES` is unset (1 GiB): below it no new
+/// data file is started, so the node refuses writes and keeps serving reads instead of filling the drive.
+pub const DEFAULT_DATA_MIN_FREE_BYTES: u64 = 1024 * 1024 * 1024;
+
 /// Seconds between reclamation passes, when `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` is unset.
 pub const DEFAULT_RECLAIM_INTERVAL_SECS: u64 = 300;
 

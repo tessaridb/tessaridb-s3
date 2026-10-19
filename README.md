@@ -115,6 +115,7 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_META_MAX_CONNECTIONS` | `32` | connections to the metadata store; at most 4 new ones sign in at once, because a node verifies at most 24 passwords at once for all its clients — a sign-in it still declines answers `503 SlowDown` |
 | `TESSARIDB_S3_META_STATEMENT_TIMEOUT_SECS` | `30` | how long a metadata statement may wait for its answer; past it the request answers `503` and a write's data stays queued, because the statement may have committed |
 | `TESSARIDB_S3_DATA_DIR` | required | where every object's bytes are stored (`<dir>/s3data/…`); unset, the node refuses to start |
+| `TESSARIDB_S3_DATA_MIN_FREE_BYTES` | `1073741824` | space the data drive keeps available: below it the node starts no new data file, so writes answer `503 ServiceUnavailable` (on a cluster, the node refuses its shards and the write needs k others) while reads are still served; `0` turns it off. `s3_data_free_bytes` shows how close a node is |
 | `TESSARIDB_S3_RECLAIM_GRACE_SECS` | `86400` | how long a replaced, deleted or abandoned data file is kept before the reclaimer removes it; recorded in the metadata store at start and applied to files queued from then on |
 | `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` | `300` | time between reclamation passes |
 | `TESSARIDB_S3_USAGE_INTERVAL_SECS` | `60` | time between passes measuring each bucket's objects and bytes; every node runs one and one member measures per pass |

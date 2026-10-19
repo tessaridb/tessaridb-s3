@@ -18,6 +18,7 @@ mod bitrot;
 mod commit_crash;
 mod disk;
 mod docker;
+mod drive_floor;
 mod faults;
 mod heal_load;
 mod join;

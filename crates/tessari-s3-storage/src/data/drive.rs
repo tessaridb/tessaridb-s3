@@ -1,5 +1,7 @@
 //! How full this node's data drive is: the filesystem holding the data directory, as the operating system reports it.
 
+use std::sync::atomic::Ordering;
+
 use super::files::{DataFiles, io};
 use crate::{Error, Result};
 
@@ -67,6 +69,27 @@ impl DataFiles {
             op: "statvfs",
             kind: std::io::ErrorKind::Other,
         })?
+    }
+}
+
+impl DataFiles {
+    /// Starts no new data file while the drive has fewer than `bytes` available to this process; 0 turns the floor
+    /// off. Every clone shares it.
+    pub(crate) fn set_floor(&self, bytes: u64) {
+        self.floor.store(bytes, Ordering::Relaxed);
+    }
+
+    /// [`Error::DriveFull`] while the drive is below the floor. One `statvfs` per new file, off the async workers.
+    pub(super) async fn check_floor(&self) -> Result<()> {
+        let floor = self.floor.load(Ordering::Relaxed);
+        if floor == 0 {
+            return Ok(());
+        }
+        let available = self.drive().await?.available;
+        if available < floor {
+            return Err(Error::DriveFull { available, floor });
+        }
+        Ok(())
     }
 }
 
