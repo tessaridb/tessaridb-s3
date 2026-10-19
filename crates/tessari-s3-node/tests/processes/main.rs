@@ -19,6 +19,7 @@ mod commit_crash;
 mod disk;
 mod docker;
 mod faults;
+mod heal_load;
 mod join;
 mod meta;
 mod notify;

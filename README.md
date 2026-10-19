@@ -231,7 +231,8 @@ TessariDB cluster, kill an S3 node while a write or a read is in flight and kill
 traffic, then check that every acknowledged object reads back whole and nothing else is visible. They also stop a
 node inside a commit, at exit points only the test build has, and check that the write left no torn object and
 no unreclaimed shard. One cuts a node off from its peers through a proxy that swallows its traffic, writes
-through the others, and checks that the node is healed once the cut ends.
+through the others, and checks that the node is healed once the cut ends. Another heals a returning node while
+readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once.
 
 ## Measuring
 
