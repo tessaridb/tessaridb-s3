@@ -228,7 +228,9 @@ With the same variables, `cargo test -p tessari-s3-node --test processes -- --ig
 starts six `tessaridb-s3` processes as one 4+2 cluster and kills some of them. The same command runs the fault
 tests, which need Docker and the `tessaridb/tessaridb:0.36.2` image: they start their own three-node
 TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
-traffic, then check that every acknowledged object reads back whole and nothing else is visible.
+traffic, then check that every acknowledged object reads back whole and nothing else is visible. They also stop a
+node inside a commit, at exit points only the test build has, and check that the write left no torn object and
+no unreclaimed shard.
 
 ## Measuring
 

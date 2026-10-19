@@ -89,7 +89,13 @@ impl ObjectService {
         object: &NewObject,
         condition: &WriteCondition,
     ) -> Result<Written> {
+        // The object's bytes are durable and its record is not yet written.
+        crate::fault::exit_at("before-commit");
         let outcome = self.commit(bucket, key, object, condition).await?;
+        if matches!(outcome, Written::Committed { .. }) {
+            // The record is written and the client has not been answered.
+            crate::fault::exit_at("after-commit");
+        }
         if let (Content::Data(id), false) = (
             &object.content,
             matches!(outcome, Written::Committed { .. }),

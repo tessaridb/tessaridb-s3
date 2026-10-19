@@ -26,6 +26,8 @@ anyhow.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+# The process tests stop nodes inside a commit (G022 C2).
+tessari-s3-storage = { workspace = true, features = ["fault-points"] }
 tessari-s3-types.workspace = true
 tokio = { workspace = true, features = ["process", "net", "time"] }
 reqwest.workspace = true

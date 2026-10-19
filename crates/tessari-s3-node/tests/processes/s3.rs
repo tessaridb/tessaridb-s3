@@ -341,22 +341,26 @@ impl Cluster {
 
     /// Starts node `index` again as it was: its name, its addresses and its data directory.
     pub async fn restart(&mut self, index: usize) {
+        self.restart_with(index, &[]).await;
+    }
+
+    /// As [`Cluster::restart`], with `extra` added to the node's variables.
+    pub async fn restart_with(&mut self, index: usize, extra: &[(&str, &str)]) {
         let old = &self.nodes[index];
         let (name, addresses, dir) = (
             old.name.clone(),
             (old.s3.clone(), old.internal.clone()),
             old.dir.clone(),
         );
-        self.nodes[index] = launch(
+        let cluster = (
             &self.settings,
-            &self.tls,
-            &self.namespace,
-            &name,
-            &self.logs,
-            addresses,
-            dir,
-        )
-        .await;
+            self.tls.as_path(),
+            self.namespace.as_str(),
+            self.logs.as_path(),
+        );
+        self.nodes[index] = spawn(cluster, &name, addresses, dir, extra)
+            .await
+            .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
     }
 }
 

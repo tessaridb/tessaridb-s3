@@ -10,6 +10,7 @@ pub mod data;
 pub mod encryption;
 pub mod erasure;
 mod error;
+mod fault;
 pub mod groups;
 pub mod identities;
 pub mod keys;

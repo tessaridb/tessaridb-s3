@@ -7,6 +7,10 @@ license.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+# Exit points a process test arms to stop a node inside a commit; never in a released build.
+fault-points = []
+
 [dependencies]
 tessari-s3-core.workspace = true
 tessari-s3-types.workspace = true

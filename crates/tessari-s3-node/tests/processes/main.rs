@@ -15,6 +15,7 @@ mod signer;
 
 mod acknowledge;
 mod bitrot;
+mod commit_crash;
 mod disk;
 mod docker;
 mod faults;
