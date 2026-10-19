@@ -1,6 +1,6 @@
 //! How the delivery workers hold, retry and give up the events they send to notification destinations.
 
-/// Seconds a delivery worker holds an event before the group hands it out again — longer than one delivery may take.
+/// Seconds a delivery worker holds an event before the group hands it out again: longer than one delivery may take.
 pub const NOTIFY_ACK_DEADLINE_SECS: u64 = 60;
 
 /// Hand-outs of one event before it is given up and kept in the `object_events_dead` topic.
