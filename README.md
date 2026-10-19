@@ -230,7 +230,8 @@ tests, which need Docker and the `tessaridb/tessaridb:0.36.2` image: they start 
 TessariDB cluster, kill an S3 node while a write or a read is in flight and kill the metadata leader under
 traffic, then check that every acknowledged object reads back whole and nothing else is visible. They also stop a
 node inside a commit, at exit points only the test build has, and check that the write left no torn object and
-no unreclaimed shard.
+no unreclaimed shard. One cuts a node off from its peers through a proxy that swallows its traffic, writes
+through the others, and checks that the node is healed once the cut ends.
 
 ## Measuring
 

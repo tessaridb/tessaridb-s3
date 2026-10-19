@@ -22,6 +22,7 @@ mod faults;
 mod join;
 mod meta;
 mod notify;
+mod partition;
 mod requests;
 mod s3;
 mod zones;
