@@ -6,6 +6,8 @@ pub fn init() {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt()
         .json()
+        // A failed event write would be reported with `eprintln!`, which panics (and aborts) when stderr fails too.
+        .log_internal_errors(false)
         .with_env_filter(filter)
         .init();
 }
