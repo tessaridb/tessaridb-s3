@@ -148,6 +148,10 @@ impl MultipartRepository for TessariMultipart {
         pending::initiated_before(&self.pool, cutoff, limit).await
     }
 
+    async fn open_count(&self, limit: usize) -> Result<usize> {
+        pending::open_count(&self.pool, limit).await
+    }
+
     async fn pending(
         &self,
         bucket: &BucketName,

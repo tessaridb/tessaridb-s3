@@ -15,6 +15,7 @@ use crate::metrics_labels::{
     AuthRefusal, DurationLabels, OperationLabels, ReasonLabels, RequestLabels, Served,
     SourceLabels, Unlabelled, gauge_value, size_class,
 };
+use crate::metrics_state::StateMetrics;
 use crate::{Error, Result};
 
 /// A duration histogram from 1 ms to about 33 s.
@@ -43,6 +44,7 @@ pub struct Metrics {
     audit_dropped: Counter,
     audit_failed: Counter,
     verification_failures: Counter,
+    state: StateMetrics,
 }
 
 impl Default for Metrics {
@@ -156,6 +158,7 @@ impl Metrics {
             registry.register(name, help, counter.clone());
             counter
         });
+        let state = StateMetrics::register(&mut registry, env!("CARGO_PKG_VERSION"));
         Self {
             registry,
             requests,
@@ -175,7 +178,14 @@ impl Metrics {
             audit_dropped,
             audit_failed,
             verification_failures,
+            state,
         }
+    }
+
+    /// The node's state and health series.
+    #[must_use]
+    pub const fn state(&self) -> &StateMetrics {
+        &self.state
     }
 
     /// Counts one served request.

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use tessari_s3_observability::{Metrics, RunOutcome};
 use tokio::sync::watch;
 
 use crate::daemon::Daemon;
@@ -17,9 +18,14 @@ pub struct Runs {
     pub timed_out: u64,
 }
 
-/// Runs `daemon` every interval until `shutdown` changes or its sender is dropped. A run that is under way when
-/// shutdown arrives finishes or reaches its timeout first; no new run starts after it.
-pub async fn run(daemon: Arc<dyn Daemon>, mut shutdown: watch::Receiver<bool>) -> Runs {
+/// Runs `daemon` every interval until `shutdown` changes or its sender is dropped, counting each run by its outcome in
+/// `metrics`. A run that is under way when shutdown arrives finishes or reaches its timeout first; no new run starts
+/// after it.
+pub async fn run(
+    daemon: Arc<dyn Daemon>,
+    mut shutdown: watch::Receiver<bool>,
+    metrics: Arc<Metrics>,
+) -> Runs {
     let name = daemon.name();
     let timeout = daemon.timeout();
     let mut ticker = tokio::time::interval(daemon.interval());
@@ -37,6 +43,7 @@ pub async fn run(daemon: Arc<dyn Daemon>, mut shutdown: watch::Receiver<bool>) -
                 match tokio::time::timeout(timeout, daemon.run_once()).await {
                     Ok(Ok(report)) => {
                         runs.succeeded = runs.succeeded.saturating_add(1);
+                        metrics.state().run(name, RunOutcome::Succeeded);
                         if report.idle {
                             tracing::debug!(daemon = name, result = %report.message, "daemon run completed");
                         } else {
@@ -45,10 +52,12 @@ pub async fn run(daemon: Arc<dyn Daemon>, mut shutdown: watch::Receiver<bool>) -
                     }
                     Ok(Err(error)) => {
                         runs.failed = runs.failed.saturating_add(1);
+                        metrics.state().run(name, RunOutcome::Failed);
                         tracing::error!(daemon = name, error = %error, "daemon run failed");
                     }
                     Err(_) => {
                         runs.timed_out = runs.timed_out.saturating_add(1);
+                        metrics.state().run(name, RunOutcome::TimedOut);
                         tracing::error!(daemon = name, timeout_secs = timeout.as_secs(), "daemon run timed out");
                     }
                 }

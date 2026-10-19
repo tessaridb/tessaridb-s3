@@ -5,6 +5,7 @@ mod console;
 mod error;
 mod internal;
 mod metrics;
+mod metrics_state;
 mod pipeline;
 mod principals;
 pub mod routes;

@@ -67,6 +67,12 @@ async fn a_flipped_byte_in_a_shard_is_read_around_healed_and_counted() {
         .and_then(|value| value.trim().parse::<u64>().ok())
         .expect("the counter is exported");
     assert!(failed >= 1, "counted on the node holding the shard: {text}");
+    // The heal that rewrote the shard ran as a daemon, and the running node counts its runs.
+    assert!(
+        text.lines().any(|line| line
+            .starts_with("s3_daemon_runs_total{daemon=\"healer\",outcome=\"succeeded\"} ")),
+        "the healer's runs are counted: {text}"
+    );
 }
 
 /// The file under `dir` whose name ends with `suffix`.

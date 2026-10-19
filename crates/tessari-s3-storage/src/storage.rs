@@ -298,3 +298,6 @@ impl Storage {
         &self.identities
     }
 }
+
+#[path = "storage_probe.rs"]
+mod probe;

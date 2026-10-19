@@ -274,3 +274,15 @@ pub(super) async fn initiated_before(
         })
         .collect()
 }
+
+/// How many uploads are open, counted up to `limit`: every open upload has its place in the listing order.
+pub(super) async fn open_count(pool: &MetaPool, limit: usize) -> Result<usize> {
+    let parameters = vec![("limit".to_owned(), crate::params::count(limit))];
+    let answers = pool
+        .run("SELECT upload FROM pending LIMIT $limit;", parameters)
+        .await?;
+    Ok(match answers.into_iter().next() {
+        Some(Answer::Records { records, .. }) => records.len(),
+        _ => 0,
+    })
+}

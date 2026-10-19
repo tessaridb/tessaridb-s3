@@ -260,6 +260,14 @@ impl MultipartService {
         }
     }
 
+    /// How many uploads are open, counted up to `limit`.
+    ///
+    /// # Errors
+    /// The metadata store's refusal or outage.
+    pub async fn open_count(&self, limit: usize) -> Result<usize> {
+        self.repository.open_count(limit).await
+    }
+
     /// Ends upload `id`: its record and every part go, and every part's data is queued for reclamation.
     ///
     /// # Errors

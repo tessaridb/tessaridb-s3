@@ -85,6 +85,9 @@ async fn main() -> anyhow::Result<()> {
         membership::take_place(cluster, &storage).await?;
         tracing::info!(node = cluster.node.as_str(), zone = cluster.zone.as_ref().map(|zone| zone.as_str()), code = %format_args!("{}+{}", cluster.code.data(), cluster.code.parity()), "registered with the cluster");
     }
+    // Built before the daemons start, so their runs are counted in the metrics it serves.
+    let state = ApiState::new(&config, ApiState::system_clock(), storage.clone());
+    let counted = Arc::clone(state.metrics());
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut daemons = JoinSet::new();
     let reclaimer = Reclaimer::new(
@@ -92,13 +95,17 @@ async fn main() -> anyhow::Result<()> {
         config.reclaim_grace_secs,
         Duration::from_secs(config.reclaim_interval_secs),
     );
-    daemons.spawn(run(Arc::new(reclaimer), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(reclaimer),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     if let Some(cluster) = &config.cluster {
         let healer = Healer::new(
             storage.objects().clone(),
             Duration::from_secs(cluster.heal_interval_secs),
         );
-        daemons.spawn(run(Arc::new(healer), stop_rx.clone()));
+        daemons.spawn(run(Arc::new(healer), stop_rx.clone(), Arc::clone(&counted)));
         let mover = Mover::new(
             storage.objects().clone(),
             Duration::from_secs(cluster.heal_interval_secs),
@@ -106,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
             cluster.move_bytes_per_sec,
             stop_rx.clone(),
         );
-        daemons.spawn(run(Arc::new(mover), stop_rx.clone()));
+        daemons.spawn(run(Arc::new(mover), stop_rx.clone(), Arc::clone(&counted)));
     }
     // Uploads can be opened without a data directory, so the reaper always runs.
     let reaper = UploadReaper::new(
@@ -114,13 +121,17 @@ async fn main() -> anyhow::Result<()> {
         config.upload_max_age_secs,
         Duration::from_secs(config.reclaim_interval_secs),
     );
-    daemons.spawn(run(Arc::new(reaper), stop_rx.clone()));
+    daemons.spawn(run(Arc::new(reaper), stop_rx.clone(), Arc::clone(&counted)));
     // Due buckets are looked for as often as uploads are reaped; the queue decides which are due.
     let lifecycle = LifecycleWorker::new(
         storage.lifecycle(),
         Duration::from_secs(config.reclaim_interval_secs),
     );
-    daemons.spawn(run(Arc::new(lifecycle), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(lifecycle),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     // Replication: this node records where its region's S3 surface is reached, then sends the region's queued
     // versions through the group, every node taking turns on it.
     let replication = storage.replication();
@@ -132,7 +143,11 @@ async fn main() -> anyhow::Result<()> {
         storage.clone(),
         tessari_s3_infrastructure::ReplicaClient::new()?,
     );
-    daemons.spawn(run(Arc::new(replicator), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(replicator),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     // Each declared destination reads the event topic through its own group, on every node: the group's record
     // takes the nodes in turns, so an event goes to one of them at a time.
     // The database's own topic is the default destination and always delivered to; declared ones are alternatives.
@@ -153,7 +168,11 @@ async fn main() -> anyhow::Result<()> {
         Destination::Topic(notifications.clone()),
         config.region.clone(),
     );
-    daemons.spawn(run(Arc::new(default_worker), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(default_worker),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     if !config.notify_targets.is_empty() {
         let client = tessari_s3_infrastructure::WebhookClient::new()?;
         for target in &config.notify_targets {
@@ -172,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
                 destination,
                 config.region.clone(),
             );
-            daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
+            daemons.spawn(run(Arc::new(worker), stop_rx.clone(), Arc::clone(&counted)));
         }
     }
     // Every node plans the renditions of the objects the media group hands it and renders image tasks from the shared
@@ -180,7 +199,11 @@ async fn main() -> anyhow::Result<()> {
     let media = storage.media();
     media.define().await?;
     let planner = MediaPlanner::new(media.clone(), storage.objects().clone());
-    daemons.spawn(run(Arc::new(planner), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(planner),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     let consumer = config.cluster.as_ref().map_or_else(
         || "single".to_owned(),
         |cluster| cluster.node.as_str().to_owned(),
@@ -191,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
     }
     for _ in 0..config.media_workers {
         let worker = ImageWorker::new(media.clone(), storage.objects().clone(), consumer.clone());
-        daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
+        daemons.spawn(run(Arc::new(worker), stop_rx.clone(), Arc::clone(&counted)));
     }
     // Only a node with ffmpeg takes video and poster tasks; the others leave them in the queue for it.
     if let Some(ffmpeg) = &config.ffmpeg {
@@ -202,20 +225,27 @@ async fn main() -> anyhow::Result<()> {
             tessari_s3_infrastructure::media_video::Ffmpeg::new(ffmpeg.clone()),
             std::env::temp_dir(),
         );
-        daemons.spawn(run(Arc::new(worker), stop_rx.clone()));
+        daemons.spawn(run(Arc::new(worker), stop_rx.clone(), Arc::clone(&counted)));
     }
     // After a rotation, each node re-wraps what is still under an older server key it holds.
     let rewrapper = Rewrapper::new(storage.objects().clone());
-    daemons.spawn(run(Arc::new(rewrapper), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(rewrapper),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),
         Duration::from_secs(config.usage_interval_secs),
     );
-    daemons.spawn(run(Arc::new(scanner), stop_rx.clone()));
+    daemons.spawn(run(
+        Arc::new(scanner),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
     let console = console::surface(&config, &storage, stop_rx.clone()).await?;
-    let state = ApiState::new(&config, ApiState::system_clock(), storage);
     // People the console's identity provider vouches for may ask the S3 surface for temporary credentials.
     if let Some(console) = &config.console
         && let Some(settings) = &console.oidc

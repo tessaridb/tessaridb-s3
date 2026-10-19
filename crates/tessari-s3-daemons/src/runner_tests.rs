@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use tessari_s3_observability::Metrics;
 use tokio::sync::watch;
 
 use super::{Runs, run};
@@ -55,13 +56,20 @@ impl Daemon for Fake {
 
 /// Runs a fake for `ticks` intervals of virtual time, then signals shutdown and returns what the runner counted.
 async fn drive(behaviour: &'static str, ticks: u64) -> (Runs, u64) {
+    let (runs, started, _) = drive_counted(behaviour, ticks).await;
+    (runs, started)
+}
+
+/// As [`drive`], with the metrics the runner counted into, encoded.
+async fn drive_counted(behaviour: &'static str, ticks: u64) -> (Runs, u64, String) {
     let started = Arc::new(AtomicU64::new(0));
     let daemon = Arc::new(Fake {
         behaviour,
         started: Arc::clone(&started),
     });
     let (stop, stopped) = watch::channel(false);
-    let runner = tokio::spawn(run(daemon, stopped));
+    let metrics = Arc::new(Metrics::new());
+    let runner = tokio::spawn(run(daemon, stopped, Arc::clone(&metrics)));
     // The first tick fires at once; each later one after the interval (plus a run's timeout when it hangs).
     tokio::time::sleep(Duration::from_secs(
         ticks.saturating_mul(15).saturating_add(1),
@@ -69,7 +77,8 @@ async fn drive(behaviour: &'static str, ticks: u64) -> (Runs, u64) {
     .await;
     stop.send(true).expect("runner listening");
     let runs = runner.await.expect("runner returns");
-    (runs, started.load(Ordering::Relaxed))
+    let text = metrics.encode().expect("encoded");
+    (runs, started.load(Ordering::Relaxed), text)
 }
 
 #[tokio::test(start_paused = true)]
@@ -103,7 +112,7 @@ async fn a_dropped_sender_also_stops_the_runner() {
         started: Arc::new(AtomicU64::new(0)),
     });
     let (stop, stopped) = watch::channel(false);
-    let runner = tokio::spawn(run(daemon, stopped));
+    let runner = tokio::spawn(run(daemon, stopped, Arc::new(Metrics::new())));
     tokio::time::sleep(Duration::from_secs(1)).await;
     drop(stop);
     let runs = tokio::time::timeout(Duration::from_secs(60), runner)
@@ -149,4 +158,23 @@ async fn a_run_that_found_nothing_to_do_is_not_logged_at_info() {
         worked.matches("daemon run completed").count() >= 3,
         "control: a run that did something is logged at INFO: {worked}"
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn every_run_is_counted_in_the_metrics_by_its_outcome() {
+    for (behaviour, outcome) in [
+        ("ok", "succeeded"),
+        ("fail", "failed"),
+        ("hang", "timed_out"),
+    ] {
+        let (runs, _, text) = drive_counted(behaviour, 3).await;
+        let counted = runs
+            .succeeded
+            .saturating_add(runs.failed)
+            .saturating_add(runs.timed_out);
+        assert!(counted > 0, "{runs:?}");
+        let line =
+            format!("s3_daemon_runs_total{{daemon=\"fake\",outcome=\"{outcome}\"}} {counted}");
+        assert!(text.lines().any(|seen| seen == line), "{line} in\n{text}");
+    }
 }
