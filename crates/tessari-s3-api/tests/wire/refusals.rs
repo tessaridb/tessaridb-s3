@@ -194,6 +194,22 @@ async fn a_presigned_url_carrying_what_sdks_add_is_dispatched_by_its_operation()
         "authenticated and dispatched to GetObject, which reaches the unreachable store: {}",
         seen.body
     );
+    // A header name is any case; some SDKs move it as `X-Amz-Checksum-Mode`.
+    let capitalised = presigned(
+        "GET",
+        "/bucket/key",
+        vec![
+            ("X-Amz-Checksum-Mode", Some("ENABLED")),
+            ("x-id", Some("GetObject")),
+        ],
+    );
+    let seen = send(state(NOW, 64), request("GET", &capitalised, &host)).await;
+    assert_eq!(
+        (seen.status, seen.code.as_deref()),
+        (503, Some("ServiceUnavailable")),
+        "{}",
+        seen.body
+    );
 }
 
 #[tokio::test]

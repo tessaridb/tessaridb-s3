@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::body::{Body, HttpBody};
 use axum::extract::{Request, State};
 use axum::http::Response;
-use tessari_s3_core::auth::{AuthError, SignedRequest};
+use tessari_s3_core::auth::{AuthError, SignedRequest, is_signature_parameter};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::dispatch::{DispatchRequest, Method, dispatch, is_implemented};
@@ -196,7 +196,11 @@ async fn serve(
     let moved = moved_headers(&parts.headers, &query)?;
     let query_refs: Vec<(&str, Option<&str>)> = query
         .iter()
-        .filter(|(name, _)| !moved.iter().any(|(moved, _)| moved.as_str() == name))
+        .filter(|(name, _)| {
+            !moved
+                .iter()
+                .any(|(moved, _)| moved.as_str().eq_ignore_ascii_case(name))
+        })
         .map(|(name, value)| (name.as_str(), value.as_deref()))
         .collect();
     let mut header_names: Vec<&str> = headers.iter().map(|(name, _)| *name).collect();
@@ -281,8 +285,8 @@ async fn serve(
     }
 }
 
-/// The `x-amz-*` headers a presigned URL carries in its signed query, as the headers they stand for; empty for any
-/// other request.
+/// The `x-amz-*` headers (any case) a presigned URL carries in its signed query, as the headers they stand for;
+/// empty for any other request.
 ///
 /// # Errors
 /// `InvalidArgument` for one that is also a header with another value, or that is no header at all.
@@ -295,7 +299,10 @@ fn moved_headers(
     }
     let mut moved = Vec::new();
     for (name, value) in query {
-        if !name.starts_with("x-amz-") {
+        let header_like = name
+            .get(..6)
+            .is_some_and(|start| start.eq_ignore_ascii_case("x-amz-"));
+        if !header_like || is_signature_parameter(name) {
             continue;
         }
         let refused = || {
