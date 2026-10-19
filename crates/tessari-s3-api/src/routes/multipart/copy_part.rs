@@ -21,7 +21,7 @@ use crate::routes::objects::customer::{
 use crate::routes::objects::data::Seal;
 use crate::routes::objects::headers::read_integrity;
 use crate::routes::objects::source;
-use crate::routes::objects::sse::{etag_for, opaque_etag};
+use crate::routes::objects::sse::{answer_sse, etag_for, opaque_etag};
 use crate::routes::quota;
 use crate::xml::{S3_NAMESPACE, escape};
 use crate::{Error, Result};
@@ -148,6 +148,9 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
             }
             out.push_str("</CopyPartResult>");
             let mut response = xml_response(StatusCode::OK, out);
+            if let Some(sealing) = &declared.encryption {
+                answer_sse(response.headers_mut(), sealing);
+            }
             if let Some(customer) = &customer {
                 answer_customer(response.headers_mut(), customer);
             }

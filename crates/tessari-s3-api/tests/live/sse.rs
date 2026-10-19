@@ -228,6 +228,11 @@ async fn multipart_parts_and_copies_asked_to_be_encrypted_are_sealed_and_read_wh
     )
     .await;
     assert_eq!(copied.status, 200, "{}", copied.body);
+    assert_eq!(
+        sse_header(&copied),
+        Some(&b"AES256"[..]),
+        "a copied part answers the upload's sealing"
+    );
     let two = text(&copied.body, "ETag").expect("an etag");
     let done = complete(
         &state,
@@ -344,4 +349,83 @@ async fn removing_the_newest_version_leaves_the_sealed_one_before_it_readable() 
     assert_eq!(got.bytes, first, "the older version reads back whole");
     assert_eq!(sse_header(&got), Some(&b"AES256"[..]));
     std::fs::remove_dir_all(dir).expect("cleanup");
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_read_asking_for_the_servers_encryption_is_refused() {
+    let _why = IGNORED;
+    let (state, _, _dir) = fresh_with(scratch_dir()).await;
+    unseal(&state).await;
+    assert_eq!(call(&state, "PUT", "/asked", vec![], b"").await.status, 200);
+    let put = call_with(&state, "PUT", "/asked/sealed", vec![], vec![SSE], b"x").await;
+    assert_eq!(put.status, 200, "{}", put.body);
+    assert_eq!(
+        call(&state, "PUT", "/asked/plain", vec![], b"y")
+            .await
+            .status,
+        200
+    );
+    let kms = ("x-amz-server-side-encryption", "aws:kms");
+    for key in ["/asked/sealed", "/asked/plain"] {
+        for asked in [SSE, kms] {
+            let got = call_with(&state, "GET", key, vec![], vec![asked], b"").await;
+            assert_eq!(
+                refused(&got),
+                (400, Some("InvalidArgument")),
+                "{key} {asked:?}"
+            );
+            let head = call_with(&state, "HEAD", key, vec![], vec![asked], b"").await;
+            assert_eq!(head.status, 400, "{key} {asked:?}");
+        }
+        assert_eq!(
+            call(&state, "GET", key, vec![], b"").await.status,
+            200,
+            "{key} unasked"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_completion_naming_its_uploads_encryption_completes_and_another_is_refused() {
+    let _why = IGNORED;
+    let (state, _, _dir) = fresh_with(scratch_dir()).await;
+    unseal(&state).await;
+    assert_eq!(
+        call(&state, "PUT", "/mpasked", vec![], b"").await.status,
+        200
+    );
+    let start = |path: &'static str, asked: Vec<(&'static str, &'static str)>| {
+        let state = state.clone();
+        async move {
+            let created =
+                call_with(&state, "POST", path, vec![("uploads", None)], asked, b"").await;
+            assert_eq!(created.status, 200, "{}", created.body);
+            let upload = text(&created.body, "UploadId").expect("an upload id");
+            let one = part(&state, path, &upload, "1", b"only").await;
+            assert_eq!(one.status, 200, "{}", one.body);
+            (upload, document(&[("1", etag(&one).as_str())]))
+        }
+    };
+    // Sealed at creation, and named again at completion as many SDKs send it.
+    let (upload, listed) = start("/mpasked/sealed", vec![SSE]).await;
+    let done = complete(&state, "/mpasked/sealed", &upload, vec![SSE], &listed).await;
+    assert_eq!(done.status, 200, "{}", done.body);
+    let read = call(&state, "GET", "/mpasked/sealed", vec![], b"").await;
+    assert_eq!(
+        (read.status, sse_header(&read)),
+        (200, Some(&b"AES256"[..]))
+    );
+    // Created plain: a completion asking for sealing would not be honoured, so it is refused by name.
+    let (upload, listed) = start("/mpasked/plain", vec![]).await;
+    let refused_done = complete(&state, "/mpasked/plain", &upload, vec![SSE], &listed).await;
+    assert_eq!(
+        refused(&refused_done),
+        (400, Some("InvalidRequest")),
+        "{}",
+        refused_done.body
+    );
+    let done = complete(&state, "/mpasked/plain", &upload, vec![], &listed).await;
+    assert_eq!(done.status, 200, "the upload is intact: {}", done.body);
 }

@@ -60,6 +60,13 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
         None => stored(call, key).await?,
     };
     let customer = read_customer(call.headers)?;
+    // The object's own encryption is used; a read naming the server's is refused (GetObject, HeadObject).
+    if call.headers.contains_key("x-amz-server-side-encryption") {
+        return Err(Error::new(
+            ErrorCode::InvalidArgument,
+            "x-amz-server-side-encryption is not sent on a read",
+        ));
+    }
     admit_read(call, &object, customer.as_ref())?;
     let text = |name: &str| call.headers.get(name).and_then(|v| v.to_str().ok());
     let conditions = ReadConditions {
@@ -178,7 +185,8 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             &format!("bytes {start}-{end}/{}", object.size),
         );
     }
-    if part_number.is_some() && sizes.len() > 1 {
+    // Counted for an object uploaded in parts, however many (GetObject, x-amz-mp-parts-count).
+    if part_number.is_some() && matches!(object.content, Content::Parts(_)) {
         set(headers, "x-amz-mp-parts-count", &sizes.len().to_string());
     }
     Ok(response)

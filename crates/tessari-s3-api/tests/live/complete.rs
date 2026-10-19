@@ -487,3 +487,57 @@ async fn a_multipart_object_overwritten_while_read_reads_whole_every_time() {
     writer.await.expect("the writer ran");
     assert!(reads > 1, "the reads did not overlap the overwrites");
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_part_read_of_a_one_part_upload_counts_its_part() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/mpone", vec![], b"").await.status, 200);
+    let upload = create(&state, "/mpone/k").await;
+    let only = etag(&part(&state, "/mpone/k", &upload, "1", b"the only part").await);
+    let done = complete(
+        &state,
+        "/mpone/k",
+        &upload,
+        vec![],
+        &document(&[("1", &only)]),
+    )
+    .await;
+    assert_eq!(done.status, 200, "{}", done.body);
+    for method in ["GET", "HEAD"] {
+        let read = call(
+            &state,
+            method,
+            "/mpone/k",
+            vec![("partNumber", Some("1"))],
+            b"",
+        )
+        .await;
+        assert!(
+            read.status == 200 || read.status == 206,
+            "{method}: {}",
+            read.body
+        );
+        assert_eq!(header(&read, "x-amz-mp-parts-count"), Some("1"), "{method}");
+    }
+    assert_eq!(
+        call(&state, "PUT", "/mpone/plain", vec![], b"plain")
+            .await
+            .status,
+        200
+    );
+    let plain = call(
+        &state,
+        "GET",
+        "/mpone/plain",
+        vec![("partNumber", Some("1"))],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        header(&plain, "x-amz-mp-parts-count"),
+        None,
+        "not uploaded in parts"
+    );
+}
