@@ -249,3 +249,59 @@ async fn a_quota_is_kept_on_the_bucket_and_cleared_by_setting_none() {
     let nowhere = BucketName::new("nowhere").expect("a name");
     assert!(!buckets.set_quota(&nowhere, limit).await.expect("answered"));
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_missing_bucket_is_named_missing_to_whoever_could_create_it() {
+    use tessari_s3_core::authz::Role;
+
+    use crate::access::user_with_key;
+    use crate::call_as;
+
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    let storage = state.storage();
+    let ann = user_with_key(storage, "ann", "alpha", Role::Member, true).await;
+    let bob = user_with_key(storage, "bob", "alpha", Role::Member, false).await;
+    let cy = user_with_key(storage, "cy", "beta", Role::Member, true).await;
+    let made = call_as(&state, cy.pair(), "PUT", "/beta-owned", vec![], vec![], b"").await;
+    assert_eq!(made.status, 200, "{}", made.body);
+    async fn head(state: &tessari_s3_api::ApiState, key: &crate::access::Key, path: &str) -> u16 {
+        crate::call_as(state, key.pair(), "HEAD", path, vec![], vec![], b"")
+            .await
+            .status
+    }
+    // Who may create buckets already learns a taken name from CreateBucket: a free one is told as missing.
+    assert_eq!(
+        head(&state, &ann, "/nowhere-at-all").await,
+        404,
+        "a creator hears NoSuchBucket"
+    );
+    let listed = call_as(
+        &state,
+        ann.pair(),
+        "GET",
+        "/nowhere-at-all",
+        vec![],
+        vec![],
+        b"",
+    )
+    .await;
+    assert_eq!(
+        (listed.status, listed.code.as_deref()),
+        (404, Some("NoSuchBucket")),
+        "{}",
+        listed.body
+    );
+    // Who may not learns nothing, and another space's bucket stays unreachable whoever asks.
+    assert_eq!(
+        head(&state, &bob, "/nowhere-at-all").await,
+        403,
+        "a non-creator hears AccessDenied"
+    );
+    assert_eq!(
+        head(&state, &ann, "/beta-owned").await,
+        403,
+        "another space's bucket is not disclosed"
+    );
+}
