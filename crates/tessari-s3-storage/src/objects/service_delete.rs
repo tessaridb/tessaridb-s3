@@ -46,8 +46,8 @@ async fn remove_named(
 }
 
 impl ObjectService {
-    /// Removes each entry — the current object of a key, or the version it names (`bypass` lets a GOVERNANCE retention
-    /// go; the caller has checked who may ask) — a few keys at a time, one outcome per entry in order; `None` when the
+    /// Removes each entry, the current object of a key or the version it names (`bypass` lets a GOVERNANCE retention
+    /// go; the caller has checked who may ask), a few keys at a time, one outcome per entry in order; `None` when the
     /// bucket does not exist. A missing key or version is removed successfully, as in S3.
     ///
     /// The entries naming one key are removed one after another: run side by side they would fence each other (each

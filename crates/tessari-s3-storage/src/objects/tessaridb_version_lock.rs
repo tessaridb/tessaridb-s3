@@ -113,7 +113,7 @@ impl TessariObjects {
     }
 
     /// Sets the version's retention (`None` removes it). While a retention keeps the version only an extension in its
-    /// own mode is free; any other change — COMPLIANCE always, GOVERNANCE unless `bypass` — is
+    /// own mode is free; any other change (COMPLIANCE always, GOVERNANCE unless `bypass`) is
     /// [`LockOutcome::Locked`] (S3 user guide, Object Lock retention modes).
     pub(crate) async fn set_retention(
         &self,
