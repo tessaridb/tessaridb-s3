@@ -59,6 +59,7 @@ async fn proxy(target: String, cut: Arc<AtomicBool>) -> String {
 #[tokio::test]
 #[ignore = "needs TESSARIDB_S3_TEST_META, _USER and _PASSWORD and the built binary"]
 async fn a_node_cut_off_from_its_peers_loses_nothing_and_is_healed_after() {
+    let _quiet = crate::QUIET.lock().await;
     let mut cluster = Cluster::start(meta_from_env()).await;
     let cut_off = cluster.nodes.len().saturating_sub(1);
     let cut = Arc::new(AtomicBool::new(false));

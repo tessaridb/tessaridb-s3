@@ -232,7 +232,8 @@ traffic, then check that every acknowledged object reads back whole and nothing 
 node inside a commit, at exit points only the test build has, and check that the write left no torn object and
 no unreclaimed shard. One cuts a node off from its peers through a proxy that swallows its traffic, writes
 through the others, and checks that the node is healed once the cut ends. Another heals a returning node while
-readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once.
+readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once. The soak runs mixed
+traffic for `TESSARIDB_S3_SOAK_SECS` seconds (7200 for two hours) and only when that is set.
 
 ## Measuring
 

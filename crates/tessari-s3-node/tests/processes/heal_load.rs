@@ -71,6 +71,7 @@ async fn work(
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs TESSARIDB_S3_TEST_META, _USER and _PASSWORD and the built binary"]
 async fn a_returning_node_is_healed_while_clients_read_and_write() {
+    let _quiet = crate::QUIET.lock().await;
     let mut cluster = Cluster::start(meta_from_env()).await;
     assert_eq!(call(&cluster.nodes[0], "PUT", "/heal", b"").await.0, 200);
     let kept: Vec<(String, Vec<u8>)> = (0..16_u8)
