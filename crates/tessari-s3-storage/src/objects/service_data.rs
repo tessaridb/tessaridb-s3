@@ -189,6 +189,12 @@ impl ObjectService {
         }
     }
 
+    /// Reads of this node's data files that failed verification since it started: a block hash, a header or a length.
+    #[must_use]
+    pub fn verification_failures(&self) -> u64 {
+        self.data.verification_failures()
+    }
+
     /// How many data ids are listed for healing, counted up to `limit`; `None` off a cluster, where nothing is.
     ///
     /// # Errors

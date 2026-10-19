@@ -42,6 +42,7 @@ pub struct Metrics {
     audit_written: Counter,
     audit_dropped: Counter,
     audit_failed: Counter,
+    verification_failures: Counter,
 }
 
 impl Default for Metrics {
@@ -135,7 +136,7 @@ impl Metrics {
             "Whether the last scrape could read a source (1) or not (0); a source not read keeps its last values",
             collect_up.clone(),
         );
-        let [audit_written, audit_dropped, audit_failed] = [
+        let [audit_written, audit_dropped, audit_failed, verification_failures] = [
             ("audit_written", "Access-log records appended"),
             (
                 "audit_dropped",
@@ -144,6 +145,10 @@ impl Metrics {
             (
                 "audit_failed",
                 "Access-log records whose append failed after every retry",
+            ),
+            (
+                "data_verification_failures",
+                "Reads of this node's data files that failed verification (a block hash, a header or a length)",
             ),
         ]
         .map(|(name, help)| {
@@ -169,6 +174,7 @@ impl Metrics {
             audit_written,
             audit_dropped,
             audit_failed,
+            verification_failures,
         }
     }
 
@@ -263,6 +269,12 @@ impl Metrics {
     /// Counts `records` whose append failed for good.
     pub fn audit_failed(&self, records: u64) {
         self.audit_failed.inc_by(records);
+    }
+
+    /// Raises the count of failed verifications to `total`, as the storage last counted it since the node started.
+    pub fn verification_failures(&self, total: u64) {
+        self.verification_failures
+            .inc_by(total.saturating_sub(self.verification_failures.get()));
     }
 
     /// The metrics in Prometheus text.

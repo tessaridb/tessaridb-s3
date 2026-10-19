@@ -45,3 +45,17 @@ fn a_served_request_is_counted_and_timed_under_its_labels() {
         assert!(text.lines().any(|seen| seen == line), "{line} in\n{text}");
     }
 }
+
+#[test]
+fn failed_verifications_are_counted_up_to_the_storage_total() {
+    let metrics = Metrics::new();
+    metrics.verification_failures(3);
+    metrics.verification_failures(5);
+    metrics.verification_failures(5);
+    let text = metrics.encode().expect("encoded");
+    assert!(
+        text.lines()
+            .any(|line| line == "s3_data_verification_failures_total 5"),
+        "{text}"
+    );
+}

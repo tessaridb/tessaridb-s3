@@ -80,6 +80,8 @@ pub struct Node {
     pub name: String,
     pub s3: String,
     pub internal: String,
+    /// Where the node serves its metrics.
+    pub metrics: String,
     pub dir: PathBuf,
 }
 
@@ -233,11 +235,13 @@ async fn spawn(
         .append(true)
         .open(logs.join(format!("{name}.log")))
         .expect("log file");
+    let metrics = format!("127.0.0.1:{}", free_port());
     let mut child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
         .env_clear()
         .envs(environment(
             meta, tls, namespace, name, &s3, &internal, &dir,
         ))
+        .env("TESSARIDB_S3_METRICS_LISTEN", &metrics)
         .envs(extra.iter().copied())
         .stdout(Stdio::from(log.try_clone().expect("log handle")))
         .stderr(Stdio::from(log))
@@ -265,6 +269,7 @@ async fn spawn(
         name: name.to_owned(),
         s3,
         internal,
+        metrics,
         dir,
     })
 }

@@ -42,6 +42,7 @@ async fn collect(state: &ApiState) {
     }
     let deadline = Duration::from_secs(METRICS_COLLECT_SECS);
     let objects = state.storage().objects();
+    metrics.verification_failures(objects.verification_failures());
     match timeout(deadline, objects.heal_backlog(METRICS_BACKLOG_COUNT_MAX)).await {
         Ok(Ok(None)) => {}
         Ok(Ok(Some(backlog))) => {

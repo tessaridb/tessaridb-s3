@@ -47,6 +47,8 @@ impl DataReader {
             Ok(block)
         } else {
             tracing::error!(data = %self.hex, index, "a data block failed its hash");
+            self.failed
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Err(corrupt("block hash"))
         }
     }
