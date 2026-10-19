@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, heade
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
 use tessari_s3_core::objects::range::{RangeRequest, part_bytes, resolve};
-use tessari_s3_storage::objects::{Content, StoredObject, VersionRead};
+use tessari_s3_storage::objects::{Content, LockOutcome, StoredObject, VersionLock, VersionRead};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
@@ -160,6 +160,9 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
     *response.status_mut() = status;
     let headers = response.headers_mut();
     describe(headers, &object, call, slice.is_none());
+    if let Some(lock) = lock_of(call, key, &object).await? {
+        answer_lock(headers, lock);
+    }
     if let Some(customer) = &customer {
         answer_customer(headers, customer);
     }
@@ -232,6 +235,47 @@ async fn stored_version(call: &Call<'_>, key: &ObjectKey, version: &str) -> Resu
             "Invalid version id specified",
         )),
         VersionRead::NoSuchBucket => Err(no_such_bucket()),
+    }
+}
+
+/// The Object Lock of the version read, when its bucket has Object Lock; none in any other bucket, which reads no
+/// lock at all.
+async fn lock_of(
+    call: &Call<'_>,
+    key: &ObjectKey,
+    object: &StoredObject,
+) -> Result<Option<VersionLock>> {
+    if crate::routes::buckets::existing(call)
+        .await?
+        .object_lock
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let read = call
+        .state
+        .storage()
+        .objects()
+        .version_lock(call.bucket()?, key, object.version.as_deref())
+        .await?;
+    Ok(match read {
+        LockOutcome::Version { lock, .. } => Some(lock),
+        _ => None,
+    })
+}
+
+/// A version's retention and legal hold, as a read answers them.
+fn answer_lock(headers: &mut HeaderMap, lock: VersionLock) {
+    if let Some((mode, until)) = lock.retention {
+        set(headers, "x-amz-object-lock-mode", mode.as_str());
+        set(
+            headers,
+            "x-amz-object-lock-retain-until-date",
+            &until.iso8601_millis(),
+        );
+    }
+    if lock.legal_hold {
+        set(headers, "x-amz-object-lock-legal-hold", "ON");
     }
 }
 
