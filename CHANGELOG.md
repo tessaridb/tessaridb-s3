@@ -3,6 +3,21 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.5.0: 2026-10-20
+
+Metadata on TessariDB `0.36.2`.
+
+- A media output names any size, not only a listed one: a side of 16 to 7680 px, or a box (`400x400`) fitted inside,
+  covering it from the middle (`-cover`) or exactly (`-exact`), and a quality on JPEG, WebP and AVIF
+  (`image/400x400-cover/avif@60`). Each refused output says why.
+- A photo is turned upright by its EXIF orientation before it is sized; no rendition carries its metadata.
+- Objects already in a bucket get their renditions: the console renders them a page at a time, shows the count, and
+  skips a rendition made since its original.
+- A video can be streamed: `video/360p+720p/hls` makes one H.264 rendition per height in six-second segments under a
+  master playlist, each file an object beside the original.
+- A save of a bucket's media rules made over someone else's change is refused `412` and changes nothing.
+- The console picks an output's kind, size, box mode and format from rows of options.
+
 ## 0.4.0: 2026-10-20
 
 Metadata on TessariDB `0.36.2`.
