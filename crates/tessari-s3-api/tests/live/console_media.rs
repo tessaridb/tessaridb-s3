@@ -1,6 +1,6 @@
 //! A bucket's media rules through the console, against a real node (G004 C1): whoever configures the bucket sets them,
 //! anyone who reads it sees them, a rule the server cannot honour is refused with nothing stored, and an empty list
-//! turns media processing off.
+//! turns media processing off; an output names any side or a box with a mode and a quality, and is made so.
 
 use serde_json::{Value, json};
 use tessari_s3_core::authz::{Access, Role};
@@ -189,4 +189,123 @@ async fn an_operator_sees_the_renditions_that_failed_for_good_and_a_member_does_
         Some("forbidden"),
         "the failures span every space, so only an operator reads them"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_output_names_a_box_a_mode_and_a_quality_and_is_rendered_so() {
+    use tessari_s3_daemons::{Daemon, ImageWorker, MediaPlanner};
+
+    use crate::media::{image_at, png};
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    assert_eq!(
+        call_as(&state, ann.pair(), "PUT", "/pics", vec![], vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    for (output, message) in [
+        ("image/640/png@80", "png is lossless and takes no quality"),
+        (
+            "image/640-cover/webp",
+            "fit, cover and exact follow a box such as 400x400",
+        ),
+        (
+            "image/8000/webp",
+            "an image side is between 16 and 7680 pixels",
+        ),
+        ("image/640/jpeg@0", "a quality is between 1 and 100"),
+        (
+            "image/7680x7680-exact/png",
+            "a box holds at most 50 000 000 pixels",
+        ),
+    ] {
+        let body = json!({"rules": [{"id": "a", "content_types": ["image/*"], "prefix": "", "outputs": [output]}]});
+        let seen = send(
+            &console,
+            "PUT",
+            MEDIA,
+            Some(&token),
+            Some(&body.to_string()),
+        )
+        .await;
+        assert_eq!(seen.status, 400, "{output}");
+        assert_eq!(seen.code().as_deref(), Some("invalid_media"), "{output}");
+        assert_eq!(seen.json()["message"], json!(message), "{output}");
+    }
+    let outputs = [
+        "image/400x400-cover/webp",
+        "image/800x600/jpeg",
+        "image/300x500-exact/png",
+        "image/1300/jpeg@40",
+    ];
+    let rules = json!({"rules": [{"id": "photos", "content_types": ["image/*"], "prefix": "", "outputs": outputs}]});
+    let set = send(
+        &console,
+        "PUT",
+        MEDIA,
+        Some(&token),
+        Some(&rules.to_string()),
+    )
+    .await;
+    assert_eq!(set.status, 204, "{:?}", set.code());
+    let got = send(&console, "GET", MEDIA, Some(&token), None).await;
+    assert_eq!(got.json()["rules"], rules["rules"], "stored as spelled");
+    let put = call_as(
+        &state,
+        ann.pair(),
+        "PUT",
+        "/pics/a.png",
+        vec![],
+        vec![("content-type", "image/png")],
+        &png(2000, 1000),
+    )
+    .await;
+    assert_eq!(put.status, 200);
+    let (media, objects) = (state.storage().media(), state.storage().objects().clone());
+    media.define().await.expect("group defined");
+    MediaPlanner::new(media.clone(), objects.clone())
+        .run_once()
+        .await
+        .expect("planned");
+    ImageWorker::new(media, objects, "node-a".to_owned())
+        .run_once()
+        .await
+        .expect("rendered");
+    let at = "/pics/a.png.renditions";
+    for (file, content_type, format, size) in [
+        (
+            "image-400x400-cover.webp",
+            "image/webp",
+            image::ImageFormat::WebP,
+            (400, 400),
+        ),
+        (
+            "image-800x600.jpg",
+            "image/jpeg",
+            image::ImageFormat::Jpeg,
+            (800, 400),
+        ),
+        (
+            "image-300x500-exact.png",
+            "image/png",
+            image::ImageFormat::Png,
+            (300, 500),
+        ),
+        (
+            "image-1300-q40.jpg",
+            "image/jpeg",
+            image::ImageFormat::Jpeg,
+            (1300, 650),
+        ),
+    ] {
+        assert_eq!(
+            image_at(&state, &format!("{at}/{file}"), content_type, format).await,
+            size,
+            "{file}"
+        );
+    }
 }

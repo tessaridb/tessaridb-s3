@@ -14,14 +14,19 @@ type Editor = { readonly box: HTMLFieldSetElement; readonly read: () => Readonly
 
 let made = 0;
 
-/** One output's three choices, each from the server's lists; the size and format lists follow the kind. */
+/** One output's choices: the kind and format from the server's lists, a video's size from its list, an image's or a
+ *  poster's size written as a side or a box (`400x400-cover`), and an optional quality; the lists follow the kind. */
 function outputRow(id: string, spelled: string | null, remove: (row: HTMLElement) => void): { readonly row: HTMLElement; readonly read: () => string } {
-  const fallback: Output = { kind: "image", size: "1280", format: "webp" };
+  const fallback: Output = { kind: "image", size: "1280", format: "webp", quality: "" };
   const start = (spelled === null ? null : outputOf(spelled)) ?? fallback;
   const choice = (suffix: string, label: string): HTMLSelectElement => el("select", { id: `${id}-${suffix}`, "aria-label": label });
   const kind = choice("kind", "Kind");
-  const size = choice("size", "Size");
+  const lines = choice("lines", "Video size");
   const format = choice("format", "Format");
+  const written = (suffix: string, label: string, hint: string): HTMLInputElement =>
+    el("input", { id: `${id}-${suffix}`, "aria-label": label, placeholder: hint, spellcheck: "false", autocomplete: "off", size: "14" });
+  const side = written("size", "Size: a side or a box such as 400x400-cover", "1280 or 400x400-cover");
+  const quality = written("quality", "Quality, 1-100, for JPEG, WebP or AVIF", "quality");
   kind.append(...Object.entries(KINDS).map(([name, lists]) => el("option", { value: name }, lists.label)));
   const offer = (select: HTMLSelectElement, values: readonly string[], keep: string): void => {
     select.replaceChildren(...values.map((value) => el("option", { value }, value)));
@@ -31,18 +36,30 @@ function outputRow(id: string, spelled: string | null, remove: (row: HTMLElement
     if (!isKind(kind.value)) {
       return;
     }
-    const lists = KINDS[kind.value];
-    offer(size, lists.sizes, size.value);
-    offer(format, lists.formats, format.value);
+    const video = kind.value === "video";
+    offer(format, KINDS[kind.value].formats, format.value);
+    lines.hidden = !video;
+    side.hidden = video;
+    quality.hidden = video || format.value === "png";
   };
   kind.value = start.kind;
-  offer(size, KINDS[start.kind].sizes, start.size);
+  offer(lines, KINDS.video.sizes, start.kind === "video" ? start.size : "");
+  side.value = start.kind === "video" ? "1280" : start.size;
+  quality.value = start.quality;
   offer(format, KINDS[start.kind].formats, start.format);
+  follow();
   kind.addEventListener("change", follow);
+  format.addEventListener("change", follow);
   const drop = el("button", { type: "button", class: "quiet", "aria-label": "Remove output" }, "Remove");
-  const row = el("div", { class: "actions" }, kind, size, format, drop);
+  const row = el("div", { class: "actions" }, kind, lines, side, format, quality, drop);
   drop.addEventListener("click", () => remove(row));
-  return { row, read: () => `${kind.value}/${size.value}/${format.value}` };
+  const read = (): string => {
+    const video = kind.value === "video";
+    const size = video ? lines.value : side.value.trim();
+    const named = video || quality.hidden ? "" : quality.value.trim();
+    return `${kind.value}/${size}/${format.value}${named === "" ? "" : `@${named}`}`;
+  };
+  return { row, read };
 }
 
 function ruleEditor(base: string, rule: MediaRule | null, remove: (editor: Editor) => void): Editor {
@@ -72,7 +89,7 @@ function ruleEditor(base: string, rule: MediaRule | null, remove: (editor: Edito
     appendOutput(null);
     rows.at(-1)?.row.querySelector("select")?.focus();
   });
-  (rule?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg" })]).forEach(appendOutput);
+  (rule?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg", quality: "" })]).forEach(appendOutput);
   name.input.value = rule?.id ?? "";
   types.input.value = rule?.content_types.join(", ") ?? "";
   prefix.input.value = rule?.prefix ?? "";

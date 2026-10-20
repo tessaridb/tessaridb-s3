@@ -235,7 +235,7 @@ pub(crate) fn png(width: u32, height: u32) -> Vec<u8> {
 }
 
 /// The size of the image at `path`, which must be served as `content_type` and be written in `format`.
-async fn image_at(
+pub(crate) async fn image_at(
     state: &tessari_s3_api::ApiState,
     path: &str,
     content_type: &str,

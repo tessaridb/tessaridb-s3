@@ -1411,8 +1411,10 @@
   // src/media-model.ts
   //! A bucket's media rules as the console sends and answers them: which uploads
   //! (content types under a key prefix) get which renditions. An output is
-  //! `kind/size/format`, each picked from the server's lists; the server checks a
-  //! rule set as a whole, this page only reads the answer and shapes the form.
+  //! `kind/size/format`: a video's size and every format come from the server's
+  //! lists; an image's or a poster's size is a side or a box (`400x400-cover`)
+  //! of 16-7680 pixels, and a lossy still format may carry `@quality`. The server
+  //! checks a rule set as a whole, this page only reads the answer and shapes the form.
   var IMAGE_SIZES = ["150", "320", "640", "768", "1024", "1280", "1440", "1920", "2560", "3840"];
   var STILL_FORMATS = ["jpeg", "png", "webp", "avif"];
   var KINDS = {
@@ -1421,15 +1423,30 @@
     poster: { label: "Poster frame", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "video" }
   };
   var isKind = (value) => Object.hasOwn(KINDS, value);
+  var isSide = (written) => /^[0-9]+$/.test(written) && Number(written) >= 16 && Number(written) <= 7680;
+  function isStillSize(written) {
+    const box2 = /^([0-9]+)x([0-9]+)(-(fit|cover|exact))?$/.exec(written);
+    return box2 === null ? isSide(written) : isSide(box2[1] ?? "") && isSide(box2[2] ?? "");
+  }
+  var isQuality = (written, format2) => written === "" || format2 !== "png" && /^[0-9]+$/.test(written) && Number(written) >= 1 && Number(written) <= 100;
   function outputOf(name) {
-    const [kind, size2, format2, extra] = name.split("/");
-    if (kind === void 0 || size2 === void 0 || format2 === void 0 || extra !== void 0 || !isKind(kind)) {
+    const [kind, size2, written, extra] = name.split("/");
+    if (kind === void 0 || size2 === void 0 || written === void 0 || extra !== void 0 || !isKind(kind)) {
       return null;
     }
+    const at2 = written.indexOf("@");
+    const format2 = at2 < 0 ? written : written.slice(0, at2);
+    const quality = at2 < 0 ? "" : written.slice(at2 + 1);
     const lists = KINDS[kind];
-    return lists.sizes.includes(size2) && lists.formats.includes(format2) ? { kind, size: size2, format: format2 } : null;
+    if (!lists.formats.includes(format2) || at2 >= 0 && quality === "") {
+      return null;
+    }
+    if (kind === "video") {
+      return lists.sizes.includes(size2) && at2 < 0 ? { kind, size: size2, format: format2, quality } : null;
+    }
+    return isStillSize(size2) && isQuality(quality, format2) ? { kind, size: size2, format: format2, quality } : null;
   }
-  var spell = (output) => `${output.kind}/${output.size}/${output.format}`;
+  var spell = (output) => `${output.kind}/${output.size}/${output.format}${output.quality === "" ? "" : `@${output.quality}`}`;
   function rule(v) {
     if (!record(v) || !text(v["id"]) || !text(v["prefix"])) {
       return null;
@@ -1450,12 +1467,15 @@
   //! changes nothing; saving none turns media processing off.
   var made = 0;
   function outputRow(id, spelled, remove) {
-    const fallback = { kind: "image", size: "1280", format: "webp" };
+    const fallback = { kind: "image", size: "1280", format: "webp", quality: "" };
     const start = (spelled === null ? null : outputOf(spelled)) ?? fallback;
     const choice = (suffix, label) => el("select", { id: `${id}-${suffix}`, "aria-label": label });
     const kind = choice("kind", "Kind");
-    const size2 = choice("size", "Size");
+    const lines = choice("lines", "Video size");
     const format2 = choice("format", "Format");
+    const written = (suffix, label, hint) => el("input", { id: `${id}-${suffix}`, "aria-label": label, placeholder: hint, spellcheck: "false", autocomplete: "off", size: "14" });
+    const side = written("size", "Size: a side or a box such as 400x400-cover", "1280 or 400x400-cover");
+    const quality = written("quality", "Quality, 1-100, for JPEG, WebP or AVIF", "quality");
     kind.append(...Object.entries(KINDS).map(([name, lists]) => el("option", { value: name }, lists.label)));
     const offer2 = (select, values, keep) => {
       select.replaceChildren(...values.map((value) => el("option", { value }, value)));
@@ -1465,18 +1485,30 @@
       if (!isKind(kind.value)) {
         return;
       }
-      const lists = KINDS[kind.value];
-      offer2(size2, lists.sizes, size2.value);
-      offer2(format2, lists.formats, format2.value);
+      const video = kind.value === "video";
+      offer2(format2, KINDS[kind.value].formats, format2.value);
+      lines.hidden = !video;
+      side.hidden = video;
+      quality.hidden = video || format2.value === "png";
     };
     kind.value = start.kind;
-    offer2(size2, KINDS[start.kind].sizes, start.size);
+    offer2(lines, KINDS.video.sizes, start.kind === "video" ? start.size : "");
+    side.value = start.kind === "video" ? "1280" : start.size;
+    quality.value = start.quality;
     offer2(format2, KINDS[start.kind].formats, start.format);
+    follow();
     kind.addEventListener("change", follow);
+    format2.addEventListener("change", follow);
     const drop = el("button", { type: "button", class: "quiet", "aria-label": "Remove output" }, "Remove");
-    const row2 = el("div", { class: "actions" }, kind, size2, format2, drop);
+    const row2 = el("div", { class: "actions" }, kind, lines, side, format2, quality, drop);
     drop.addEventListener("click", () => remove(row2));
-    return { row: row2, read: () => `${kind.value}/${size2.value}/${format2.value}` };
+    const read = () => {
+      const video = kind.value === "video";
+      const size2 = video ? lines.value : side.value.trim();
+      const named = video || quality.hidden ? "" : quality.value.trim();
+      return `${kind.value}/${size2}/${format2.value}${named === "" ? "" : `@${named}`}`;
+    };
+    return { row: row2, read };
   }
   function ruleEditor(base, rule2, remove) {
     made += 1;
@@ -1505,7 +1537,7 @@
       appendOutput(null);
       rows.at(-1)?.row.querySelector("select")?.focus();
     });
-    (rule2?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg" })]).forEach(appendOutput);
+    (rule2?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg", quality: "" })]).forEach(appendOutput);
     name.input.value = rule2?.id ?? "";
     types.input.value = rule2?.content_types.join(", ") ?? "";
     prefix.input.value = rule2?.prefix ?? "";

@@ -18,7 +18,7 @@ use tessari_s3_storage::objects::{ObjectService, StoredObject};
 use tessari_s3_types::BucketName;
 
 use crate::daemon::{Daemon, DaemonFuture, Report};
-use crate::media_work::{encoding, landed, original, sealed, target, work};
+use crate::media_work::{landed, original, sealed, still, target, work};
 
 /// Renders video and poster tasks through ffmpeg.
 pub struct VideoWorker {
@@ -114,14 +114,18 @@ impl VideoWorker {
                     )
                     .await
             }
-            Output::Poster { size, format } => {
+            Output::Poster {
+                size,
+                format,
+                quality,
+            } => {
                 self.ffmpeg
                     .frame(input, output)
                     .await
                     .map_err(|error| error.to_string())?;
                 let frame = tokio::fs::read(output).await.map_err(io)?;
-                let encoder = encoding(format);
-                let made = tokio::task::spawn_blocking(move || render(&frame, &[(size, encoder)]))
+                let wanted = still(size, format, quality);
+                let made = tokio::task::spawn_blocking(move || render(&frame, &[wanted]))
                     .await
                     .map_err(|error| error.to_string())?
                     .map_err(|error| error.to_string())?

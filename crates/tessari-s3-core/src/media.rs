@@ -7,9 +7,11 @@ pub const RENDITIONS: &str = ".renditions/";
 /// Most rules one bucket may hold.
 pub const MAX_RULES: usize = 100;
 
-/// The long sides, in pixels, an image or a poster is fitted into: thumbnails, the common responsive widths, full HD and
-/// up to 4K.
-pub const IMAGE_SIZES: [u32; 10] = [150, 320, 640, 768, 1024, 1280, 1440, 1920, 2560, 3840];
+/// The smallest side, in pixels, an image or a poster output may name.
+pub const MIN_SIDE: u32 = 16;
+
+/// The largest side, in pixels, an image or a poster output may name: 8K.
+pub const MAX_SIDE: u32 = 7680;
 
 /// The heights a video is made at, spelled `<size>p` — the shorter side, so a portrait video keeps its shape.
 pub const VIDEO_SIZES: [u32; 6] = [360, 480, 720, 1080, 1440, 2160];
@@ -103,96 +105,9 @@ impl VideoFormat {
     }
 }
 
-/// One rendition a rule makes: `kind/size/format`, each from its list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Output {
-    /// An image fitted into `size` pixels on its long side.
-    Image {
-        /// One of [`IMAGE_SIZES`].
-        size: u32,
-        /// Its format.
-        format: ImageFormat,
-    },
-    /// A video `size` lines on its shorter side.
-    Video {
-        /// One of [`VIDEO_SIZES`].
-        size: u32,
-        /// Its container and codecs.
-        format: VideoFormat,
-    },
-    /// One frame of a video as an image fitted into `size` pixels.
-    Poster {
-        /// One of [`IMAGE_SIZES`].
-        size: u32,
-        /// Its format.
-        format: ImageFormat,
-    },
-}
+mod output;
 
-impl Output {
-    /// The output spelled `name` (`image/1280/webp`, `video/720p/mp4`, `poster/640/jpeg`), if it is one.
-    #[must_use]
-    pub fn parse(name: &str) -> Option<Self> {
-        let mut parts = name.split('/');
-        let (kind, size, format) = (parts.next()?, parts.next()?, parts.next()?);
-        if parts.next().is_some() {
-            return None;
-        }
-        let image_size = || {
-            size.parse::<u32>()
-                .ok()
-                .filter(|size| IMAGE_SIZES.contains(size))
-        };
-        match kind {
-            "image" => Some(Self::Image {
-                size: image_size()?,
-                format: ImageFormat::parse(format)?,
-            }),
-            "poster" => Some(Self::Poster {
-                size: image_size()?,
-                format: ImageFormat::parse(format)?,
-            }),
-            "video" => Some(Self::Video {
-                size: size
-                    .strip_suffix('p')?
-                    .parse::<u32>()
-                    .ok()
-                    .filter(|size| VIDEO_SIZES.contains(size))?,
-                format: VideoFormat::parse(format)?,
-            }),
-            _ => None,
-        }
-    }
-
-    /// Its spelling in a rule.
-    #[must_use]
-    pub fn name(self) -> String {
-        match self {
-            Self::Image { size, format } => format!("image/{size}/{}", format.name()),
-            Self::Video { size, format } => format!("video/{size}p/{}", format.name()),
-            Self::Poster { size, format } => format!("poster/{size}/{}", format.name()),
-        }
-    }
-
-    /// The rendition's file name under the original's `.renditions/` folder.
-    #[must_use]
-    pub fn file_name(self) -> String {
-        match self {
-            Self::Image { size, format } => format!("image-{size}.{}", format.extension()),
-            Self::Video { size, format } => format!("video-{size}p.{}", format.name()),
-            Self::Poster { size, format } => format!("poster-{size}.{}", format.extension()),
-        }
-    }
-
-    /// The family of content types it is made from: `image` for an image, `video` for a video or a poster.
-    #[must_use]
-    pub const fn source(self) -> &'static str {
-        match self {
-            Self::Image { .. } => "image",
-            Self::Video { .. } | Self::Poster { .. } => "video",
-        }
-    }
-}
+pub use output::{Fit, Output, OutputError, Size};
 
 /// One rule.
 #[derive(Debug, Clone, PartialEq, Eq)]

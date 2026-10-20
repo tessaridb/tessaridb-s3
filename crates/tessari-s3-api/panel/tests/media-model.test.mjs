@@ -13,16 +13,29 @@ test("a rule missing a field, or naming an output off the lists, is not a rule",
   const { prefix: _gone, ...noPrefix } = rule;
   assert.equal(readMediaRules({ rules: [noPrefix] }), null);
   assert.equal(readMediaRules({ rules: [{ ...rule, outputs: ["thumb"] }] }), null);
-  assert.equal(readMediaRules({ rules: [{ ...rule, outputs: ["image/1300/jpeg"] }] }), null);
+  assert.equal(readMediaRules({ rules: [{ ...rule, outputs: ["image/15/jpeg"] }] }), null);
   assert.equal(readMediaRules({ rules: [{ ...rule, content_types: "image/*" }] }), null);
   assert.equal(readMediaRules({}), null);
 });
 
 test("an output is spelled kind/size/format and read back the same", () => {
-  assert.deepEqual(outputOf("video/720p/mp4"), { kind: "video", size: "720p", format: "mp4" });
-  assert.equal(spell({ kind: "poster", size: "640", format: "avif" }), "poster/640/avif");
+  assert.deepEqual(outputOf("video/720p/mp4"), { kind: "video", size: "720p", format: "mp4", quality: "" });
+  assert.equal(spell({ kind: "poster", size: "640", format: "avif", quality: "" }), "poster/640/avif");
   assert.equal(outputOf("video/720/mp4"), null);
   assert.equal(outputOf("image/320/mp4"), null);
+});
+
+test("an image or a poster takes any side, a box with a mode, and a quality on a lossy format", () => {
+  assert.deepEqual(outputOf("image/1300/webp@70"), { kind: "image", size: "1300", format: "webp", quality: "70" });
+  assert.deepEqual(outputOf("poster/400x400-cover/avif"), { kind: "poster", size: "400x400-cover", format: "avif", quality: "" });
+  for (const name of ["image/16/jpeg", "image/7680/png", "image/800x600/jpeg@100", "image/800x600-exact/png", "image/300x200-fit/webp@1"]) {
+    const output = outputOf(name);
+    assert.notEqual(output, null, name);
+    assert.equal(output === null ? null : spell(output), name);
+  }
+  for (const name of ["image/15/jpeg", "image/7681/jpeg", "image/640-cover/jpeg", "image/800x/jpeg", "image/800x600-zoom/jpeg", "image/640/png@80", "image/640/jpeg@0", "image/640/jpeg@101", "image/640/jpeg@", "video/720p/mp4@80"]) {
+    assert.equal(outputOf(name), null, name);
+  }
 });
 
 test("the lists are the server's", () => {

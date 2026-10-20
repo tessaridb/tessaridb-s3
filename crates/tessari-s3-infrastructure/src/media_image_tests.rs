@@ -1,9 +1,32 @@
 use std::io::Cursor;
 
+use image::codecs::jpeg::JpegEncoder;
 use image::{ImageFormat, Rgb, RgbImage};
 use tessari_s3_constants::MEDIA_MAX_INPUT_BYTES;
 
-use super::{Encoding, RenderError, render};
+use super::{Encoding, Mode, RenderError, Target, render};
+
+/// Fitted into a square of `side`, at the format's own quality.
+const fn fit(side: u32, encoding: Encoding) -> Target {
+    Target {
+        width: side,
+        height: side,
+        mode: Mode::Fit,
+        encoding,
+        quality: None,
+    }
+}
+
+/// Made to `width` by `height` as `mode` says, written as PNG so pixels compare exactly.
+const fn boxed(width: u32, height: u32, mode: Mode) -> Target {
+    Target {
+        width,
+        height,
+        mode,
+        encoding: Encoding::Png,
+        quality: None,
+    }
+}
 
 fn png(width: u32, height: u32) -> Vec<u8> {
     let image = RgbImage::from_fn(width, height, |x, y| {
@@ -54,7 +77,7 @@ fn declared_png(width: u32, height: u32) -> Vec<u8> {
 fn an_original_is_fitted_into_each_box_as_jpeg_keeping_its_shape() {
     let made = render(
         &png(2000, 1000),
-        &[(320, Encoding::Jpeg), (1600, Encoding::Jpeg)],
+        &[fit(320, Encoding::Jpeg), fit(1600, Encoding::Jpeg)],
     )
     .expect("rendered");
     let sizes: Vec<(u32, u32)> = made.iter().map(|one| (one.width, one.height)).collect();
@@ -71,14 +94,14 @@ fn an_original_is_fitted_into_each_box_as_jpeg_keeping_its_shape() {
 
 #[test]
 fn a_small_original_is_never_enlarged() {
-    let made = render(&png(100, 50), &[(320, Encoding::Jpeg)]).expect("rendered");
+    let made = render(&png(100, 50), &[fit(320, Encoding::Jpeg)]).expect("rendered");
     assert_eq!((made[0].width, made[0].height), (100, 50));
 }
 
 #[test]
 fn a_declared_size_past_the_pixel_bound_is_refused_before_decoding() {
     assert_eq!(
-        render(&declared_png(100_000, 100_000), &[(320, Encoding::Jpeg)]),
+        render(&declared_png(100_000, 100_000), &[fit(320, Encoding::Jpeg)]),
         Err(RenderError::TooManyPixels)
     );
 }
@@ -87,11 +110,11 @@ fn a_declared_size_past_the_pixel_bound_is_refused_before_decoding() {
 fn an_original_past_the_byte_bound_and_one_that_is_no_image_are_refused() {
     let past = vec![0_u8; usize::try_from(MEDIA_MAX_INPUT_BYTES + 1).expect("fits")];
     assert_eq!(
-        render(&past, &[(320, Encoding::Jpeg)]),
+        render(&past, &[fit(320, Encoding::Jpeg)]),
         Err(RenderError::TooLarge)
     );
     assert_eq!(
-        render(b"not an image", &[(320, Encoding::Jpeg)]),
+        render(b"not an image", &[fit(320, Encoding::Jpeg)]),
         Err(RenderError::Unreadable)
     );
 }
@@ -119,10 +142,10 @@ fn each_encoding_is_written_as_itself_at_the_fitted_size() {
     let made = render(
         &png(400, 200),
         &[
-            (320, Encoding::Jpeg),
-            (320, Encoding::Png),
-            (320, Encoding::Webp),
-            (320, Encoding::Avif),
+            fit(320, Encoding::Jpeg),
+            fit(320, Encoding::Png),
+            fit(320, Encoding::Webp),
+            fit(320, Encoding::Avif),
         ],
     )
     .expect("rendered");
@@ -145,4 +168,164 @@ fn each_encoding_is_written_as_itself_at_the_fitted_size() {
     }
     assert_eq!(avif_size(&made[3].bytes), (320, 160));
     assert_eq!((made[3].width, made[3].height), (320, 160));
+}
+
+fn sizes(input: &[u8], targets: &[Target]) -> Vec<(u32, u32)> {
+    render(input, targets)
+        .expect("rendered")
+        .iter()
+        .map(|one| (one.width, one.height))
+        .collect()
+}
+
+#[test]
+fn a_box_is_fitted_into_keeping_the_shape_and_never_enlarging() {
+    assert_eq!(
+        sizes(
+            &png(2000, 1000),
+            &[
+                boxed(400, 400, Mode::Fit),
+                boxed(1000, 100, Mode::Fit),
+                boxed(4000, 4000, Mode::Fit),
+            ]
+        ),
+        vec![(400, 200), (200, 100), (2000, 1000)]
+    );
+}
+
+#[test]
+fn cover_fills_the_box_from_the_middle_and_never_enlarges() {
+    assert_eq!(
+        sizes(
+            &png(2000, 1000),
+            &[boxed(400, 400, Mode::Cover), boxed(300, 100, Mode::Cover)]
+        ),
+        vec![(400, 400), (300, 100)]
+    );
+    // Three bands, red, green and blue: a square cover keeps the green middle and crops both sides.
+    let bands = RgbImage::from_fn(300, 100, |x, _| match x {
+        0..100 => Rgb([255, 0, 0]),
+        100..200 => Rgb([0, 255, 0]),
+        _ => Rgb([0, 0, 255]),
+    });
+    let mut original = Cursor::new(Vec::new());
+    bands
+        .write_to(&mut original, ImageFormat::Png)
+        .expect("png written");
+    let made = render(&original.into_inner(), &[boxed(400, 400, Mode::Cover)]).expect("rendered");
+    assert_eq!(
+        (made[0].width, made[0].height),
+        (100, 100),
+        "never enlarged"
+    );
+    let back = image::load_from_memory(&made[0].bytes)
+        .expect("decodes")
+        .to_rgb8();
+    for (x, y) in [(0, 0), (99, 0), (0, 99), (99, 99), (50, 50)] {
+        assert_eq!(back.get_pixel(x, y), &Rgb([0, 255, 0]), "pixel {x},{y}");
+    }
+}
+
+#[test]
+fn exact_makes_the_box_whatever_the_shape() {
+    assert_eq!(
+        sizes(
+            &png(400, 200),
+            &[boxed(100, 300, Mode::Exact), boxed(800, 800, Mode::Exact)]
+        ),
+        vec![(100, 300), (800, 800)]
+    );
+}
+
+#[test]
+fn a_named_quality_is_honoured_on_each_lossy_format() {
+    for encoding in [Encoding::Jpeg, Encoding::Webp, Encoding::Avif] {
+        let at = |quality| Target {
+            quality: Some(quality),
+            ..fit(400, encoding)
+        };
+        let made = render(&png(400, 400), &[at(10), at(95)]).expect("rendered");
+        assert!(
+            made[0].bytes.len() < made[1].bytes.len(),
+            "{encoding:?}: quality 10 is {} bytes, 95 is {}",
+            made[0].bytes.len(),
+            made[1].bytes.len()
+        );
+    }
+}
+
+/// A JPEG of `width` × `height` carrying EXIF with `orientation` and a GPS latitude reference.
+fn photo(width: u32, height: u32, orientation: u16) -> Vec<u8> {
+    let image = RgbImage::from_fn(width, height, |x, _| {
+        Rgb([u8::try_from(x % 256).unwrap_or(0), 80, 160])
+    });
+    let mut encoded = Vec::new();
+    JpegEncoder::new_with_quality(&mut encoded, 90)
+        .encode_image(&image)
+        .expect("jpeg written");
+    // Little-endian TIFF: IFD0 at 8 with Orientation and the GPS IFD pointer, the GPS IFD at 38 with one entry.
+    let mut tiff = b"II*\0".to_vec();
+    tiff.extend_from_slice(&8_u32.to_le_bytes());
+    tiff.extend_from_slice(&2_u16.to_le_bytes());
+    tiff.extend_from_slice(&0x0112_u16.to_le_bytes());
+    tiff.extend_from_slice(&3_u16.to_le_bytes());
+    tiff.extend_from_slice(&1_u32.to_le_bytes());
+    tiff.extend_from_slice(&u32::from(orientation).to_le_bytes());
+    tiff.extend_from_slice(&0x8825_u16.to_le_bytes());
+    tiff.extend_from_slice(&4_u16.to_le_bytes());
+    tiff.extend_from_slice(&1_u32.to_le_bytes());
+    tiff.extend_from_slice(&38_u32.to_le_bytes());
+    tiff.extend_from_slice(&0_u32.to_le_bytes());
+    tiff.extend_from_slice(&1_u16.to_le_bytes());
+    tiff.extend_from_slice(&0x0001_u16.to_le_bytes());
+    tiff.extend_from_slice(&2_u16.to_le_bytes());
+    tiff.extend_from_slice(&2_u32.to_le_bytes());
+    tiff.extend_from_slice(b"N\0\0\0");
+    tiff.extend_from_slice(&0_u32.to_le_bytes());
+    let mut segment = b"Exif\0\0".to_vec();
+    segment.extend_from_slice(&tiff);
+    let length = segment
+        .len()
+        .checked_add(2)
+        .and_then(|length| u16::try_from(length).ok())
+        .expect("a short segment");
+    let mut bytes = encoded[..2].to_vec();
+    bytes.extend_from_slice(&[0xFF, 0xE1]);
+    bytes.extend_from_slice(&length.to_be_bytes());
+    bytes.extend_from_slice(&segment);
+    bytes.extend_from_slice(&encoded[2..]);
+    bytes
+}
+
+#[test]
+fn a_photo_is_turned_upright_before_it_is_sized_and_keeps_no_metadata() {
+    let original = photo(300, 100, 6);
+    assert!(original.windows(4).any(|window| window == b"Exif"));
+    let made = render(
+        &original,
+        &[
+            fit(3000, Encoding::Jpeg),
+            boxed(50, 100, Mode::Exact),
+            fit(150, Encoding::Webp),
+            fit(150, Encoding::Avif),
+        ],
+    )
+    .expect("rendered");
+    assert_eq!(
+        (made[0].width, made[0].height),
+        (100, 300),
+        "rotated a quarter turn"
+    );
+    assert_eq!((made[2].width, made[2].height), (50, 150));
+    for one in &made {
+        assert!(
+            !one.bytes.windows(4).any(|window| window == b"Exif"),
+            "no EXIF, so no GPS, in a rendition"
+        );
+    }
+    assert_eq!(
+        sizes(&photo(300, 100, 1), &[fit(3000, Encoding::Jpeg)]),
+        vec![(300, 100)],
+        "an upright photo stays as it is"
+    );
 }

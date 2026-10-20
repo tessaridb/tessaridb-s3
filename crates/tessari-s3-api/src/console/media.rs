@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
-use tessari_s3_core::media::{MediaError, Output, Rule, validate};
+use tessari_s3_core::media::{MediaError, Output, OutputError, Rule, validate};
 use tessari_s3_storage::actions::NewAction;
 
 use super::ConsoleState;
@@ -57,6 +57,19 @@ fn refused(error: &MediaError) -> ConsoleError {
             "a media rule cannot take keys under a '.renditions/' segment"
         }
         MediaError::TooManyRules => "a bucket holds at most 100 media rules",
+    };
+    ConsoleError::invalid("invalid_media", message)
+}
+
+/// An output refused in the console's own words.
+fn unspelled(error: OutputError) -> ConsoleError {
+    let message = match error {
+        OutputError::Unknown => "an output is image, video or poster, a size and a listed format",
+        OutputError::SizeOutOfRange => "an image side is between 16 and 7680 pixels",
+        OutputError::BoxTooLarge => "a box holds at most 50 000 000 pixels",
+        OutputError::ModeNeedsBox => "fit, cover and exact follow a box such as 400x400",
+        OutputError::QualityOutOfRange => "a quality is between 1 and 100",
+        OutputError::QualityOnLossless => "png is lossless and takes no quality",
     };
     ConsoleError::invalid("invalid_media", message)
 }
@@ -127,12 +140,7 @@ pub(super) async fn set(
             let outputs = rule
                 .outputs
                 .iter()
-                .map(|output| {
-                    Output::parse(output).ok_or(ConsoleError::invalid(
-                        "invalid_media",
-                        "an output is image, video or poster, a listed size and a listed format",
-                    ))
-                })
+                .map(|output| Output::parse(output).map_err(unspelled))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Rule {
                 id: rule.id,
