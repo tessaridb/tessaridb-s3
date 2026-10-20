@@ -76,6 +76,16 @@ fn encode(text: &str) -> String {
 
 /// `POST /` with `fields` form-encoded, unsigned, as an STS client sends it.
 async fn ask(state: &ApiState, fields: &[(&str, &str)]) -> Seen {
+    ask_from(state, fields, None, false).await
+}
+
+/// [`ask`] arriving from `peer` (none: an in-process caller), over TLS when `tls`.
+async fn ask_from(
+    state: &ApiState,
+    fields: &[(&str, &str)],
+    peer: Option<std::net::SocketAddr>,
+    tls: bool,
+) -> Seen {
     let body: Vec<String> = fields
         .iter()
         .map(|(name, value)| format!("{}={}", encode(name), encode(value)))
@@ -92,6 +102,15 @@ async fn ask(state: &ApiState, fields: &[(&str, &str)]) -> Seen {
         .header("content-length", body.len().to_string())
         .body(Body::from(body))
         .expect("request");
+    let mut request = request;
+    if let Some(peer) = peer {
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(peer));
+    }
+    if tls {
+        request.extensions_mut().insert(tessari_s3_api::OverTls);
+    }
     send(state, request).await
 }
 
@@ -522,4 +541,28 @@ async fn a_session_policy_narrows_what_its_user_may_do_and_never_widens_it() {
         (unparsable.status, unparsable.code.as_deref()),
         (400, Some("MalformedPolicyDocument"))
     );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn temporary_credentials_cross_the_network_only_over_tls() {
+    let _why = IGNORED;
+    let provider = Provider::start().await;
+    let (state, _) = issuing(&provider, 60).await;
+    let good = provider.identity_token(Shape::Good);
+    let remote = std::net::SocketAddr::from(([10, 0, 0, 9], 40_000));
+    // In the clear from another machine, the bearer token and the issued secret would cross the network readable.
+    let clear = ask_from(&state, &asking(&good, &[], ""), Some(remote), false).await;
+    assert_eq!(
+        (clear.status, clear.code.as_deref()),
+        (403, Some("AccessDenied")),
+        "{}",
+        clear.body
+    );
+    assert!(!clear.body.contains("<SecretAccessKey>"), "{}", clear.body);
+    let secure = ask_from(&state, &asking(&good, &[], ""), Some(remote), true).await;
+    assert_eq!(secure.status, 200, "{}", secure.body);
+    let local = std::net::SocketAddr::from(([127, 0, 0, 1], 40_000));
+    let same_machine = ask_from(&state, &asking(&good, &[], ""), Some(local), false).await;
+    assert_eq!(same_machine.status, 200, "{}", same_machine.body);
 }

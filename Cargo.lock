@@ -3073,6 +3073,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "hmac",
+ "http-body",
  "hyper-util",
  "image",
  "md-5",
