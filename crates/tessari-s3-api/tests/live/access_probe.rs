@@ -57,6 +57,8 @@ const LOCK_BODY: &[u8] = b"<ObjectLockConfiguration><ObjectLockEnabled>Enabled</
 const RETENTION_BODY: &[u8] = b"<Retention><Mode>GOVERNANCE</Mode>\
 <RetainUntilDate>2999-01-01T00:00:00Z</RetainUntilDate></Retention>";
 const HOLD_BODY: &[u8] = b"<LegalHold><Status>ON</Status></LegalHold>";
+const OWNERSHIP_BODY: &[u8] =
+    b"<OwnershipControls><Rule><ObjectOwnership>BucketOwnerEnforced</ObjectOwnership></Rule></OwnershipControls>";
 const TAGGING_BODY: &[u8] =
     b"<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag></TagSet></Tagging>";
 const ENCRYPTION_BODY: &[u8] = b"<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault>\
@@ -357,6 +359,54 @@ pub(crate) fn table(upload: &str) -> Vec<Probe> {
                 "PUT",
                 "/ann-photos/a.txt",
                 &[("legal-hold", None)],
+            )
+        },
+        probe(
+            Operation::GetBucketAcl,
+            "GET",
+            "/ann-photos",
+            &[("acl", None)],
+        ),
+        probe(
+            Operation::PutBucketAcl,
+            "PUT",
+            "/ann-photos",
+            &[("acl", None)],
+        ),
+        probe(
+            Operation::GetObjectAcl,
+            "GET",
+            "/ann-photos/a.txt",
+            &[("acl", None)],
+        ),
+        probe(
+            Operation::PutObjectAcl,
+            "PUT",
+            "/ann-photos/a.txt",
+            &[("acl", None)],
+        ),
+        probe(
+            Operation::GetBucketOwnershipControls,
+            "GET",
+            "/ann-photos",
+            &[("ownershipControls", None)],
+        ),
+        Probe {
+            body: OWNERSHIP_BODY,
+            ..probe(
+                Operation::PutBucketOwnershipControls,
+                "PUT",
+                "/ann-photos",
+                &[("ownershipControls", None)],
+            )
+        },
+        Probe {
+            headers: vec![("x-amz-object-attributes", "ObjectSize")],
+            ..probe(
+                Operation::GetObjectAttributes,
+                "GET",
+                "/ann-photos/a.txt",
+                &[("attributes", None)],
             )
         },
         Probe {

@@ -6,7 +6,9 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Response, StatusCode, heade
 use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Declared};
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
 use tessari_s3_core::objects::range::{RangeRequest, part_bytes, resolve};
-use tessari_s3_storage::objects::{Content, LockOutcome, StoredObject, VersionLock, VersionRead};
+use tessari_s3_storage::objects::{
+    Content, LockOutcome, Part, StoredObject, VersionLock, VersionRead,
+};
 use tessari_s3_types::{ErrorCode, ObjectKey, PartNumber};
 
 use super::body;
@@ -163,7 +165,15 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
     let mut response = Response::new(body);
     *response.status_mut() = status;
     let headers = response.headers_mut();
-    describe(headers, &object, call, slice.is_none());
+    // A read of exactly one part of a multipart object answers that part's own checksum (S3 ref 05 M4).
+    let served_part = match (part_number, &object.content) {
+        (Some(number), Content::Parts(multipart)) if slice.is_some() => multipart
+            .parts
+            .iter()
+            .find(|part| part.number == number.get()),
+        _ => None,
+    };
+    describe(headers, &object, call, slice.is_none(), served_part);
     if let Some(lock) = lock_of(call, key, &object).await? {
         answer_lock(headers, lock);
     }
@@ -293,7 +303,13 @@ fn answer_lock(headers: &mut HeaderMap, lock: VersionLock) {
 }
 
 /// The headers that describe the stored object.
-fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, whole: bool) {
+fn describe(
+    headers: &mut HeaderMap,
+    object: &StoredObject,
+    call: &Call<'_>,
+    whole: bool,
+    part: Option<&Part>,
+) {
     set(headers, "content-type", "binary/octet-stream");
     for (name, value) in &object.headers {
         set(headers, name, value);
@@ -329,10 +345,19 @@ fn describe(headers: &mut HeaderMap, object: &StoredObject, call: &Call<'_>, who
         .headers
         .get("x-amz-checksum-mode")
         .and_then(|v| v.to_str().ok());
-    if whole && checksum_mode.is_some_and(|mode| mode.eq_ignore_ascii_case("ENABLED")) {
+    if (whole || part.is_some())
+        && checksum_mode.is_some_and(|mode| mode.eq_ignore_ascii_case("ENABLED"))
+    {
         for (name, value) in &object.checksums {
-            if let Some(Declared::Supported(algorithm)) = ChecksumAlgorithm::parse(name) {
-                set(headers, algorithm.header(), value);
+            // A part answers its own value of the object's algorithm; one it has none of answers nothing.
+            let answered = match part {
+                Some(part) => part.checksums.get(name),
+                None => Some(value),
+            };
+            if let (Some(Declared::Supported(algorithm)), Some(answered)) =
+                (ChecksumAlgorithm::parse(name), answered)
+            {
+                set(headers, algorithm.header(), answered);
                 // A composite value carries its part count after `-`, which base64 never contains.
                 let kind = if value.contains('-') {
                     "COMPOSITE"

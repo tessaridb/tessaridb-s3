@@ -121,9 +121,21 @@ fn parts(call: &Call<'_>, object: &StoredObject) -> Result<String> {
         );
     }
     for part in page {
+        let _ = write!(out, "<Part>");
+        // The part's own value of each algorithm the object carries.
+        for algorithm in object.checksums.keys() {
+            if let Some(value) = part.checksums.get(algorithm) {
+                let _ = write!(
+                    out,
+                    "<Checksum{0}>{1}</Checksum{0}>",
+                    escape(algorithm),
+                    escape(value)
+                );
+            }
+        }
         let _ = write!(
             out,
-            "<Part><PartNumber>{}</PartNumber><Size>{}</Size></Part>",
+            "<PartNumber>{}</PartNumber><Size>{}</Size></Part>",
             part.number, part.size
         );
     }

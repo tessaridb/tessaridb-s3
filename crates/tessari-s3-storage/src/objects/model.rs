@@ -35,6 +35,8 @@ pub struct Part {
     pub data: [u8; 16],
     /// Size in bytes.
     pub size: u64,
+    /// Its checksums by algorithm name, as the part record stored them.
+    pub checksums: BTreeMap<String, String>,
     /// The wrapped data key its bytes are sealed under; none for a part stored plain.
     pub encryption: Option<WrappedKey>,
 }

@@ -17,10 +17,9 @@ use crate::{Error, Result};
 
 const ENFORCED: &str = "BucketOwnerEnforced";
 
-/// The one ACL there is: the owner — who the caller is signed in as, as every owner this server answers names —
-/// holding FULL_CONTROL.
+/// The one ACL there is: the owner — the space, as every owner this server answers names — holding FULL_CONTROL.
 fn owner_full_control(call: &Call<'_>) -> Response<Body> {
-    let owner = escape(call.verified.access_key());
+    let owner = escape(&call.owner());
     xml_response(
         StatusCode::OK,
         format!(

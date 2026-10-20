@@ -4,6 +4,7 @@
 //! both `s3:GetObjectAttributes` and `s3:GetObject`.
 
 use tessari_s3_core::authz::Role;
+use tessari_s3_core::objects::checksum::{ChecksumAlgorithm, Hashes};
 
 use crate::access::user_with_key;
 use crate::complete::{complete, document};
@@ -135,6 +136,12 @@ async fn a_multipart_object_lists_its_parts_page_by_page() {
     );
     let upload = create(&state, "/attrmp/k").await;
     let mut listed = Vec::new();
+    let mut second = Hashes::new();
+    second.update(&body(5 * MIB, 2));
+    let second = second
+        .finish()
+        .value(ChecksumAlgorithm::Crc64Nvme)
+        .to_owned();
     for (number, bytes) in [
         ("1", body(5 * MIB, 1)),
         ("2", body(5 * MIB, 2)),
@@ -221,6 +228,32 @@ async fn a_multipart_object_lists_its_parts_page_by_page() {
         page.body.contains("<MaxParts>1</MaxParts>"),
         "{}",
         page.body
+    );
+    // A part's own checksum, as the part record stored it, in its listing and in a read of exactly that part.
+    assert!(
+        page.body
+            .contains(&format!("<ChecksumCRC64NVME>{second}</ChecksumCRC64NVME>")),
+        "{}",
+        page.body
+    );
+    let read = call_with(
+        &state,
+        "GET",
+        "/attrmp/k",
+        vec![("partNumber", Some("2"))],
+        vec![("x-amz-checksum-mode", "ENABLED")],
+        b"",
+    )
+    .await;
+    assert_eq!(read.status, 206, "{}", read.body);
+    assert_eq!(
+        header(&read, "x-amz-checksum-crc64nvme"),
+        Some(second.as_str())
+    );
+    assert!(
+        header(&read, "x-amz-checksum-type").is_some(),
+        "{:?}",
+        read.headers
     );
 }
 

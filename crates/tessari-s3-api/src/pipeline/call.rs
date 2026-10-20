@@ -31,6 +31,24 @@ pub struct Call<'a> {
 }
 
 impl Call<'_> {
+    /// The owner every answer names: the space — the account a bucket and everything in it belong to, and the only
+    /// one a principal reaches — so a rotated key or a granted reader never shows up as one; root, whose buckets are
+    /// in every space, is named by its key.
+    #[must_use]
+    pub fn owner(&self) -> String {
+        fn space(principal: &Principal) -> Option<&str> {
+            match principal {
+                Principal::User(user) => Some(user.space.as_str()),
+                Principal::Upload(upload) => Some(upload.parent.space.as_str()),
+                Principal::Session(session) => space(session.as_user()),
+                Principal::Root | Principal::Anonymous => None,
+            }
+        }
+        space(self.principal)
+            .unwrap_or_else(|| self.verified.access_key())
+            .to_owned()
+    }
+
     /// The bucket a bucket or object operation addresses. Dispatch guarantees one; its absence is a defect.
     ///
     /// # Errors

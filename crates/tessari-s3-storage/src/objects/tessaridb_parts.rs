@@ -6,6 +6,7 @@ use tessari_s3_infrastructure::tessaridb::{Answer, MetaPool, Number, Value};
 use super::super::entity::sealed;
 use super::super::model::Part;
 use crate::answers::first_record;
+use crate::multipart::string_map;
 use crate::{Error, Result};
 
 /// One parts record as an object reads it.
@@ -28,6 +29,7 @@ fn part(value: &Value) -> Result<Part> {
             _ => return Err(malformed("data")),
         },
         size: u64::try_from(integer("size")?).map_err(|_| malformed("size"))?,
+        checksums: string_map(fields.get("checksums"))?,
         encryption: sealed(fields)?,
     })
 }
@@ -52,7 +54,7 @@ pub(super) async fn parts_of(
     // the upload, and an upload id never comes back — so the object still naming it afterwards proves the parts were
     // whole when they were read. A table is grammar, and this one is the server's own.
     let script = format!(
-        "SELECT number, data, size, sse_alg, sse_kek, sse_nonce, sse_key, sse_c_salt, sse_c_verifier FROM parts WHERE upload = $upload LIMIT $limit \
+        "SELECT number, data, size, checksums, sse_alg, sse_kek, sse_nonce, sse_key, sse_c_salt, sse_c_verifier FROM parts WHERE upload = $upload LIMIT $limit \
          USING INDEX by_upload; SELECT upload FROM ONLY {table}:$id;"
     );
     let mut answers = pool.run(&script, parameters).await?.into_iter();

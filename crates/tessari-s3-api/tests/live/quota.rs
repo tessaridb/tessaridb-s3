@@ -100,6 +100,11 @@ fn writes(upload: &str, first_part: &str, spare: &str) -> Vec<Write> {
             query: vec![("tagging", None)],
             ..write(Operation::DeleteObjectTagging, "DELETE", "/full/a")
         },
+        Write {
+            query: vec![("acl", None)],
+            headers: vec![("x-amz-acl", "private".to_owned())],
+            ..write(Operation::PutObjectAcl, "PUT", "/full/a")
+        },
         // Retention needs a bucket with Object Lock, as full as `full`.
         Write {
             query: vec![("retention", None)],

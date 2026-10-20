@@ -18,6 +18,7 @@ const MAX_BUCKETS_PER_PAGE: usize = 10_000;
 /// `PUT /{bucket}` — an optional `CreateBucketConfiguration` may only name this server's region.
 pub(crate) async fn create(call: &Call<'_>, body: Body) -> Result<Response<Body>> {
     let name = call.bucket()?;
+    owner_enforced(call)?;
     let document = read_verified(body, call.verified, CONTROL_BODY_LIMIT).await?;
     let region = call.state.region();
     let constraint = element_text(&document, "CreateBucketConfiguration", "LocationConstraint")?;
@@ -182,7 +183,7 @@ pub(crate) async fn list(call: &Call<'_>) -> Result<Response<Body>> {
     let mut document = format!(
         "<ListAllMyBucketsResult xmlns=\"{S3_NAMESPACE}\"><Owner><ID>{owner}</ID><DisplayName>{owner}</DisplayName>\
          </Owner><Buckets>",
-        owner = escape(call.verified.access_key())
+        owner = escape(&call.owner())
     );
     for bucket in &page {
         document.push_str(&format!(
@@ -217,6 +218,39 @@ pub(crate) async fn resident(call: &Call<'_>) -> Result<()> {
             .into())
         }
         _ => Ok(()),
+    }
+}
+
+/// Refuses a bucket asked to be made with ACLs on: an ACL granting anyone but the owner (`InvalidBucketAclWithObjectOwnership`,
+/// as S3 answers under BucketOwnerEnforced), or an object ownership other than BucketOwnerEnforced, which this
+/// server does not implement — rather than make a bucket that quietly differs from what was asked.
+fn owner_enforced(call: &Call<'_>) -> Result<()> {
+    let text = |name: &str| {
+        call.headers
+            .get(name)
+            .map(|value| value.to_str().unwrap_or(""))
+    };
+    let granting = call
+        .headers
+        .keys()
+        .any(|name| name.as_str().starts_with("x-amz-grant-"));
+    if granting
+        || !matches!(
+            text("x-amz-acl"),
+            None | Some("private" | "bucket-owner-full-control")
+        )
+    {
+        return Err(Error::new(
+            ErrorCode::InvalidBucketAclWithObjectOwnership,
+            "Bucket cannot have ACLs set with ObjectOwnership's BucketOwnerEnforced setting",
+        ));
+    }
+    match text("x-amz-object-ownership") {
+        None | Some("BucketOwnerEnforced") => Ok(()),
+        Some(_) => Err(Error::new(
+            ErrorCode::NotImplemented,
+            "only BucketOwnerEnforced is implemented: ACLs stay disabled",
+        )),
     }
 }
 

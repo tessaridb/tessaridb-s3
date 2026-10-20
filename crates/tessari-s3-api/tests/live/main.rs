@@ -74,6 +74,7 @@ mod objects;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod oidc_provider;
+mod ownership;
 mod policy;
 mod policy_enforced;
 mod policy_probe;

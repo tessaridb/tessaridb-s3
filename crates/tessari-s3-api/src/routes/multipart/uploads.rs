@@ -104,7 +104,7 @@ pub(crate) async fn list_uploads(call: &Call<'_>) -> Result<Response<Body>> {
         "<MaxUploads>{max}</MaxUploads><IsTruncated>{}</IsTruncated>",
         page.truncated
     );
-    let owner = escape(call.verified.access_key());
+    let owner = escape(&call.owner());
     let mut prefixes = String::new();
     for entry in &page.entries {
         match entry {

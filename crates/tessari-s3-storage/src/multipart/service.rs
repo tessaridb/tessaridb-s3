@@ -220,6 +220,7 @@ impl MultipartService {
                 number: row.number,
                 data: row.data,
                 size: row.record.size,
+                checksums: row.record.checksums.clone(),
                 encryption: row.encryption.clone(),
             })
             .collect();

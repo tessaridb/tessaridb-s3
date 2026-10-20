@@ -14,3 +14,4 @@ pub use model::{
 };
 pub use service::MultipartService;
 pub use tessaridb::TessariMultipart;
+pub(crate) use tessaridb::string_map;
