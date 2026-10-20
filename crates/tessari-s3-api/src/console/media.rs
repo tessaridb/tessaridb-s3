@@ -13,6 +13,7 @@ use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_core::media::{MediaError, Output, OutputError, Rule, validate};
 use tessari_s3_storage::actions::NewAction;
+use tessari_s3_storage::buckets::MediaSet;
 use tessari_s3_storage::media::SweepProgress;
 
 use super::ConsoleState;
@@ -35,12 +36,15 @@ pub(super) struct MediaRule {
 #[derive(Serialize)]
 pub(super) struct MediaRules {
     rules: Vec<MediaRule>,
+    /// How many times the rules were set; a save naming it is refused if they were set again since.
+    version: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetMedia {
     rules: Vec<MediaRule>,
+    version: Option<u64>,
     reason: Option<String>,
 }
 
@@ -127,6 +131,7 @@ pub(super) async fn get(
         .get(&name)
         .await?
         .ok_or_else(|| ConsoleError::missing("no_such_bucket", "the bucket does not exist"))?;
+    let version = found.media_version;
     let rules = found
         .media
         .unwrap_or_default()
@@ -138,7 +143,7 @@ pub(super) async fn get(
             prefix: rule.prefix,
         })
         .collect();
-    Ok(Json(MediaRules { rules }))
+    Ok(Json(MediaRules { rules, version }))
 }
 
 pub(super) async fn set(
@@ -152,8 +157,13 @@ pub(super) async fn set(
 ) -> Result<Response, ConsoleError> {
     let SetMedia {
         rules,
+        version,
         reason: given,
-    } = json(&headers, &body, "expected rules and an optional reason")?;
+    } = json(
+        &headers,
+        &body,
+        "expected rules, an optional version and an optional reason",
+    )?;
     let why = reason(given, false)?;
     let name = bucket_name(&bucket)?;
     on_bucket(
@@ -182,7 +192,11 @@ pub(super) async fn set(
         })
         .collect::<Result<Vec<_>, ConsoleError>>()?;
     validate(&rules).map_err(|error| refused(&error))?;
-    let set = state.storage().buckets().set_media(&name, &rules).await?;
+    let set = state
+        .storage()
+        .buckets()
+        .set_media(&name, &rules, version)
+        .await?;
     record(
         &state,
         NewAction {
@@ -190,17 +204,25 @@ pub(super) async fn set(
             operation: "set_media".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,
-            outcome: if set { "done" } else { "no_such_bucket" }.to_owned(),
+            outcome: match set {
+                MediaSet::Set => "done",
+                MediaSet::Stale => "stale_media",
+                MediaSet::NoSuchBucket => "no_such_bucket",
+            }
+            .to_owned(),
         },
     )
     .await?;
-    if set {
-        Ok(StatusCode::NO_CONTENT.into_response())
-    } else {
-        Err(ConsoleError::missing(
+    match set {
+        MediaSet::Set => Ok(StatusCode::NO_CONTENT.into_response()),
+        MediaSet::Stale => Err(ConsoleError::stale(
+            "stale_media",
+            "the media rules were changed since they were read; read them again",
+        )),
+        MediaSet::NoSuchBucket => Err(ConsoleError::missing(
             "no_such_bucket",
             "the bucket does not exist",
-        ))
+        )),
     }
 }
 

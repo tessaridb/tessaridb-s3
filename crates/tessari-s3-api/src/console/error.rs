@@ -128,6 +128,15 @@ impl ConsoleError {
         }
     }
 
+    /// `412` for a change that named a version of something set again since it was read.
+    pub(crate) const fn stale(code: &'static str, message: &'static str) -> Self {
+        Self {
+            status: StatusCode::PRECONDITION_FAILED,
+            code,
+            message,
+        }
+    }
+
     pub(crate) const fn failed_over() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,

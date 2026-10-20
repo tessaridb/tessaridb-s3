@@ -37,6 +37,8 @@ pub struct BucketEntity {
     pub object_lock: Option<Value>,
     /// The media rules as stored; absent while none are set.
     pub media: Option<Vec<Value>>,
+    /// How many times the media rules were set; 0 before the first.
+    pub media_version: u64,
     /// The tags as stored; absent while none are set.
     pub tags: Option<Value>,
     /// The default encryption as stored; absent while the bucket has none.
@@ -127,6 +129,13 @@ impl BucketEntity {
             Some(configuration @ Value::Object(_)) => Some(configuration.clone()),
             Some(_) => return Err(malformed("notify")),
         };
+        let media_version = match fields.get("media_version") {
+            Some(Value::Number(Number::Integer(times))) => {
+                u64::try_from(*times).map_err(|_| malformed("media_version"))?
+            }
+            None | Some(Value::None | Value::Null) => 0,
+            Some(_) => return Err(malformed("media_version")),
+        };
         let media = match fields.get("media") {
             None | Some(Value::None) => None,
             Some(Value::Array(rules)) => Some(rules.clone()),
@@ -168,6 +177,7 @@ impl BucketEntity {
             replication,
             object_lock,
             media,
+            media_version,
             tags,
             encryption,
             policy,

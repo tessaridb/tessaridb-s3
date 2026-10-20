@@ -87,6 +87,14 @@ export function readMediaRules(v: unknown): readonly MediaRule[] | null {
   return record(v) ? list(v["rules"], rule) : null;
 }
 
+/** A bucket's rules with the version a save names, so a save over someone else's is refused. */
+export type MediaSet = { readonly rules: readonly MediaRule[]; readonly version: number };
+
+export function readMediaSet(v: unknown): MediaSet | null {
+  const rules = readMediaRules(v);
+  return rules !== null && record(v) && count(v["version"]) ? { rules, version: v["version"] } : null;
+}
+
 /** The content types an operator wrote comma-separated, trimmed, empties dropped. */
 export const typesOf = (written: string): string[] =>
   written

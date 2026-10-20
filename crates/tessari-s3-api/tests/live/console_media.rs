@@ -446,3 +446,57 @@ async fn a_sweep_renders_the_objects_written_before_a_rule_once_a_page_at_a_time
         "only whoever configures the bucket starts a sweep"
     );
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_save_naming_a_version_set_again_since_is_refused_and_changes_nothing() {
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    assert_eq!(
+        call_as(&state, ann.pair(), "PUT", "/pics", vec![], vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    let read = || async {
+        send(&console, "GET", MEDIA, Some(&token), None)
+            .await
+            .json()
+    };
+    assert_eq!(read().await["version"], json!(0));
+    let rules = |output: &str| json!([{"id": "p", "content_types": ["image/*"], "prefix": "", "outputs": [output]}]);
+    let (console, token) = (&console, &token);
+    let save = |body: Value| async move {
+        send(
+            console,
+            "PUT",
+            MEDIA,
+            Some(token),
+            Some(&body.to_string()),
+        )
+        .await
+    };
+    // Two editors read version 0; the first save wins and moves it to 1.
+    let first = save(json!({"rules": rules("image/320/jpeg"), "version": 0})).await;
+    assert_eq!(first.status, 204);
+    assert_eq!(read().await["version"], json!(1));
+    let second = save(json!({"rules": rules("image/640/webp"), "version": 0})).await;
+    assert_eq!(second.status, 412);
+    assert_eq!(second.code().as_deref(), Some("stale_media"));
+    assert_eq!(
+        read().await["rules"],
+        rules("image/320/jpeg"),
+        "the stale save changed nothing"
+    );
+    // Read again, the second editor saves at the current version; a save naming none is not checked.
+    assert_eq!(
+        save(json!({"rules": rules("image/640/webp"), "version": 1}))
+            .await
+            .status,
+        204
+    );
+    assert_eq!(save(json!({"rules": []})).await.status, 204);
+    assert_eq!(read().await, json!({"rules": [], "version": 3}));
+}

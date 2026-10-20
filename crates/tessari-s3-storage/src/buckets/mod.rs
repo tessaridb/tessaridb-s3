@@ -18,5 +18,5 @@ mod tessaridb;
 pub(crate) use model::LOCAL;
 pub use model::{Acknowledgement, Bucket, BucketEncryption, LockSet};
 pub use public_access::PublicAccess;
-pub use service::{AcknowledgementSet, BucketService, Created, Deleted};
+pub use service::{AcknowledgementSet, BucketService, Created, Deleted, MediaSet};
 pub use tessaridb::TessariBuckets;

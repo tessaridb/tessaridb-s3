@@ -79,6 +79,7 @@ DEFINE FIELD IF NOT EXISTS cors ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS media_version ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
 DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;

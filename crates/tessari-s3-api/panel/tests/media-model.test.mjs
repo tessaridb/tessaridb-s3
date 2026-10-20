@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KINDS, outputOf, readMediaRules, readSweep, spell, sweepText, typesOf } from "../src/media-model.ts";
+import { KINDS, outputOf, readMediaRules, readMediaSet, readSweep, spell, sweepText, typesOf } from "../src/media-model.ts";
 
 const rule = { id: "photos", content_types: ["image/*"], prefix: "photos/", outputs: ["image/320/jpeg", "image/1920/webp"] };
 
@@ -66,4 +66,10 @@ test("an HLS stream names its rungs once, ascending", () => {
   for (const name of ["video/720p+360p/hls", "video/720p+720p/hls", "video/700p/hls", "video/360p+/hls", "video/360p+720p/mp4"]) {
     assert.equal(outputOf(name), null, name);
   }
+});
+
+test("the rules come with the version a save names", () => {
+  assert.deepEqual(readMediaSet({ rules: [rule], version: 3 }), { rules: [rule], version: 3 });
+  assert.equal(readMediaSet({ rules: [rule] }), null);
+  assert.equal(readMediaSet({ rules: [rule], version: -1 }), null);
 });
