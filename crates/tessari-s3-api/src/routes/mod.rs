@@ -9,6 +9,7 @@ use tessari_s3_types::ErrorCode;
 use crate::pipeline::call::Call;
 use crate::{Error, Result};
 
+mod acl;
 pub mod buckets;
 pub(crate) mod cors;
 mod encryption;
@@ -62,6 +63,9 @@ pub(crate) async fn route(
             | Operation::DeleteBucketCors
             | Operation::GetPublicAccessBlock
             | Operation::DeletePublicAccessBlock
+            | Operation::GetBucketAcl
+            | Operation::PutBucketAcl
+            | Operation::GetBucketOwnershipControls
     ) {
         buckets::resident(call).await?;
     }
@@ -107,6 +111,12 @@ pub(crate) async fn route(
         Operation::GetPublicAccessBlock => public_access::get(call).await,
         Operation::PutPublicAccessBlock => public_access::put(call, body).await,
         Operation::DeletePublicAccessBlock => public_access::delete(call).await,
+        Operation::GetBucketAcl => acl::get_bucket(call).await,
+        Operation::PutBucketAcl => acl::put_bucket(call, body).await,
+        Operation::GetObjectAcl => acl::get_object(call, objects::key(call)?).await,
+        Operation::PutObjectAcl => acl::put_object(call, objects::key(call)?, body).await,
+        Operation::GetBucketOwnershipControls => acl::get_ownership(call).await,
+        Operation::PutBucketOwnershipControls => acl::put_ownership(call, body).await,
         Operation::GetObjectLockConfiguration => object_lock::get(call).await,
         Operation::PutObjectLockConfiguration => object_lock::put(call, body).await,
         Operation::GetObjectRetention => retention::get_retention(call, objects::key(call)?).await,

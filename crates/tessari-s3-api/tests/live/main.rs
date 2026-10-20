@@ -10,6 +10,7 @@ mod access;
 mod access_crossing;
 mod access_probe;
 mod access_window;
+mod acl;
 mod audit;
 #[path = "../wire/authority.rs"]
 mod authority;

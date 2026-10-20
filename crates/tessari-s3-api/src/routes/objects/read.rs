@@ -55,10 +55,7 @@ pub(crate) async fn read(call: &Call<'_>, key: &ObjectKey, head: bool) -> Result
             "Range and partNumber cannot both be specified",
         ));
     }
-    let object = match call.query_value("versionId") {
-        Some(version) => stored_version(call, key, version).await?,
-        None => stored(call, key).await?,
-    };
+    let object = addressed(call, key).await?;
     let customer = read_customer(call.headers)?;
     // The object's own encryption is used; a read naming the server's is refused (GetObject, HeadObject).
     if call.headers.contains_key("x-amz-server-side-encryption") {
@@ -200,6 +197,14 @@ fn no_such_bucket() -> Error {
 }
 
 /// The key's current object; a key whose newest version is a delete marker answers 404 naming it (S3 ref 08 M4).
+/// The object a read addresses: the version `versionId` names, or the current one.
+pub(crate) async fn addressed(call: &Call<'_>, key: &ObjectKey) -> Result<StoredObject> {
+    match call.query_value("versionId") {
+        Some(version) => stored_version(call, key, version).await,
+        None => stored(call, key).await,
+    }
+}
+
 async fn stored(call: &Call<'_>, key: &ObjectKey) -> Result<StoredObject> {
     let objects = call.state.storage().objects();
     match objects.get(call.bucket()?, key).await? {

@@ -24,7 +24,7 @@ use crate::{Error, Result};
 pub(crate) use copy::copy;
 pub(crate) use delete_many::delete_many;
 pub(crate) use put::put;
-pub(crate) use read::read;
+pub(crate) use read::{addressed, read};
 pub(crate) use replica::REPLICA_VERSION;
 
 /// The key an object operation addresses. Dispatch guarantees one; its absence is a defect.

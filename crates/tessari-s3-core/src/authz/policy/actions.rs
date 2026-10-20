@@ -156,6 +156,18 @@ pub fn policy_action(operation: Operation, naming_version: bool) -> Option<(&'st
             versioned("s3:DeleteObjectTagging", "s3:DeleteObjectVersionTagging"),
             Object,
         ),
+        O::GetBucketAcl => ("s3:GetBucketAcl", Bucket),
+        O::PutBucketAcl => ("s3:PutBucketAcl", Bucket),
+        O::GetBucketOwnershipControls => ("s3:GetBucketOwnershipControls", Bucket),
+        O::PutBucketOwnershipControls => ("s3:PutBucketOwnershipControls", Bucket),
+        O::GetObjectAcl => (
+            versioned("s3:GetObjectAcl", "s3:GetObjectVersionAcl"),
+            Object,
+        ),
+        O::PutObjectAcl => (
+            versioned("s3:PutObjectAcl", "s3:PutObjectVersionAcl"),
+            Object,
+        ),
         O::GetObjectRetention => ("s3:GetObjectRetention", Object),
         O::PutObjectRetention => ("s3:PutObjectRetention", Object),
         O::GetObjectLegalHold => ("s3:GetObjectLegalHold", Object),
