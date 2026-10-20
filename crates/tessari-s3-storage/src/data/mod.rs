@@ -3,6 +3,7 @@
 mod drive;
 mod files;
 mod format;
+mod layout;
 mod shards;
 mod writer;
 

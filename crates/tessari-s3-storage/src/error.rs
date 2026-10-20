@@ -53,6 +53,14 @@ pub enum Error {
         /// What is wrong with it.
         reason: &'static str,
     },
+    /// The data directory was written in a layout this build does not read: a newer build's, or not this server's.
+    #[error("the data directory's layout is {found}; this build reads layout {reads}")]
+    DataLayout {
+        /// What the directory's marker says.
+        found: String,
+        /// The layout this build reads.
+        reads: u32,
+    },
     /// A data file operation failed at the operating system. After a failed sync the write is over: the pages the
     /// sync covered may be gone even though a second sync would succeed.
     #[error("data file {op} failed: {kind}")]
@@ -192,7 +200,8 @@ impl Error {
             | Self::Randomness
             | Self::Unsealable
             | Self::NoIamKey
-            | Self::LayoutMismatch { .. } => ErrorCategory::Internal,
+            | Self::LayoutMismatch { .. }
+            | Self::DataLayout { .. } => ErrorCategory::Internal,
             Self::InvalidShard { .. }
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }

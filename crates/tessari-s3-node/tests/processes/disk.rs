@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// Files of any kind under `dir`.
+/// Files of any kind under `dir`, the layout marker left out.
 fn files(dir: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
@@ -13,7 +13,12 @@ fn files(dir: &Path) -> usize {
         .flatten()
         .map(|entry| {
             let path = entry.path();
-            if path.is_dir() { files(&path) } else { 1 }
+            if path.is_dir() {
+                files(&path)
+            } else {
+                // The data directory's layout marker is not a file a write made.
+                usize::from(path.file_name().is_none_or(|name| name != "LAYOUT"))
+            }
         })
         .sum()
 }

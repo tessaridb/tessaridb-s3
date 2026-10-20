@@ -35,10 +35,15 @@ fn amz_now() -> String {
 
 /// A request to `node` signed over `body`, not yet sent.
 fn signed(node: &Node, method: &str, path: &str, body: &[u8]) -> reqwest::RequestBuilder {
+    signed_to(&node.s3, method, path, body)
+}
+
+/// A request to the node serving S3 at `host`, signed over `body`, not yet sent.
+fn signed_to(host: &str, method: &str, path: &str, body: &[u8]) -> reqwest::RequestBuilder {
     let amz_date = amz_now();
     let unsigned = signer::Unsigned {
         method,
-        host: &node.s3,
+        host,
         path,
         query: Vec::new(),
         headers: Vec::new(),
@@ -56,7 +61,7 @@ fn signed(node: &Node, method: &str, path: &str, body: &[u8]) -> reqwest::Reques
         .expect("an HTTP client")
         .request(
             reqwest::Method::from_bytes(method.as_bytes()).expect("method"),
-            format!("http://{}{target}", node.s3),
+            format!("http://{host}{target}"),
         )
         .timeout(REQUEST_WITHIN);
     for (name, value) in headers.iter().filter(|(name, _)| name != "host") {
@@ -84,6 +89,15 @@ pub async fn put(node: &Node, path: &str, body: &[u8]) -> Result<(u16, String), 
         .await?;
     let status = response.status().as_u16();
     Ok((status, response.text().await.unwrap_or_default()))
+}
+
+/// A PUT to the node serving S3 at `host`: its status, or the transport's error when nothing answered.
+pub async fn put_to(host: &str, path: &str, body: &[u8]) -> Result<u16, reqwest::Error> {
+    let response = signed_to(host, "PUT", path, body)
+        .body(body.to_vec())
+        .send()
+        .await?;
+    Ok(response.status().as_u16())
 }
 
 /// A GET's status and body bytes, or the transport's error when the node did not answer.

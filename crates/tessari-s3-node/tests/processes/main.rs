@@ -28,6 +28,7 @@ mod partition;
 mod requests;
 mod s3;
 mod soak;
+mod upgrade;
 mod zones;
 
 use std::time::{Duration, Instant};

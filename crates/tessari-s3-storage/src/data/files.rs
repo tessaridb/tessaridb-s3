@@ -157,8 +157,12 @@ impl DataFiles {
     /// The drive's refusal while walking or removing.
     pub(crate) async fn recover(&self) -> Result<usize> {
         let root = self.root.join(DATA_SUBDIR);
-        // Once, before the node serves: no writer of this process exists yet, so every temporary name is a dead one.
-        blocking("recover", move || remove_temps(&root)).await
+        // Once, before serving: the layout must be this build's, and with no writer yet every temporary is dead.
+        blocking("recover", move || {
+            super::layout::check(&root)?;
+            remove_temps(&root)
+        })
+        .await
     }
 
     /// Starts writing data `id`: its directory exists and its temporary file holds the header.
