@@ -105,8 +105,10 @@ impl VideoFormat {
     }
 }
 
+mod ladder;
 mod output;
 
+pub use ladder::Ladder;
 pub use output::{Fit, Output, OutputError, Size};
 
 /// One rule.

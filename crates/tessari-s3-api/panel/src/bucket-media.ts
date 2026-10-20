@@ -38,13 +38,15 @@ function outputRow(id: string, spelled: string | null, remove: (row: HTMLElement
     }
     const video = kind.value === "video";
     offer(format, KINDS[kind.value].formats, format.value);
-    lines.hidden = !video;
-    side.hidden = video;
+    const stream = video && format.value === "hls";
+    lines.hidden = !video || stream;
+    side.hidden = video && !stream;
+    side.placeholder = stream ? "360p+720p+1080p" : "1280 or 400x400-cover";
     quality.hidden = video || format.value === "png";
   };
   kind.value = start.kind;
   offer(lines, KINDS.video.sizes, start.kind === "video" ? start.size : "");
-  side.value = start.kind === "video" ? "1280" : start.size;
+  side.value = start.kind !== "video" || start.format === "hls" ? start.size : "360p+720p";
   quality.value = start.quality;
   offer(format, KINDS[start.kind].formats, start.format);
   follow();
@@ -55,7 +57,7 @@ function outputRow(id: string, spelled: string | null, remove: (row: HTMLElement
   drop.addEventListener("click", () => remove(row));
   const read = (): string => {
     const video = kind.value === "video";
-    const size = video ? lines.value : side.value.trim();
+    const size = video && format.value !== "hls" ? lines.value : side.value.trim();
     const named = video || quality.hidden ? "" : quality.value.trim();
     return `${kind.value}/${size}/${format.value}${named === "" ? "" : `@${named}`}`;
   };

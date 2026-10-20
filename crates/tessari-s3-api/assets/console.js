@@ -1413,13 +1413,14 @@
   //! (content types under a key prefix) get which renditions. An output is
   //! `kind/size/format`: a video's size and every format come from the server's
   //! lists; an image's or a poster's size is a side or a box (`400x400-cover`)
-  //! of 16-7680 pixels, and a lossy still format may carry `@quality`. The server
+  //! of 16-7680 pixels, and a lossy still format may carry `@quality`; an HLS
+  //! stream names its ladder of video sizes (`video/360p+720p/hls`). The server
   //! checks a rule set as a whole, this page only reads the answer and shapes the form.
   var IMAGE_SIZES = ["150", "320", "640", "768", "1024", "1280", "1440", "1920", "2560", "3840"];
   var STILL_FORMATS = ["jpeg", "png", "webp", "avif"];
   var KINDS = {
     image: { label: "Image", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "image" },
-    video: { label: "Video", sizes: ["360p", "480p", "720p", "1080p", "1440p", "2160p"], formats: ["mp4", "webm"], from: "video" },
+    video: { label: "Video", sizes: ["360p", "480p", "720p", "1080p", "1440p", "2160p"], formats: ["mp4", "webm", "hls"], from: "video" },
     poster: { label: "Poster frame", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "video" }
   };
   var isKind = (value) => Object.hasOwn(KINDS, value);
@@ -1429,6 +1430,10 @@
     return box2 === null ? isSide(written) : isSide(box2[1] ?? "") && isSide(box2[2] ?? "");
   }
   var isQuality = (written, format2) => written === "" || format2 !== "png" && /^[0-9]+$/.test(written) && Number(written) >= 1 && Number(written) <= 100;
+  function isLadder(written) {
+    const places = written.split("+").map((rung) => KINDS.video.sizes.findIndex((size2) => size2 === rung));
+    return places.every((place, index) => place >= 0 && (index === 0 || place > (places[index - 1] ?? -1)));
+  }
   function outputOf(name) {
     const [kind, size2, written, extra] = name.split("/");
     if (kind === void 0 || size2 === void 0 || written === void 0 || extra !== void 0 || !isKind(kind)) {
@@ -1442,7 +1447,8 @@
       return null;
     }
     if (kind === "video") {
-      return lists.sizes.includes(size2) && at2 < 0 ? { kind, size: size2, format: format2, quality } : null;
+      const fits = format2 === "hls" ? isLadder(size2) : lists.sizes.includes(size2);
+      return fits && at2 < 0 ? { kind, size: size2, format: format2, quality } : null;
     }
     return isStillSize(size2) && isQuality(quality, format2) ? { kind, size: size2, format: format2, quality } : null;
   }
@@ -1504,13 +1510,15 @@
       }
       const video = kind.value === "video";
       offer2(format2, KINDS[kind.value].formats, format2.value);
-      lines.hidden = !video;
-      side.hidden = video;
+      const stream = video && format2.value === "hls";
+      lines.hidden = !video || stream;
+      side.hidden = video && !stream;
+      side.placeholder = stream ? "360p+720p+1080p" : "1280 or 400x400-cover";
       quality.hidden = video || format2.value === "png";
     };
     kind.value = start.kind;
     offer2(lines, KINDS.video.sizes, start.kind === "video" ? start.size : "");
-    side.value = start.kind === "video" ? "1280" : start.size;
+    side.value = start.kind !== "video" || start.format === "hls" ? start.size : "360p+720p";
     quality.value = start.quality;
     offer2(format2, KINDS[start.kind].formats, start.format);
     follow();
@@ -1521,7 +1529,7 @@
     drop.addEventListener("click", () => remove(row2));
     const read = () => {
       const video = kind.value === "video";
-      const size2 = video ? lines.value : side.value.trim();
+      const size2 = video && format2.value !== "hls" ? lines.value : side.value.trim();
       const named = video || quality.hidden ? "" : quality.value.trim();
       return `${kind.value}/${size2}/${format2.value}${named === "" ? "" : `@${named}`}`;
     };

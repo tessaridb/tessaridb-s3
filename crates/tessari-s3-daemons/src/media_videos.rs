@@ -141,6 +141,24 @@ impl VideoWorker {
                     )
                     .await
             }
+            Output::Stream { ladder } => {
+                let directory = output.with_extension("hls");
+                let made = crate::media_streams::stream(
+                    &self.ffmpeg,
+                    &self.objects,
+                    (bucket, rendition),
+                    (input, &directory),
+                    ladder,
+                    sealing.as_ref(),
+                )
+                .await;
+                if let Err(error) = tokio::fs::remove_dir_all(&directory).await
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::warn!(daemon = "media-videos", %error, "a scratch folder was left behind");
+                }
+                return made;
+            }
             Output::Image { .. } => return Err("not a video output".to_owned()),
         };
         landed(&written.map_err(|error| error.to_string())?)

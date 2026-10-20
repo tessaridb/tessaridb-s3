@@ -1,5 +1,6 @@
 use super::{
-    Fit, ImageFormat, MediaError, Output, OutputError, Rule, Size, VideoFormat, matches, validate,
+    Fit, ImageFormat, Ladder, MediaError, Output, OutputError, Rule, Size, VideoFormat, matches,
+    validate,
 };
 
 fn rule(id: &str, types: &[&str], prefix: &str, outputs: &[&str]) -> Rule {
@@ -237,4 +238,50 @@ fn a_rule_matches_its_types_and_prefix_and_never_a_rendition() {
         "image/webp",
         "photos/a.jpg.renditions/image-320.webp"
     ));
+}
+
+#[test]
+fn a_stream_names_its_rungs_once_ascending_and_its_files_under_one_folder() {
+    let ladder = |name: &str| Ladder::parse(name).expect("a ladder");
+    assert_eq!(
+        Output::parse("video/360p+720p/hls"),
+        Ok(Output::Stream {
+            ladder: ladder("360p+720p")
+        })
+    );
+    assert_eq!(
+        ladder("360p+720p+1080p").rungs().collect::<Vec<_>>(),
+        vec![360, 720, 1080]
+    );
+    for name in [
+        "video/720p/hls",
+        "video/360p+480p+720p+1080p+1440p+2160p/hls",
+    ] {
+        assert_eq!(
+            Output::parse(name).map(|output| output.name()),
+            Ok(name.to_owned())
+        );
+    }
+    for refused in [
+        "video/720p+360p/hls",
+        "video/720p+720p/hls",
+        "video/700p/hls",
+        "video//hls",
+        "video/720p+/hls",
+        "video/hls/mp4",
+        "image/720p/hls",
+    ] {
+        assert_eq!(
+            Output::parse(refused),
+            Err(OutputError::Unknown),
+            "{refused}"
+        );
+    }
+    let stream = Output::parse("video/360p+720p/hls").expect("a stream");
+    assert_eq!(
+        stream.file_name(),
+        "hls-360p-720p/master.m3u8",
+        "no + to encode in a path"
+    );
+    assert_eq!(stream.source(), "video");
 }

@@ -42,7 +42,7 @@ test("the lists are the server's", () => {
   assert.deepEqual(Object.keys(KINDS), ["image", "video", "poster"]);
   assert.deepEqual(KINDS.image.sizes, ["150", "320", "640", "768", "1024", "1280", "1440", "1920", "2560", "3840"]);
   assert.deepEqual(KINDS.video.sizes, ["360p", "480p", "720p", "1080p", "1440p", "2160p"]);
-  assert.deepEqual(KINDS.video.formats, ["mp4", "webm"]);
+  assert.deepEqual(KINDS.video.formats, ["mp4", "webm", "hls"]);
   assert.deepEqual(KINDS.poster.formats, ["jpeg", "png", "webp", "avif"]);
 });
 
@@ -58,4 +58,12 @@ test("a sweep reads as the server sends it and says where it stands", () => {
   assert.equal(readSweep({ state: "done", listed: 4 }), null);
   assert.equal(sweepText({ state: "done", listed: 104, queued: 6 }), "The objects already here were rendered: 104 listed, 6 renditions queued.");
   assert.match(sweepText({ state: "none", listed: 0, queued: 0 }), /not been rendered/);
+});
+
+test("an HLS stream names its rungs once, ascending", () => {
+  assert.deepEqual(outputOf("video/360p+720p/hls"), { kind: "video", size: "360p+720p", format: "hls", quality: "" });
+  assert.notEqual(outputOf("video/1080p/hls"), null);
+  for (const name of ["video/720p+360p/hls", "video/720p+720p/hls", "video/700p/hls", "video/360p+/hls", "video/360p+720p/mp4"]) {
+    assert.equal(outputOf(name), null, name);
+  }
 });

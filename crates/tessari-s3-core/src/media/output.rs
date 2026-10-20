@@ -3,7 +3,7 @@
 
 use tessari_s3_constants::MEDIA_MAX_PIXELS;
 
-use super::{ImageFormat, MAX_SIDE, MIN_SIDE, VIDEO_SIZES, VideoFormat};
+use super::{ImageFormat, Ladder, MAX_SIDE, MIN_SIDE, VIDEO_SIZES, VideoFormat};
 
 /// How an image is made to a box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -178,6 +178,11 @@ pub enum Output {
         /// Its container and codecs.
         format: VideoFormat,
     },
+    /// A video as an HLS stream: one H.264 rendition per rung under a master playlist.
+    Stream {
+        /// Its rungs.
+        ladder: Ladder,
+    },
     /// One frame of a video as an image made to `size`.
     Poster {
         /// Its size.
@@ -220,6 +225,9 @@ impl Output {
                     }
                 })
             }
+            "video" if format == "hls" => Ok(Self::Stream {
+                ladder: Ladder::parse(size).ok_or(OutputError::Unknown)?,
+            }),
             "video" => Ok(Self::Video {
                 size: size
                     .strip_suffix('p')
@@ -247,6 +255,7 @@ impl Output {
                 quality_suffix(quality, "@")
             ),
             Self::Video { size, format } => format!("video/{size}p/{}", format.name()),
+            Self::Stream { ladder } => format!("video/{}/hls", ladder.name()),
             Self::Poster {
                 size,
                 format,
@@ -276,6 +285,9 @@ impl Output {
                 format.extension()
             ),
             Self::Video { size, format } => format!("video-{size}p.{}", format.name()),
+            Self::Stream { ladder } => {
+                format!("hls-{}/master.m3u8", ladder.name().replace('+', "-"))
+            }
             Self::Poster {
                 size,
                 format,
@@ -294,7 +306,7 @@ impl Output {
     pub const fn source(self) -> &'static str {
         match self {
             Self::Image { .. } => "image",
-            Self::Video { .. } | Self::Poster { .. } => "video",
+            Self::Video { .. } | Self::Stream { .. } | Self::Poster { .. } => "video",
         }
     }
 }

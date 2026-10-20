@@ -51,6 +51,7 @@ mod large;
 mod lifecycle;
 mod listing;
 mod media;
+mod media_streams;
 mod members;
 mod meta_pool;
 mod metadata;

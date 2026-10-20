@@ -2,7 +2,8 @@
 //! (content types under a key prefix) get which renditions. An output is
 //! `kind/size/format`: a video's size and every format come from the server's
 //! lists; an image's or a poster's size is a side or a box (`400x400-cover`)
-//! of 16-7680 pixels, and a lossy still format may carry `@quality`. The server
+//! of 16-7680 pixels, and a lossy still format may carry `@quality`; an HLS
+//! stream names its ladder of video sizes (`video/360p+720p/hls`). The server
 //! checks a rule set as a whole, this page only reads the answer and shapes the form.
 
 import { count, list, record, text } from "./models.ts";
@@ -13,7 +14,7 @@ const STILL_FORMATS = ["jpeg", "png", "webp", "avif"] as const;
 /** The kinds of rendition, each with the formats the server makes it in and its sizes: a video's list, or an image's common sides. */
 export const KINDS = {
   image: { label: "Image", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "image" },
-  video: { label: "Video", sizes: ["360p", "480p", "720p", "1080p", "1440p", "2160p"], formats: ["mp4", "webm"], from: "video" },
+  video: { label: "Video", sizes: ["360p", "480p", "720p", "1080p", "1440p", "2160p"], formats: ["mp4", "webm", "hls"], from: "video" },
   poster: { label: "Poster frame", sizes: IMAGE_SIZES, formats: STILL_FORMATS, from: "video" },
 } as const;
 
@@ -43,6 +44,12 @@ export function isStillSize(written: string): boolean {
 const isQuality = (written: string, format: string): boolean =>
   written === "" || (format !== "png" && /^[0-9]+$/.test(written) && Number(written) >= 1 && Number(written) <= 100);
 
+/** An HLS ladder: video sizes from the list, strictly ascending, joined by `+` (`360p+720p`). */
+export function isLadder(written: string): boolean {
+  const places = written.split("+").map((rung) => KINDS.video.sizes.findIndex((size) => size === rung));
+  return places.every((place, index) => place >= 0 && (index === 0 || place > (places[index - 1] ?? -1)));
+}
+
 /** The output spelled `name`, when the server would take it. */
 export function outputOf(name: string): Output | null {
   const [kind, size, written, extra] = name.split("/");
@@ -57,7 +64,8 @@ export function outputOf(name: string): Output | null {
     return null;
   }
   if (kind === "video") {
-    return lists.sizes.includes(size) && at < 0 ? { kind, size, format, quality } : null;
+    const fits = format === "hls" ? isLadder(size) : lists.sizes.includes(size);
+    return fits && at < 0 ? { kind, size, format, quality } : null;
   }
   return isStillSize(size) && isQuality(quality, format) ? { kind, size, format, quality } : null;
 }

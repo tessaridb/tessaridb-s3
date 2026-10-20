@@ -7,6 +7,7 @@ mod healer;
 mod lifecycle;
 mod media_images;
 mod media_planner;
+mod media_streams;
 mod media_videos;
 mod media_work;
 mod mover;

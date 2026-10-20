@@ -43,7 +43,7 @@ impl TaskQueue {
     pub const fn of(output: Output) -> Self {
         match output {
             Output::Image { .. } => Self::Images,
-            Output::Video { .. } | Output::Poster { .. } => Self::Videos,
+            Output::Video { .. } | Output::Stream { .. } | Output::Poster { .. } => Self::Videos,
         }
     }
 
