@@ -96,15 +96,21 @@ fn walk(
         else {
             continue;
         };
-        let modified = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .map_err(io("list"))?;
-        if modified <= cutoff {
+        // A shard another node's reclaim removed after the listing named it is simply not there to sweep.
+        if modified(&path)?.is_some_and(|modified| modified <= cutoff) {
             found.push(shard);
         }
     }
     Ok(())
+}
+
+/// When the file at `path` was last written; `None` once it is gone.
+fn modified(path: &Path) -> Result<Option<SystemTime>> {
+    match std::fs::metadata(path).and_then(|meta| meta.modified()) {
+        Ok(modified) => Ok(Some(modified)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io("list")(error)),
+    }
 }
 
 /// The data id and index a final shard name `<32 hex digits>.s<index>` spells; anything else is `None`.
@@ -123,7 +129,17 @@ fn shard_name(name: &str) -> Option<([u8; 16], u16)> {
 
 #[cfg(test)]
 mod tests {
-    use super::shard_name;
+    use super::{modified, shard_name};
+
+    #[test]
+    fn a_file_removed_before_it_is_read_has_no_age_rather_than_failing_the_walk() {
+        let path =
+            std::env::temp_dir().join(format!("tessari-s3-gone-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::write(&path, b"x").expect("written");
+        assert!(modified(&path).expect("read").is_some(), "control: present");
+        std::fs::remove_file(&path).expect("removed");
+        assert_eq!(modified(&path).expect("gone is not an error"), None);
+    }
 
     #[test]
     fn only_a_final_shard_name_is_read_as_a_shard() {

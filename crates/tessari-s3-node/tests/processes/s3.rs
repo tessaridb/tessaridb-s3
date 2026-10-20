@@ -80,6 +80,8 @@ pub struct Node {
     pub name: String,
     pub s3: String,
     pub internal: String,
+    /// Where the node serves its metrics.
+    pub metrics: String,
     pub dir: PathBuf,
 }
 
@@ -233,11 +235,13 @@ async fn spawn(
         .append(true)
         .open(logs.join(format!("{name}.log")))
         .expect("log file");
+    let metrics = format!("127.0.0.1:{}", free_port());
     let mut child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
         .env_clear()
         .envs(environment(
             meta, tls, namespace, name, &s3, &internal, &dir,
         ))
+        .env("TESSARIDB_S3_METRICS_LISTEN", &metrics)
         .envs(extra.iter().copied())
         .stdout(Stdio::from(log.try_clone().expect("log handle")))
         .stderr(Stdio::from(log))
@@ -265,6 +269,7 @@ async fn spawn(
         name: name.to_owned(),
         s3,
         internal,
+        metrics,
         dir,
     })
 }
@@ -336,22 +341,26 @@ impl Cluster {
 
     /// Starts node `index` again as it was: its name, its addresses and its data directory.
     pub async fn restart(&mut self, index: usize) {
+        self.restart_with(index, &[]).await;
+    }
+
+    /// As [`Cluster::restart`], with `extra` added to the node's variables.
+    pub async fn restart_with(&mut self, index: usize, extra: &[(&str, &str)]) {
         let old = &self.nodes[index];
         let (name, addresses, dir) = (
             old.name.clone(),
             (old.s3.clone(), old.internal.clone()),
             old.dir.clone(),
         );
-        self.nodes[index] = launch(
+        let cluster = (
             &self.settings,
-            &self.tls,
-            &self.namespace,
-            &name,
-            &self.logs,
-            addresses,
-            dir,
-        )
-        .await;
+            self.tls.as_path(),
+            self.namespace.as_str(),
+            self.logs.as_path(),
+        );
+        self.nodes[index] = spawn(cluster, &name, addresses, dir, extra)
+            .await
+            .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
     }
 }
 

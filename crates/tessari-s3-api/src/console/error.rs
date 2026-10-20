@@ -144,6 +144,16 @@ impl ConsoleError {
         }
     }
 
+    /// The metadata store asked for the request to be made again: another write won, or the store could not take it
+    /// now.
+    pub(crate) const fn busy() -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "busy",
+            message: "the metadata store is busy; try again",
+        }
+    }
+
     pub(crate) const fn not_recorded() -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -175,14 +185,64 @@ impl IntoResponse for ConsoleError {
 }
 
 impl From<tessari_s3_storage::Error> for ConsoleError {
-    /// A storage failure keeps its kind and loses its detail: the store being unreachable is `503`, anything else is
-    /// `500`, and the detail goes to the log rather than to the browser.
+    /// A storage failure keeps its kind and loses its detail: the store being unreachable is `503`, the store asking
+    /// for the request again is `503` too, anything else is `500`, and the detail goes to the log rather than to the
+    /// browser.
     fn from(error: tessari_s3_storage::Error) -> Self {
+        use tessari_s3_infrastructure::tessaridb::{MetaError, RefusalClass};
+        use tessari_s3_storage::Error as Storage;
         tracing::error!(error = %error, "console request failed in storage");
-        if error.category() == tessari_s3_types::ErrorCategory::Unavailable {
-            Self::unavailable()
-        } else {
-            Self::internal()
+        match &error {
+            Storage::Meta(MetaError::Refused {
+                class: Some(RefusalClass::Retry | RefusalClass::Unavailable),
+                ..
+            })
+            | Storage::Contended => Self::busy(),
+            _ if error.category() == tessari_s3_types::ErrorCategory::Unavailable => {
+                Self::unavailable()
+            }
+            _ => Self::internal(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+    use tessari_s3_infrastructure::tessaridb::{MetaError, RefusalClass};
+    use tessari_s3_storage::Error as Storage;
+
+    use super::ConsoleError;
+
+    fn refused(class: RefusalClass) -> Storage {
+        Storage::Meta(MetaError::Refused {
+            message: "write conflict on record sessions/root".to_owned(),
+            class: Some(class),
+        })
+    }
+
+    #[test]
+    fn a_store_asking_for_a_retry_answers_try_again_not_an_internal_error() {
+        for error in [
+            refused(RefusalClass::Retry),
+            refused(RefusalClass::Unavailable),
+            Storage::Contended,
+        ] {
+            let answered = ConsoleError::from(error);
+            assert_eq!(
+                (answered.status, answered.code),
+                (StatusCode::SERVICE_UNAVAILABLE, "busy")
+            );
+        }
+        assert_eq!(
+            ConsoleError::from(refused(RefusalClass::Throttled)).status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "control: a throttled store keeps its answer"
+        );
+        assert_eq!(
+            ConsoleError::from(refused(RefusalClass::Invalid)).status,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "control: a statement the store refused is this server's fault"
+        );
     }
 }

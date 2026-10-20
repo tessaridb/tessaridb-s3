@@ -15,6 +15,7 @@ use crate::metrics_labels::{
     AuthRefusal, DurationLabels, OperationLabels, ReasonLabels, RequestLabels, Served,
     SourceLabels, Unlabelled, gauge_value, size_class,
 };
+use crate::metrics_state::StateMetrics;
 use crate::{Error, Result};
 
 /// A duration histogram from 1 ms to about 33 s.
@@ -42,6 +43,8 @@ pub struct Metrics {
     audit_written: Counter,
     audit_dropped: Counter,
     audit_failed: Counter,
+    verification_failures: Counter,
+    state: StateMetrics,
 }
 
 impl Default for Metrics {
@@ -135,7 +138,7 @@ impl Metrics {
             "Whether the last scrape could read a source (1) or not (0); a source not read keeps its last values",
             collect_up.clone(),
         );
-        let [audit_written, audit_dropped, audit_failed] = [
+        let [audit_written, audit_dropped, audit_failed, verification_failures] = [
             ("audit_written", "Access-log records appended"),
             (
                 "audit_dropped",
@@ -145,12 +148,17 @@ impl Metrics {
                 "audit_failed",
                 "Access-log records whose append failed after every retry",
             ),
+            (
+                "data_verification_failures",
+                "Reads of this node's data files that failed verification (a block hash, a header or a length)",
+            ),
         ]
         .map(|(name, help)| {
             let counter = Counter::default();
             registry.register(name, help, counter.clone());
             counter
         });
+        let state = StateMetrics::register(&mut registry, env!("CARGO_PKG_VERSION"));
         Self {
             registry,
             requests,
@@ -169,7 +177,15 @@ impl Metrics {
             audit_written,
             audit_dropped,
             audit_failed,
+            verification_failures,
+            state,
         }
+    }
+
+    /// The node's state and health series.
+    #[must_use]
+    pub const fn state(&self) -> &StateMetrics {
+        &self.state
     }
 
     /// Counts one served request.
@@ -263,6 +279,12 @@ impl Metrics {
     /// Counts `records` whose append failed for good.
     pub fn audit_failed(&self, records: u64) {
         self.audit_failed.inc_by(records);
+    }
+
+    /// Raises the count of failed verifications to `total`, as the storage last counted it since the node started.
+    pub fn verification_failures(&self, total: u64) {
+        self.verification_failures
+            .inc_by(total.saturating_sub(self.verification_failures.get()));
     }
 
     /// The metrics in Prometheus text.

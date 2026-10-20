@@ -20,6 +20,9 @@ pub(super) enum OnPropose {
     Loses,
     /// The first n proposals are refused `retry`; after that, another node's proposal has committed.
     Contended(u32),
+    /// Another node's proposal committed at the store's creation and is seen only after this long: until then every
+    /// proposal is refused `retry`, as a commit is before its group is synced.
+    ContendedFor(std::time::Duration),
 }
 
 /// A metadata store in memory: registrations, layouts by version, the current version, and counters.
@@ -36,6 +39,7 @@ pub(super) struct Fake {
     pub(super) apply_refusals: Mutex<u32>,
     /// Staged by another operator just before the next apply reaches the store.
     pub(super) staged_before_apply: Mutex<Option<StagedEntity>>,
+    pub(super) created: tokio::time::Instant,
 }
 
 impl Fake {
@@ -54,6 +58,7 @@ impl Fake {
             staged: Mutex::new(None),
             apply_refusals: Mutex::new(0),
             staged_before_apply: Mutex::new(None),
+            created: tokio::time::Instant::now(),
         }
     }
 
@@ -145,6 +150,16 @@ impl ClusterRepository for Fake {
                 }))
             }
             OnPropose::Contended(_) => {
+                self.commit(&self.winner);
+                Ok(Proposed::Exists)
+            }
+            OnPropose::ContendedFor(lag) if self.created.elapsed() < lag => {
+                Err(crate::Error::Meta(MetaError::Refused {
+                    message: "write conflict on record 1".to_owned(),
+                    class: Some(RefusalClass::Retry),
+                }))
+            }
+            OnPropose::ContendedFor(_) => {
                 self.commit(&self.winner);
                 Ok(Proposed::Exists)
             }

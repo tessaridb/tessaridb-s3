@@ -108,7 +108,10 @@ impl ShardSetRepository for TessariShardSets {
     }
 
     async fn take_heal(&self) -> Result<Option<[u8; 16]>> {
-        let answers = self.pool.run("CLAIM FROM heal_queue;", Vec::new()).await?;
+        // Writers list ids here while healers claim; a claim that collides took nothing and is asked again.
+        let answers = self
+            .run_retrying("CLAIM FROM heal_queue;", Vec::new())
+            .await?;
         Ok(heal_records(answers)?.into_iter().next().map(|(id, _)| id))
     }
 
@@ -184,8 +187,8 @@ impl ShardSetRepository for TessariShardSets {
 
 impl TessariShardSets {
     /// Runs a claim script again while the store answers `retry`: another write to the claim committed after this
-    /// one's snapshot, and the store leaves asking again to the caller. Both claim scripts give the same outcome when
-    /// run twice, so a repeat is safe.
+    /// one's snapshot, and the store leaves asking again to the caller. Every script given here gives the same outcome
+    /// when run twice (a refused one changed nothing), so a repeat is safe.
     async fn run_retrying(
         &self,
         script: &str,

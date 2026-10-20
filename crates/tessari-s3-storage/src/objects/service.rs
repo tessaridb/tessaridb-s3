@@ -2,9 +2,10 @@
 //! statement; a read sees an object only if it belongs to the bucket's current incarnation. A data file is queued for
 //! reclamation before it exists and leaves the queue only in the transaction that commits an object pointing at it.
 
-use tessari_s3_constants::{MULTIPART_READ_ATTEMPTS, VERSION_WRITE_ATTEMPTS};
+use tessari_s3_constants::MULTIPART_READ_ATTEMPTS;
 use tessari_s3_types::{BucketName, ObjectKey};
 
+use super::attempts::Attempts;
 use super::entity::read;
 use super::model::{Content, NewObject, StoredObject, WriteCondition, Written};
 use super::repository::{Guard, ObjectRepository, Snapshot, Wrote};
@@ -88,7 +89,13 @@ impl ObjectService {
         object: &NewObject,
         condition: &WriteCondition,
     ) -> Result<Written> {
+        // The object's bytes are durable and its record is not yet written.
+        crate::fault::exit_at("before-commit");
         let outcome = self.commit(bucket, key, object, condition).await?;
+        if matches!(outcome, Written::Committed { .. }) {
+            // The record is written and the client has not been answered.
+            crate::fault::exit_at("after-commit");
+        }
         if let (Content::Data(id), false) = (
             &object.content,
             matches!(outcome, Written::Committed { .. }),
@@ -122,7 +129,8 @@ impl ObjectService {
             WriteCondition::IfNoneMatch => Guard::Absent,
             WriteCondition::IfMatch(etag) => Guard::Etag(etag.clone()),
         };
-        for _ in 0..VERSION_WRITE_ATTEMPTS {
+        let mut attempts = Attempts::new();
+        while attempts.next().await {
             let plan = versions::plan(&self.repository.head(bucket, key).await?, key, false)?;
             match self
                 .repository

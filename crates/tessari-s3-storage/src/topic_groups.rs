@@ -31,6 +31,7 @@ pub(crate) struct MessageEntity {
 /// the topic it reads, a name of this crate's schema.
 #[derive(Debug, Clone)]
 pub(crate) struct Group {
+    name: String,
     quoted: String,
     topic: &'static str,
 }
@@ -49,6 +50,7 @@ impl Group {
             ));
         }
         Ok(Self {
+            name: format!("{prefix}{name}"),
             quoted: format!("'{prefix}{name}'"),
             topic,
         })
@@ -95,7 +97,9 @@ fn whole(value: Option<&Value>, reason: &'static str) -> Result<u64> {
     }
 }
 
-/// Declares `group` on its topic when it is missing; a new group starts at the topic's oldest message.
+/// Declares `group` on its topic when it is missing; a new group starts at the topic's oldest message. A group keeps
+/// what it was declared with, so one declared narrower by an earlier release is named in a warning: a reader that dies
+/// holding its messages may then hold the whole group until the ack deadline.
 pub(crate) async fn define(pool: &MetaPool, group: &Group, holding: &Holding) -> Result<()> {
     let script = format!(
         "DEFINE GROUP IF NOT EXISTS {} ON TOPIC {} ACK DEADLINE {}s DELIVERIES {} IN FLIGHT {} \
@@ -108,7 +112,43 @@ pub(crate) async fn define(pool: &MetaPool, group: &Group, holding: &Holding) ->
         holding.dead_letter
     );
     pool.run(&script, Vec::new()).await?;
+    let width = declared_width(pool, group).await?;
+    if let Some(width) = width
+        .filter(|width| u64::try_from(holding.in_flight).is_ok_and(|declared| *width < declared))
+    {
+        tracing::warn!(
+            group = %group.name,
+            topic = group.topic,
+            width,
+            this_release = holding.in_flight,
+            "the group was declared narrower by an earlier release and keeps that width"
+        );
+    }
     Ok(())
+}
+
+/// The width `group` was declared with, as the topic's `INFO` reports it; none while the group is missing.
+async fn declared_width(pool: &MetaPool, group: &Group) -> Result<Option<u64>> {
+    let answers = pool
+        .run(&format!("INFO FOR TOPIC {};", group.topic), Vec::new())
+        .await?;
+    let Some(Answer::Value {
+        value: Value::Object(info),
+        ..
+    }) = answers.into_iter().next()
+    else {
+        return Err(malformed("INFO FOR TOPIC answered no value"));
+    };
+    let width = match info.get("groups") {
+        Some(Value::Object(groups)) => match groups.get(&group.name) {
+            Some(Value::Object(declared)) => declared.get("width").cloned(),
+            _ => None,
+        },
+        _ => None,
+    };
+    width
+        .map(|width| whole(Some(&width), "a group's width"))
+        .transpose()
 }
 
 /// Hands out up to `limit` messages to `group`.

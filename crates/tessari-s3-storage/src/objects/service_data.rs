@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use tessari_s3_constants::DATA_BLOCK_SIZE;
+use futures_util::StreamExt;
+use tessari_s3_constants::{DATA_BLOCK_SIZE, RECLAIM_CLAIM_BATCH, RECLAIM_WORKERS};
 
 use super::ObjectService;
 use crate::data::hex;
@@ -12,6 +13,16 @@ use crate::objects::model::{HealBacklog, Healed, MoveBacklog, Moved, Reclaimed};
 use crate::objects::repository::ObjectRepository;
 use crate::objects::upload::Upload;
 use crate::{Error, Result};
+
+/// What reclaiming one entry came to.
+enum Settled {
+    /// Its bytes and its entry are gone.
+    Removed,
+    /// An object references it: the entry is gone, the bytes kept.
+    Kept,
+    /// A commit took it, or another node holds it: the entry stays for later.
+    Left,
+}
 
 impl ObjectService {
     /// Starts writing `size` bytes under a new data id: the id is queued for reclamation first (on a cluster member
@@ -110,42 +121,66 @@ impl ObjectService {
     /// hold lapses.
     pub async fn reclaim(&self, grace_secs: u64, limit: usize) -> Result<Reclaimed> {
         let mut done = Reclaimed::default();
-        // One entry at a time: a pass cut short by a refusal leaves at most the entry in hand held until its hold
-        // lapses, never a batch.
-        while done.examined < limit {
-            let Some((id, marked)) = self.repository.claim_next().await? else {
+        let mut refused = None;
+        // Entries are claimed a batch at a time in one statement, so a pass meets the other nodes' claims and the
+        // writers queuing beside them a few times rather than once per entry; the batch is worked
+        // `RECLAIM_WORKERS` at a time. A refusal ends the pass after its batch; the entry it hit is held until its
+        // hold lapses.
+        while done.examined < limit && refused.is_none() {
+            let batch = self
+                .repository
+                .claim_due(RECLAIM_CLAIM_BATCH.min(limit.saturating_sub(done.examined)))
+                .await?;
+            if batch.is_empty() {
                 break;
-            };
-            done.examined = done.examined.saturating_add(1);
-            let data = uuid::Uuid::from_bytes(id);
-            if self.repository.referenced(id).await? {
-                // Not a state this server writes; keep the bytes and say so.
-                tracing::warn!(%data, "a queued data file is referenced by an object; kept");
-                self.repository.unqueue(id).await?;
-                done.kept = done.kept.saturating_add(1);
-                continue;
             }
-            // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false
-            // mark means the commit got there first.
-            if !marked && !self.repository.mark(id).await? {
-                continue;
-            }
-            match self.remove_data(id).await {
-                // Another node is healing it; the entry stays marked and goes back to the queue for a later pass,
-                // behind the entries waiting after it.
-                Err(Error::Held) => {
-                    self.repository.defer(id).await?;
-                    continue;
+            done.examined = done.examined.saturating_add(batch.len());
+            let mut settled = futures_util::stream::iter(batch)
+                .map(|(id, marked)| self.reclaim_one(id, marked))
+                .buffer_unordered(RECLAIM_WORKERS);
+            while let Some(outcome) = settled.next().await {
+                match outcome {
+                    Ok(Settled::Removed) => done.removed = done.removed.saturating_add(1),
+                    Ok(Settled::Kept) => done.kept = done.kept.saturating_add(1),
+                    Ok(Settled::Left) => {}
+                    Err(error) => refused = refused.or(Some(error)),
                 }
-                removed => removed?,
             }
-            self.repository.unqueue(id).await?;
-            done.removed = done.removed.saturating_add(1);
+        }
+        if let Some(error) = refused {
+            return Err(error);
         }
         if let Some(writes) = &self.erasure {
             done.orphans = writes.sweep(grace_secs, limit).await?;
         }
         Ok(done)
+    }
+
+    /// Reclaims one held entry: its bytes and then the entry, unless an object references it or a commit took it.
+    async fn reclaim_one(&self, id: [u8; 16], marked: bool) -> Result<Settled> {
+        let data = uuid::Uuid::from_bytes(id);
+        if self.repository.referenced(id).await? {
+            // Not a state this server writes; keep the bytes and say so.
+            tracing::warn!(%data, "a queued data file is referenced by an object; kept");
+            self.repository.unqueue(id).await?;
+            return Ok(Settled::Kept);
+        }
+        // The mark is what a racing commit asserts against: from here on the file is the reclaimer's. A false mark
+        // means the commit got there first.
+        if !marked && !self.repository.mark(id).await? {
+            return Ok(Settled::Left);
+        }
+        match self.remove_data(id).await {
+            // Another node is healing it; the entry stays marked and goes back to the queue for a later pass, behind
+            // the entries waiting after it.
+            Err(Error::Held) => {
+                self.repository.defer(id).await?;
+                return Ok(Settled::Left);
+            }
+            removed => removed?,
+        }
+        self.repository.unqueue(id).await?;
+        Ok(Settled::Removed)
     }
 
     /// Rewrites the missing or damaged shards of up to `limit` data ids listed for healing.
@@ -187,6 +222,12 @@ impl ObjectService {
             Some(writes) => writes.moving(limit).await.map(Some),
             None => Ok(None),
         }
+    }
+
+    /// Reads of this node's data files that failed verification since it started: a block hash, a header or a length.
+    #[must_use]
+    pub fn verification_failures(&self) -> u64 {
+        self.data.verification_failures()
     }
 
     /// How many data ids are listed for healing, counted up to `limit`; `None` off a cluster, where nothing is.

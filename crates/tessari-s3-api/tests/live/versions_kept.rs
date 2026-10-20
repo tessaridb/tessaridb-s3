@@ -248,11 +248,25 @@ async fn a_noncurrent_multipart_version_keeps_its_parts() {
 #[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
 async fn concurrent_writers_of_one_key_leave_versions_in_write_order() {
     let _why = IGNORED;
+    writers_of_one_key_leave_versions_in_write_order(16).await;
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn many_concurrent_writers_of_one_key_all_succeed() {
+    let _why = IGNORED;
+    // More writers than attempts: a retry that lost to a commit not yet visible would spend its attempts on it.
+    writers_of_one_key_leave_versions_in_write_order(64).await;
+}
+
+/// `writers` concurrent PUTs of one key in a versioned bucket: each answers 200 and leaves one version, numbered in
+/// commit order, and the newest is the object read.
+async fn writers_of_one_key_leave_versions_in_write_order(writers: u8) {
     let (state, planter, _) = fresh_with(scratch_dir()).await;
     assert_eq!(call(&state, "PUT", "/files", vec![], b"").await.status, 200);
     set_versioning(&state, "files", "Enabled").await;
     let mut writes = tokio::task::JoinSet::new();
-    for writer in 0..16_u8 {
+    for writer in 0..writers {
         let state = state.clone();
         writes.spawn(async move { call(&state, "PUT", "/files/hot", vec![], &[writer]).await });
     }
@@ -266,7 +280,7 @@ async fn concurrent_writers_of_one_key_leave_versions_in_write_order() {
     let seqs: Vec<i64> = kept.iter().map(|version| version.seq).collect();
     assert_eq!(
         seqs,
-        (1..=16).rev().collect::<Vec<i64>>(),
+        (1..=i64::from(writers)).rev().collect::<Vec<i64>>(),
         "one version per write, numbered in commit order"
     );
     let mut ids: Vec<String> = kept.iter().map(|version| version.version.clone()).collect();

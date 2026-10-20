@@ -79,6 +79,11 @@ async fn a_flipped_byte_in_a_block_is_refused_as_corrupt() {
         .await
         .expect("header still fine");
     assert!(reader.read_block(0).await.is_ok(), "block 0 untouched");
+    assert_eq!(
+        files.verification_failures(),
+        0,
+        "a sound block is not counted"
+    );
     assert!(
         matches!(
             reader.read_block(1).await,
@@ -89,6 +94,7 @@ async fn a_flipped_byte_in_a_block_is_refused_as_corrupt() {
         ),
         "the damaged block is refused"
     );
+    assert_eq!(files.verification_failures(), 1, "counted once");
     std::fs::remove_dir_all(&root).expect("cleanup");
 }
 

@@ -51,6 +51,7 @@ pub(crate) fn require_docker() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs Docker and the tessaridb/tessaridb:0.36.2 image"]
 async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
+    let _quiet = crate::QUIET.lock().await;
     require_docker();
     let metadata = MetaCluster::start().await;
     let mut cluster = Cluster::start(metadata.meta()).await;
@@ -171,6 +172,7 @@ struct Attempt {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs Docker and the tessaridb/tessaridb:0.36.2 image"]
 async fn the_metadata_leader_killed_under_traffic_loses_nothing_acknowledged() {
+    let _quiet = crate::QUIET.lock().await;
     require_docker();
     let metadata = MetaCluster::start().await;
     let cluster = Cluster::start(metadata.meta()).await;

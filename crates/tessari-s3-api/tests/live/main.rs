@@ -78,6 +78,7 @@ mod public_access;
 mod quota;
 mod quota_window;
 mod reclaim;
+mod reclaim_contended;
 mod region_drill;
 mod region_failover;
 mod regions;

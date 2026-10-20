@@ -124,6 +124,7 @@ impl Daemon for MediaPlanner {
             }
             Ok(Report {
                 message: format!("renditions queued {queued}, objects handed back {handed_back}"),
+                idle: queued == 0 && handed_back == 0,
             })
         })
     }

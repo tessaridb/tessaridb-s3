@@ -89,6 +89,13 @@ impl From<tessari_s3_storage::Error> for Error {
                 ErrorCode::ServiceUnavailable,
                 "the encryption keys are sealed on this node; an operator must unseal them",
             ),
+            Storage::DriveFull { .. } => {
+                tracing::warn!(error = %error, "write refused: data drive below its free-space floor");
+                Self::new(
+                    ErrorCode::ServiceUnavailable,
+                    "this node's data drive is below its free-space floor; writes are refused, reads are served",
+                )
+            }
             Storage::CustomerKeyMismatch => Self::new(
                 ErrorCode::AccessDenied,
                 "the customer key does not match the one the object was encrypted with",
@@ -154,5 +161,14 @@ mod tests {
             ErrorCode::ServiceUnavailable,
             "control: a retry-class refusal keeps its answer"
         );
+    }
+
+    #[test]
+    fn a_drive_below_its_floor_answers_service_unavailable_never_an_internal_error() {
+        let error = Error::from(tessari_s3_storage::Error::DriveFull {
+            available: 10,
+            floor: 20,
+        });
+        assert_eq!(error.code, ErrorCode::ServiceUnavailable);
     }
 }

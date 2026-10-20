@@ -150,6 +150,26 @@ fn the_secret_never_appears_in_debug_output() {
 }
 
 #[test]
+fn the_data_floor_defaults_to_a_gib_takes_zero_and_refuses_what_is_not_a_count() {
+    assert_eq!(
+        load(&CREDENTIALS).expect("loads").data_min_free_bytes,
+        1 << 30
+    );
+    let mut off = CREDENTIALS.to_vec();
+    off.push(("TESSARIDB_S3_DATA_MIN_FREE_BYTES", "0"));
+    assert_eq!(load(&off).expect("loads").data_min_free_bytes, 0);
+    let mut bad = CREDENTIALS.to_vec();
+    bad.push(("TESSARIDB_S3_DATA_MIN_FREE_BYTES", "1GiB"));
+    assert!(matches!(
+        load(&bad).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_DATA_MIN_FREE_BYTES",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn reclamation_defaults_and_overrides() {
     let config = load(&CREDENTIALS).expect("loads");
     assert_eq!(

@@ -51,6 +51,7 @@ impl Daemon for Healer {
                     "examined {}, healed {}, at risk {}, held elsewhere {}",
                     done.examined, done.healed, done.at_risk, done.held
                 ),
+                idle: done.examined == 0,
             })
         })
     }

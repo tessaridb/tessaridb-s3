@@ -128,3 +128,56 @@ async fn the_cluster_members_and_those_answering_are_counted() {
         assert!(text.contains(line), "missing {line}in\n{text}");
     }
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn the_nodes_state_and_health_are_read_at_the_scrape() {
+    let _why = IGNORED;
+    let (state, _) = fresh().await;
+    assert_eq!(call(&state, "PUT", "/held", vec![], b"").await.status, 200);
+    for key in ["/held/a", "/held/b"] {
+        assert_eq!(call(&state, "PUT", key, vec![], b"12345").await.status, 200);
+    }
+    let created = call(&state, "POST", "/held/big", vec![("uploads", None)], b"").await;
+    assert_eq!(created.status, 200, "{}", created.body);
+    state
+        .storage()
+        .usage()
+        .refresh("standalone")
+        .await
+        .expect("measured");
+    let text = scrape(state).await;
+    let value = |name: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(name))
+            .and_then(|rest| rest.trim().parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("{name} missing in\n{text}"))
+    };
+    for line in [
+        format!(
+            "s3_build_info{{version=\"{}\"}} 1\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+        "s3_collect_up{source=\"meta\"} 1\n".to_owned(),
+        "s3_collect_up{source=\"keys\"} 1\n".to_owned(),
+        "s3_collect_up{source=\"drive\"} 1\n".to_owned(),
+        "s3_collect_up{source=\"usage\"} 1\n".to_owned(),
+        "s3_collect_up{source=\"uploads\"} 1\n".to_owned(),
+        // The suite's stores never create a keys vault.
+        "s3_keys_vault{state=\"uninitialised\"} 1\n".to_owned(),
+        "s3_keys_vault{state=\"sealed\"} 0\n".to_owned(),
+        "s3_buckets{} 1\n".to_owned(),
+        "s3_objects{} 2\n".to_owned(),
+        "s3_stored_bytes{} 10\n".to_owned(),
+        "s3_uploads_open{} 1\n".to_owned(),
+    ] {
+        assert!(text.contains(&line), "missing {line}in\n{text}");
+    }
+    let probe = value("s3_meta_probe_seconds{}");
+    assert!(probe > 0.0 && probe < 5.0, "{probe}");
+    let capacity = value("s3_data_capacity_bytes{}");
+    let free = value("s3_data_free_bytes{}");
+    assert!(capacity > 0.0 && free <= capacity, "{free} of {capacity}");
+    assert!(value("s3_start_time_seconds") > 1.7e9);
+    assert!(value("s3_usage_taken_seconds{}") >= value("s3_start_time_seconds") - 60.0);
+}

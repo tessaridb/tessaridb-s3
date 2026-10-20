@@ -4,10 +4,10 @@
 use std::net::SocketAddr;
 
 use tessari_s3_constants::{
-    DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_MEDIA_WORKERS, DEFAULT_RECLAIM_GRACE_SECS,
-    DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION, DEFAULT_SHUTDOWN_GRACE_SECS,
-    DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS, MAX_MEDIA_WORKERS,
-    MIN_SECRET_KEY_LEN,
+    DEFAULT_DATA_MIN_FREE_BYTES, DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_MEDIA_WORKERS,
+    DEFAULT_RECLAIM_GRACE_SECS, DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION,
+    DEFAULT_SHUTDOWN_GRACE_SECS, DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS,
+    MAX_MEDIA_WORKERS, MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::{Code, NodeId, SecretKey};
 
@@ -39,6 +39,8 @@ pub struct S3Config {
     pub meta: MetaSettings,
     /// `TESSARIDB_S3_DATA_DIR` — where every object's bytes are stored (required: none are held in the metadata).
     pub data_dir: std::path::PathBuf,
+    /// `TESSARIDB_S3_DATA_MIN_FREE_BYTES`: space the data drive keeps available; below it writes are refused (0: off).
+    pub data_min_free_bytes: u64,
     /// `TESSARIDB_S3_RECLAIM_GRACE_SECS` — how long a queued data file is kept before it may be removed.
     pub reclaim_grace_secs: u64,
     /// `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` — time between reclamation passes (positive).
@@ -191,6 +193,13 @@ impl S3Config {
             iam_key,
             keys_passphrase,
             notify_targets,
+            data_min_free_bytes: match get("TESSARIDB_S3_DATA_MIN_FREE_BYTES") {
+                None => DEFAULT_DATA_MIN_FREE_BYTES,
+                Some(text) => text.trim().parse().map_err(|_| Error::InvalidConfig {
+                    key: "TESSARIDB_S3_DATA_MIN_FREE_BYTES",
+                    reason: "not a whole number of bytes",
+                })?,
+            },
             reclaim_grace_secs: match get("TESSARIDB_S3_RECLAIM_GRACE_SECS") {
                 None => DEFAULT_RECLAIM_GRACE_SECS,
                 Some(text) => text.trim().parse().map_err(|_| Error::InvalidConfig {

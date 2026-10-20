@@ -8,6 +8,7 @@ use std::io::{ErrorKind, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::format::{HEADER_LEN, Piece, decode_header, encode_header, file_len};
 use super::writer::DataWriter;
@@ -21,6 +22,10 @@ const DATA_SUBDIR: &str = "s3data";
 pub(crate) struct DataFiles {
     root: PathBuf,
     block_size: u32,
+    /// Reads of this node's data that failed verification since start: a block hash, a header or a length.
+    failed: Arc<AtomicU64>,
+    /// Bytes the drive must keep available for a new file to be started (0: none); shared by every clone.
+    pub(super) floor: Arc<AtomicU64>,
 }
 
 /// An open data file whose header and length were checked. The handle is shared read-only with the blocking pool:
@@ -30,6 +35,7 @@ pub struct DataReader {
     size: u64,
     block_size: u32,
     hex: String,
+    failed: Arc<AtomicU64>,
 }
 
 pub(crate) fn hex(id: [u8; 16]) -> String {
@@ -90,8 +96,18 @@ pub(super) fn sync_dir(dir: &Path) -> Result<()> {
 
 impl DataFiles {
     /// Files under `root`, written in blocks of `block_size` bytes.
-    pub(crate) const fn new(root: PathBuf, block_size: u32) -> Self {
-        Self { root, block_size }
+    pub(crate) fn new(root: PathBuf, block_size: u32) -> Self {
+        Self {
+            root,
+            block_size,
+            failed: Arc::new(AtomicU64::new(0)),
+            floor: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Reads of this node's data that failed verification since start.
+    pub(crate) fn verification_failures(&self) -> u64 {
+        self.failed.load(Ordering::Relaxed)
     }
 
     /// Bytes per stored block of the files this writes.
@@ -165,6 +181,7 @@ impl DataFiles {
         block_size: u32,
         sealed: bool,
     ) -> Result<DataWriter> {
+        self.check_floor().await?;
         let (path, temp) = self.piece_paths(id, piece);
         let header = encode_header(block_size, id, piece, sealed);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -232,12 +249,18 @@ impl DataFiles {
             }
             Ok((file, block_size))
         })
-        .await?;
+        .await
+        .inspect_err(|error| {
+            if matches!(error, Error::Corrupt { .. }) {
+                self.failed.fetch_add(1, Ordering::Relaxed);
+            }
+        })?;
         Ok(DataReader {
             file: Arc::new(file),
             size,
             block_size,
             hex: name,
+            failed: Arc::clone(&self.failed),
         })
     }
 

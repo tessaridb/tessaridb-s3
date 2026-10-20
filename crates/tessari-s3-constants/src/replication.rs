@@ -8,8 +8,13 @@ pub const REPLICATION_ACK_DEADLINE_SECS: u64 = 300;
 /// `replication_failed` topic.
 pub const REPLICATION_DELIVERIES: u32 = 10;
 
-/// Replication tasks the group holds in flight at once.
-pub const REPLICATION_IN_FLIGHT: usize = 4;
+/// Replication tasks the group lets be in flight at once, across every replicator of the region. Wider than one
+/// replicator's take, so a replicator that dies holding its tasks holds only those until the ack deadline, and the
+/// rest is handed to another.
+pub const REPLICATION_IN_FLIGHT: usize = 64;
+
+/// Replication tasks one replicator takes per run.
+pub const REPLICATION_TAKE: usize = 4;
 
 /// Seconds before a failed replication is tried again after its first hand-out; doubled per hand-out, at most
 /// [`REPLICATION_RETRY_MAX_SECS`].

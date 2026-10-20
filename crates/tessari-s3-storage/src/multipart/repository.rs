@@ -81,6 +81,8 @@ pub(crate) trait MultipartRepository: Send + Sync {
         cutoff: Timestamp,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<UploadId>>> + Send;
+    /// How many uploads are open, counted up to `limit`.
+    fn open_count(&self, limit: usize) -> impl Future<Output = Result<usize>> + Send;
     /// At most `limit` open uploads after listing position `after`, in listing order.
     fn pending(
         &self,

@@ -24,6 +24,12 @@ impl ShardService {
         Self { files }
     }
 
+    /// Starts no new data file while the drive has fewer than `bytes` available; 0 turns the floor off. The files are
+    /// shared by every service of the node, so this reaches object writes, shards, heals and moves alike.
+    pub(crate) fn set_floor(&self, bytes: u64) {
+        self.files.set_floor(bytes);
+    }
+
     /// The space of this node's data drive.
     ///
     /// # Errors

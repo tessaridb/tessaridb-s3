@@ -176,22 +176,41 @@ async fn a_queued_file_a_part_still_references_is_kept() {
     std::fs::remove_dir_all(&dir).expect("cleanup");
 }
 
-/// Seconds from now until the reclamation queue hands data `id` out, as the store computes them.
-pub(crate) async fn due_in(planter: &MetaPool, id: [u8; 16]) -> i64 {
+/// The store's clock, in whole seconds since the epoch.
+pub(crate) async fn store_now(planter: &MetaPool) -> i64 {
+    let answers = planter
+        .run("RETURN time::unix(time::now());", vec![])
+        .await
+        .expect("a clock read");
+    match answers.into_iter().next() {
+        Some(Answer::Value {
+            value: Value::Number(Number::Integer(now)),
+            ..
+        }) => now,
+        other => panic!("no clock: {other:?}"),
+    }
+}
+
+/// When the `table` entry for `id` is due, in whole seconds since the epoch.
+pub(crate) async fn due_at(planter: &MetaPool, table: &'static str, id: [u8; 16]) -> i64 {
     let answers = planter
         .run(
-            "SELECT time::unix(due) - time::unix(time::now()) AS ahead FROM ONLY reclaims:$data;",
+            &format!("SELECT time::unix(due) AS due FROM ONLY {table}:$data;"),
             vec![("data".to_owned(), Value::Uuid(id))],
         )
         .await
-        .expect("a reclaims read");
+        .expect("a queue read");
+    integer_field(answers, "due")
+}
+
+fn integer_field(answers: Vec<Answer>, name: &str) -> i64 {
     match answers.into_iter().next() {
         Some(Answer::Records { records, .. }) => match records.first().map(|(_, record)| record) {
-            Some(Value::Object(fields)) => match fields.get("ahead") {
-                Some(Value::Number(Number::Integer(ahead))) => *ahead,
-                other => panic!("no due instant: {other:?}"),
+            Some(Value::Object(fields)) => match fields.get(name) {
+                Some(Value::Number(Number::Integer(value))) => *value,
+                other => panic!("no {name}: {other:?}"),
             },
-            other => panic!("no queue record for the data id: {other:?}"),
+            other => panic!("no record: {other:?}"),
         },
         other => panic!("not a record answer: {other:?}"),
     }
@@ -219,25 +238,29 @@ async fn a_queued_data_id_waits_in_the_reclaim_queue_until_its_grace_ends() {
         200
     );
     let replaced = data_of(&planter, "wait", "k").await.expect("data");
+    let before = store_now(&planter).await;
     assert_eq!(
         call(&state, "PUT", "/wait/k", vec![], &body(MIB + 2, 8))
             .await
             .status,
         200
     );
+    let replacing = (before, store_now(&planter).await);
     let bytes = body(MIB, 9);
+    let before = store_now(&planter).await;
     let mut orphan = objects
         .upload(u64::try_from(bytes.len()).expect("small"))
         .await
         .expect("upload");
     orphan.append(&bytes).await.expect("append");
     let orphan = orphan.finish().await.expect("finish").id;
+    let uploading = (before, store_now(&planter).await);
     // The overwrite queues through the store's event, the open upload through the server: both wait the grace.
-    for id in [replaced, orphan] {
-        let ahead = due_in(&planter, id).await;
+    for (id, (before, after)) in [(replaced, replacing), (orphan, uploading)] {
+        let due = due_at(&planter, "reclaims", id).await;
         assert!(
-            (590..=600).contains(&ahead),
-            "handed out {ahead} s from now, not after the 600 s grace"
+            (before + 600..=after + 600).contains(&due),
+            "due at {due}, not 600 s after it was queued between {before} and {after}"
         );
     }
     let early = objects.reclaim(0, 1000).await.expect("reclaim");

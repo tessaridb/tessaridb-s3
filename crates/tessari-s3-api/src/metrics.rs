@@ -42,6 +42,7 @@ async fn collect(state: &ApiState) {
     }
     let deadline = Duration::from_secs(METRICS_COLLECT_SECS);
     let objects = state.storage().objects();
+    metrics.verification_failures(objects.verification_failures());
     match timeout(deadline, objects.heal_backlog(METRICS_BACKLOG_COUNT_MAX)).await {
         Ok(Ok(None)) => {}
         Ok(Ok(Some(backlog))) => {
@@ -102,6 +103,7 @@ async fn quorum(state: &ApiState) -> tessari_s3_storage::Result<Option<(u64, u64
 
 async fn scrape(State(state): State<ApiState>) -> Response {
     collect(&state).await;
+    crate::metrics_state::collect(&state).await;
     match state.metrics().encode() {
         Ok(text) => ([(header::CONTENT_TYPE, TEXT_FORMAT)], text).into_response(),
         Err(error) => {

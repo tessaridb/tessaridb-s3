@@ -233,6 +233,7 @@ impl Daemon for NotifyWorker {
                     "target {}: delivered {sent}, to retry {retried}",
                     self.target
                 ),
+                idle: sent == 0 && retried == 0,
             })
         })
     }

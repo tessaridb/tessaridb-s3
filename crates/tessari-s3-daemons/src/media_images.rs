@@ -100,6 +100,7 @@ impl Daemon for ImageWorker {
             .await?;
             Ok(Report {
                 message: format!("renditions made {made}, handed back {retried}"),
+                idle: made == 0 && retried == 0,
             })
         })
     }

@@ -4,12 +4,23 @@ pub mod access;
 mod keys;
 pub use keys::{KEYS_OPEN_ATTEMPTS, KEYS_OPEN_BACKOFF_MS, REWRAP_BATCH, REWRAP_INTERVAL_SECS};
 pub mod multipart;
+mod notify;
 pub mod observability;
+pub use notify::{
+    NOTIFY_ACK_DEADLINE_SECS, NOTIFY_BATCH, NOTIFY_CONCURRENCY, NOTIFY_DELIVERIES,
+    NOTIFY_DELIVERY_TIMEOUT_SECS, NOTIFY_IN_FLIGHT, NOTIFY_POLL_SECS, NOTIFY_RETRY_MAX_SECS,
+    NOTIFY_RETRY_STEP_SECS,
+};
 mod replication;
+mod versions;
 pub use replication::{
     REPLICATION_ACK_DEADLINE_SECS, REPLICATION_CONNECT_TIMEOUT_SECS, REPLICATION_DELIVERIES,
     REPLICATION_IN_FLIGHT, REPLICATION_POLL_SECS, REPLICATION_RETRY_MAX_SECS,
-    REPLICATION_RETRY_STEP_SECS,
+    REPLICATION_RETRY_STEP_SECS, REPLICATION_TAKE,
+};
+pub use versions::{
+    VERSION_WRITE_ATTEMPTS, VERSION_WRITE_BACKOFF_FIRST_MS, VERSION_WRITE_BACKOFF_MAX_MS,
+    VERSION_WRITE_DEADLINE_MS,
 };
 
 /// Shortest bucket name, in bytes. AWS general purpose bucket naming rules.
@@ -132,9 +143,11 @@ pub const SCHEMA_RETRY_ATTEMPTS: u32 = 16;
 /// Milliseconds of back-off per attempt between schema retries (20, 40, 60 … ms).
 pub const SCHEMA_RETRY_BACKOFF_MS: u64 = 20;
 
-/// Times a node proposes the first layout when the store answers `retry` (another proposal committed after this
-/// one's snapshot): the next attempt sees the committed layout and reads it back.
-pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 3;
+/// Times a node proposes a layout when the store answers `retry` (another proposal committed after this one's
+/// snapshot). The committed layout is seen once its group is synced, so each attempt waits first (Q-S3-90).
+pub const LAYOUT_PROPOSE_ATTEMPTS: u32 = 8;
+/// Milliseconds per attempt a layout proposal waits before it is made again; about 0.7 s over every attempt.
+pub const LAYOUT_PROPOSE_BACKOFF_MS: u64 = 25;
 
 /// Times an action is appended to the action record when the store answers `retry` (another action committed to the
 /// record after this one's snapshot); a refused append wrote nothing, so the next attempt cannot duplicate it.
@@ -163,6 +176,10 @@ pub const SINGLE_PUT_MAX: u64 = 5 * 1024 * 1024 * 1024;
 /// Seconds a queued data file is kept before the reclaimer may remove it (24 h), when
 /// `TESSARIDB_S3_RECLAIM_GRACE_SECS` is unset: longer than any upload and any read in flight.
 pub const DEFAULT_RECLAIM_GRACE_SECS: u64 = 24 * 60 * 60;
+
+/// Bytes a node's data drive keeps available when `TESSARIDB_S3_DATA_MIN_FREE_BYTES` is unset (1 GiB): below it no new
+/// data file is started, so the node refuses writes and keeps serving reads instead of filling the drive.
+pub const DEFAULT_DATA_MIN_FREE_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Seconds between reclamation passes, when `TESSARIDB_S3_RECLAIM_INTERVAL_SECS` is unset.
 pub const DEFAULT_RECLAIM_INTERVAL_SECS: u64 = 300;
@@ -287,6 +304,14 @@ pub const QUOTA_COUNT_TIMEOUT_SECS: u64 = 2;
 /// Queue entries one reclamation pass looks at.
 pub const RECLAIM_BATCH: usize = 1000;
 
+/// Entries one reclamation pass works on at once. Each costs a few metadata commits and a request to every shard's
+/// node, so one at a time leaves a pass bound by round trips and slower than steady overwrites queue data.
+pub const RECLAIM_WORKERS: usize = 8;
+
+/// Entries one claim takes from the reclaims queue. Claiming one at a time put every worker of every node on the
+/// queue's head at once, and the collisions grew with the backlog.
+pub const RECLAIM_CLAIM_BATCH: usize = 32;
+
 /// Seconds a queued data id a pass could not finish (another node holds its shards) waits before it is handed out
 /// again, so it leaves the head of the queue.
 pub const RECLAIM_RETRY_SECS: u64 = 15;
@@ -297,34 +322,6 @@ pub const LIFECYCLE_BATCH: usize = 100;
 /// Seconds after a lifecycle pass before the same bucket is due again. A rule's period is whole days rounded to the
 /// next day boundary, so an hour late is the most an action waits.
 pub const LIFECYCLE_INTERVAL_SECS: u64 = 3600;
-
-/// Seconds a delivery worker holds an event before the group hands it out again — longer than one delivery may take.
-pub const NOTIFY_ACK_DEADLINE_SECS: u64 = 60;
-
-/// Hand-outs of one event before it is given up and kept in the `object_events_dead` topic.
-pub const NOTIFY_DELIVERIES: u32 = 8;
-
-/// Events a destination's group holds in flight at once.
-pub const NOTIFY_IN_FLIGHT: usize = 64;
-
-/// Events one delivery run reads at most.
-pub const NOTIFY_BATCH: usize = 64;
-
-/// Deliveries one run sends at once to its destination.
-pub const NOTIFY_CONCURRENCY: usize = 8;
-
-/// Seconds a delivery may take before it counts as failed.
-pub const NOTIFY_DELIVERY_TIMEOUT_SECS: u64 = 10;
-
-/// Seconds before a failed delivery is tried again after its first hand-out; doubled per hand-out, at most
-/// [`NOTIFY_RETRY_MAX_SECS`].
-pub const NOTIFY_RETRY_STEP_SECS: u64 = 2;
-
-/// Longest wait between two tries of one delivery.
-pub const NOTIFY_RETRY_MAX_SECS: u64 = 300;
-
-/// Seconds between delivery runs when the last found nothing.
-pub const NOTIFY_POLL_SECS: u64 = 1;
 
 /// How long the media group holds a handed-out object before giving it to another worker: longer than the slowest
 /// rendition a worker may take, so a live worker is not raced.
@@ -417,11 +414,6 @@ pub const COMPLETE_MULTIPART_BODY_MAX: usize = 10_000 * 512;
 /// Reads of a multipart object's key before giving up when it is overwritten between reading the object and its parts
 /// every time.
 pub const MULTIPART_READ_ATTEMPTS: u32 = 3;
-
-/// Attempts of one write or delete of a key before giving up when another writer of the same key commits first every
-/// time; each attempt reads the key's newest version again (ADR-0010). One writer wins each round, so with n writers of
-/// one key the last of them needs n attempts; past this bound the request is answered as contended (503 SlowDown).
-pub const VERSION_WRITE_ATTEMPTS: u32 = 32;
 
 /// Most parts one ListParts page carries, and the default.
 pub const LIST_PARTS_MAX: usize = 1000;

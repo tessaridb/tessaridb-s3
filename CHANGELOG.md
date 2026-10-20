@@ -3,6 +3,25 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.4.0: 2026-10-20
+
+Metadata on TessariDB `0.36.2`.
+
+- Metrics of the node's state: build and start time, how long the metadata store takes to answer, the keys vault's
+  state, the data drive's size and free space, the latest buckets, objects and bytes, open uploads, daemon runs by
+  outcome, and reads of data that failed verification.
+- `TESSARIDB_S3_DATA_MIN_FREE_BYTES` (1 GiB): below it a node refuses writes with `503 ServiceUnavailable` and keeps
+  serving reads, instead of filling its drive.
+- A node keeps serving when its log cannot be written.
+- Replaced and deleted data is reclaimed under steady overwrites: a reclaim pass that met a writer no longer fails,
+  and eight workers per pass keep up with the writes. Healing no longer stops at a claim that met a writer.
+- The layout mover runs on clusters with many shard sets.
+- Nodes starting together agree on the first layout instead of failing their first writes.
+- A replicator that stops while holding tasks holds back only its own.
+- Writes of one key racing another writer wait and retry instead of answering `503`.
+- The console answers `503` when the metadata store asks for a retry.
+- An idle node logs nothing at INFO.
+
 ## 0.3.0-beta: 2026-10-19
 
 Metadata on TessariDB `0.36.2`.

@@ -518,6 +518,7 @@
       case "rate_limit":
         return "Wait a minute, then try again.";
       case "unavailable":
+      case "busy":
       case "network":
         return "Try again in a moment.";
       case "precondition_failed":

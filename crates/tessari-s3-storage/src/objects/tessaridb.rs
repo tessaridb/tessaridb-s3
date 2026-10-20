@@ -1,6 +1,6 @@
 //! Objects in TessariDB: one `objects` record per key, id `<bucket>/<key>`; every value is bound.
 
-use tessari_s3_constants::RECLAIM_RETRY_SECS;
+use tessari_s3_constants::{CLAIM_RETRY_ATTEMPTS, CLAIM_RETRY_BACKOFF_MS, RECLAIM_RETRY_SECS};
 use tessari_s3_infrastructure::tessaridb::{Answer, MetaError, MetaPool, RefusalClass, Value};
 use tessari_s3_types::{BucketName, ObjectKey};
 
@@ -153,28 +153,50 @@ impl ObjectRepository for TessariObjects {
         Ok(())
     }
 
-    async fn claim_next(&self) -> Result<Option<([u8; 16], bool)>> {
-        let answers = self.pool.run("CLAIM FROM reclaims;", Vec::new()).await?;
-        let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
-            return Ok(None);
+    async fn claim_due(&self, limit: usize) -> Result<Vec<([u8; 16], bool)>> {
+        let parameters = vec![("limit".to_owned(), crate::params::count(limit))];
+        // Several nodes' reclaimers reaching for the head, or a writer queuing beside it, collide: the store answers
+        // the loser `retry` and waits for nobody, so the claim is asked again after a growing wait. A refused claim
+        // took nothing.
+        let mut attempt: u32 = 1;
+        let answers = loop {
+            match self
+                .pool
+                .run("CLAIM $limit FROM reclaims;", parameters.clone())
+                .await
+            {
+                Err(error)
+                    if error.is_class(RefusalClass::Retry) && attempt < CLAIM_RETRY_ATTEMPTS =>
+                {
+                    tokio::time::sleep(crate::backoff::backoff(attempt, CLAIM_RETRY_BACKOFF_MS))
+                        .await;
+                    attempt = attempt.saturating_add(1);
+                }
+                outcome => break outcome?,
+            }
         };
-        let Some((_, record)) = records.into_iter().next() else {
-            return Ok(None);
+        let Some(Answer::Records { records, .. }) = answers.into_iter().next() else {
+            return Ok(Vec::new());
         };
         let malformed = |reason| Error::Malformed {
             record: "reclaims",
             reason,
         };
-        let Value::Object(fields) = record else {
-            return Err(malformed("not an object"));
-        };
-        match fields.get("data") {
-            Some(Value::Uuid(id)) => Ok(Some((
-                *id,
-                matches!(fields.get("reclaiming"), Some(Value::Datetime { .. })),
-            ))),
-            _ => Err(malformed("data")),
-        }
+        records
+            .into_iter()
+            .map(|(_, record)| {
+                let Value::Object(fields) = record else {
+                    return Err(malformed("not an object"));
+                };
+                match fields.get("data") {
+                    Some(Value::Uuid(id)) => Ok((
+                        *id,
+                        matches!(fields.get("reclaiming"), Some(Value::Datetime { .. })),
+                    )),
+                    _ => Err(malformed("data")),
+                }
+            })
+            .collect()
     }
 
     async fn defer(&self, id: [u8; 16]) -> Result<()> {

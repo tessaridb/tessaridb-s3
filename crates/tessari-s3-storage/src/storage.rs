@@ -140,6 +140,13 @@ impl Storage {
         }
     }
 
+    /// The same services refusing every new data file while the drive has fewer than `bytes` available (0: off).
+    #[must_use]
+    pub fn with_data_floor(self, bytes: u64) -> Self {
+        self.shards.set_floor(bytes);
+        self
+    }
+
     /// The same services with a queued data file held back `secs` seconds before it may be reclaimed (unset:
     /// [`DEFAULT_RECLAIM_GRACE_SECS`]); [`Storage::prepare`] records it in the store, where every queuing reads it.
     #[must_use]
@@ -298,3 +305,6 @@ impl Storage {
         &self.identities
     }
 }
+
+#[path = "storage_probe.rs"]
+mod probe;

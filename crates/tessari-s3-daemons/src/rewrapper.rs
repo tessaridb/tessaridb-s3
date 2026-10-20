@@ -41,9 +41,12 @@ impl Daemon for Rewrapper {
             match self.objects.rewrap(REWRAP_BATCH).await {
                 Ok(done) => Ok(Report {
                     message: format!("re-wrapped {} of {}", done.rewrapped, done.examined),
+                    idle: done.examined == 0,
                 }),
                 Err(tessari_s3_storage::Error::KeysSealed) => Ok(Report {
                     message: "the keys are sealed; nothing re-wrapped".to_owned(),
+                    // Sealed keys are reported at start and in the console; every run saying so again is noise.
+                    idle: true,
                 }),
                 Err(error) => Err(Error::Run {
                     daemon: "rewrapper",

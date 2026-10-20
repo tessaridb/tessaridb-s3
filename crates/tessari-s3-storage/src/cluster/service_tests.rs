@@ -38,6 +38,20 @@ async fn a_proposal_refused_retry_is_proposed_again_and_takes_the_winners_layout
     assert_eq!(*store.proposals.lock().expect("unpoisoned"), 2);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_proposal_that_loses_to_a_commit_not_yet_seen_waits_and_takes_it() {
+    // Several nodes propose the first layout at once (Q-S3-90); the winner's commit is seen 200 ms later.
+    let store = Fake::new(
+        vec![("n1", None), ("n2", None), ("n3", None)],
+        OnPropose::ContendedFor(std::time::Duration::from_millis(200)),
+    );
+    let layout = current_of(&store, &cache(), code())
+        .await
+        .expect("a proposal is planned again after a wait, not reported")
+        .expect("a layout");
+    assert_eq!(layout.version(), 1);
+}
+
 #[tokio::test]
 async fn proposals_refused_retry_every_time_give_up_after_the_bound() {
     let store = Fake::new(

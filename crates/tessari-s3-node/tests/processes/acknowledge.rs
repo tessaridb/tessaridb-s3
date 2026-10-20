@@ -13,6 +13,7 @@ use crate::s3::{Cluster, scratch};
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs Docker and the tessaridb/tessaridb:0.36.2 image"]
 async fn a_region_level_the_store_cannot_count_is_refused_in_its_words() {
+    let _quiet = crate::QUIET.lock().await;
     require_docker();
     let metadata = MetaCluster::start().await;
     let cluster = Cluster::start(metadata.meta()).await;

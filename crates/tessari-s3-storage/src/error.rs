@@ -62,6 +62,15 @@ pub enum Error {
         /// The operating system's error kind; the message is logged where it happened.
         kind: std::io::ErrorKind,
     },
+    /// The data drive has less space this process may write than its free-space floor
+    /// (`TESSARIDB_S3_DATA_MIN_FREE_BYTES`); no new data file is started, and reads are still served.
+    #[error("the data drive has {available} bytes available, below its floor of {floor}")]
+    DriveFull {
+        /// Bytes this process may still write.
+        available: u64,
+        /// The floor.
+        floor: u64,
+    },
     /// A data file does not hold what its record says it should — the media or the file was damaged.
     #[error("data file {id} is damaged: {reason}")]
     Corrupt {
@@ -191,7 +200,9 @@ impl Error {
             Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
                 ErrorCategory::Conflict
             }
-            Self::KeysSealed | Self::PassphraseThrottled => ErrorCategory::Unavailable,
+            Self::KeysSealed | Self::PassphraseThrottled | Self::DriveFull { .. } => {
+                ErrorCategory::Unavailable
+            }
             Self::WeakPassphrase { .. } | Self::UnknownKey { .. } => ErrorCategory::Validation,
             Self::WrongPassphrase => ErrorCategory::Unauthorized,
             Self::CustomerKeyMismatch => ErrorCategory::Forbidden,

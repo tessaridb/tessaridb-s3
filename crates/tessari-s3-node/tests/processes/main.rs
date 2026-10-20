@@ -14,17 +14,27 @@
 mod signer;
 
 mod acknowledge;
+mod bitrot;
+mod commit_crash;
 mod disk;
 mod docker;
+mod drive_floor;
 mod faults;
+mod heal_load;
 mod join;
 mod meta;
 mod notify;
+mod partition;
 mod requests;
 mod s3;
+mod soak;
 mod zones;
 
 use std::time::{Duration, Instant};
+
+/// Held by the tests whose clusters must not share the machine: the ones over a Docker metadata cluster, whose
+/// acknowledgements are timed, and the ones that load every node. Each runs alone; the others run beside them.
+static QUIET: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 use requests::{call, fetch};
 use s3::{Cluster, Meta, count, shard_files};
