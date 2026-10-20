@@ -1,6 +1,6 @@
 //! A bucket's media rules through the console, against a real node (G004 C1): whoever configures the bucket sets them,
 //! anyone who reads it sees them, a rule the server cannot honour is refused with nothing stored, and an empty list
-//! turns media processing off.
+//! turns media processing off; an output names any side or a box with a mode and a quality, and is made so.
 
 use serde_json::{Value, json};
 use tessari_s3_core::authz::{Access, Role};
@@ -189,4 +189,307 @@ async fn an_operator_sees_the_renditions_that_failed_for_good_and_a_member_does_
         Some("forbidden"),
         "the failures span every space, so only an operator reads them"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn an_output_names_a_box_a_mode_and_a_quality_and_is_rendered_so() {
+    use tessari_s3_daemons::{Daemon, ImageWorker, MediaPlanner};
+
+    use crate::media::{image_at, png};
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    assert_eq!(
+        call_as(&state, ann.pair(), "PUT", "/pics", vec![], vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    for (output, message) in [
+        ("image/640/png@80", "png is lossless and takes no quality"),
+        (
+            "image/640-cover/webp",
+            "fit, cover and exact follow a box such as 400x400",
+        ),
+        (
+            "image/8000/webp",
+            "an image side is between 16 and 7680 pixels",
+        ),
+        ("image/640/jpeg@0", "a quality is between 1 and 100"),
+        (
+            "image/7680x7680-exact/png",
+            "a box holds at most 50 000 000 pixels",
+        ),
+    ] {
+        let body = json!({"rules": [{"id": "a", "content_types": ["image/*"], "prefix": "", "outputs": [output]}]});
+        let seen = send(
+            &console,
+            "PUT",
+            MEDIA,
+            Some(&token),
+            Some(&body.to_string()),
+        )
+        .await;
+        assert_eq!(seen.status, 400, "{output}");
+        assert_eq!(seen.code().as_deref(), Some("invalid_media"), "{output}");
+        assert_eq!(seen.json()["message"], json!(message), "{output}");
+    }
+    let outputs = [
+        "image/400x400-cover/webp",
+        "image/800x600/jpeg",
+        "image/300x500-exact/png",
+        "image/1300/jpeg@40",
+    ];
+    let rules = json!({"rules": [{"id": "photos", "content_types": ["image/*"], "prefix": "", "outputs": outputs}]});
+    let set = send(
+        &console,
+        "PUT",
+        MEDIA,
+        Some(&token),
+        Some(&rules.to_string()),
+    )
+    .await;
+    assert_eq!(set.status, 204, "{:?}", set.code());
+    let got = send(&console, "GET", MEDIA, Some(&token), None).await;
+    assert_eq!(got.json()["rules"], rules["rules"], "stored as spelled");
+    let put = call_as(
+        &state,
+        ann.pair(),
+        "PUT",
+        "/pics/a.png",
+        vec![],
+        vec![("content-type", "image/png")],
+        &png(2000, 1000),
+    )
+    .await;
+    assert_eq!(put.status, 200);
+    let (media, objects) = (state.storage().media(), state.storage().objects().clone());
+    media.define().await.expect("group defined");
+    MediaPlanner::new(media.clone(), objects.clone())
+        .run_once()
+        .await
+        .expect("planned");
+    ImageWorker::new(media, objects, "node-a".to_owned())
+        .run_once()
+        .await
+        .expect("rendered");
+    let at = "/pics/a.png.renditions";
+    for (file, content_type, format, size) in [
+        (
+            "image-400x400-cover.webp",
+            "image/webp",
+            image::ImageFormat::WebP,
+            (400, 400),
+        ),
+        (
+            "image-800x600.jpg",
+            "image/jpeg",
+            image::ImageFormat::Jpeg,
+            (800, 400),
+        ),
+        (
+            "image-300x500-exact.png",
+            "image/png",
+            image::ImageFormat::Png,
+            (300, 500),
+        ),
+        (
+            "image-1300-q40.jpg",
+            "image/jpeg",
+            image::ImageFormat::Jpeg,
+            (1300, 650),
+        ),
+    ] {
+        assert_eq!(
+            image_at(&state, &format!("{at}/{file}"), content_type, format).await,
+            size,
+            "{file}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_sweep_renders_the_objects_written_before_a_rule_once_a_page_at_a_time() {
+    use tessari_s3_daemons::{Daemon, ImageWorker, MediaPlanner};
+
+    use crate::media::{image_at, png};
+    const SWEEP: &str = "/api/v1/buckets/pics/media/sweep";
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    let put = |path: String, content_type: &'static str, body: Vec<u8>| {
+        let state = &state;
+        let pair = ann.pair();
+        async move {
+            call_as(
+                state,
+                pair,
+                "PUT",
+                &path,
+                vec![],
+                vec![("content-type", content_type)],
+                &body,
+            )
+            .await
+            .status
+        }
+    };
+    assert_eq!(put("/pics".to_owned(), "text/plain", Vec::new()).await, 200);
+    for name in ["a", "b", "c"] {
+        assert_eq!(
+            put(format!("/pics/{name}.png"), "image/png", png(400, 200)).await,
+            200
+        );
+    }
+    // More than one page: 104 objects, of which three are images.
+    for n in 0..101 {
+        assert_eq!(
+            put(format!("/pics/t/{n:03}"), "text/plain", b"x".to_vec()).await,
+            200
+        );
+    }
+    let (media, objects) = (state.storage().media(), state.storage().objects().clone());
+    media.define().await.expect("group defined");
+    let planner = MediaPlanner::new(media.clone(), objects.clone());
+    // Without rules the created objects are settled unplanned: only a sweep reaches them now.
+    planner.run_once().await.expect("planned");
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    let progress = || async {
+        let seen = send(&console, "GET", SWEEP, Some(&token), None).await;
+        assert_eq!(seen.status, 200);
+        seen.json()
+    };
+    assert_eq!(
+        progress().await,
+        json!({"state": "none", "listed": 0, "queued": 0})
+    );
+    let rules = json!({"rules": [{"id": "p", "content_types": ["image/*"], "prefix": "",
+        "outputs": ["image/320/jpeg", "image/64x64-cover/webp"]}]});
+    let set = send(
+        &console,
+        "PUT",
+        MEDIA,
+        Some(&token),
+        Some(&rules.to_string()),
+    )
+    .await;
+    assert_eq!(set.status, 204);
+    let start = || async {
+        let seen = send(&console, "POST", SWEEP, Some(&token), None).await;
+        assert_eq!(seen.status, 202, "{:?}", seen.code());
+    };
+    start().await;
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 0, "queued": 0})
+    );
+    planner.run_once().await.expect("first page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 100, "queued": 6})
+    );
+    // Started again mid-way, it begins from the first key.
+    start().await;
+    planner.run_once().await.expect("first page again");
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 100, "queued": 6})
+    );
+    planner.run_once().await.expect("last page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "done", "listed": 104, "queued": 6})
+    );
+    let worker = ImageWorker::new(media.clone(), objects.clone(), "node-a".to_owned());
+    for _ in 0..3 {
+        worker.run_once().await.expect("rendered");
+    }
+    for name in ["a", "b", "c"] {
+        let at = format!("/pics/{name}.png.renditions");
+        assert_eq!(
+            image_at(
+                &state,
+                &format!("{at}/image-320.jpg"),
+                "image/jpeg",
+                image::ImageFormat::Jpeg
+            )
+            .await,
+            (320, 160)
+        );
+        assert_eq!(
+            image_at(
+                &state,
+                &format!("{at}/image-64x64-cover.webp"),
+                "image/webp",
+                image::ImageFormat::WebP
+            )
+            .await,
+            (64, 64)
+        );
+    }
+    // A repeat lists the same objects and queues nothing: every rendition was written since its original.
+    start().await;
+    planner.run_once().await.expect("first page");
+    planner.run_once().await.expect("last page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "done", "listed": 104, "queued": 0})
+    );
+    let member = user_with_key(state.storage(), "bob", "alpha", Role::Member, false).await;
+    let bob = sign_in_as(&console, &member).await.expect("bob signed in");
+    assert_eq!(
+        send(&console, "POST", SWEEP, Some(&bob), None).await.status,
+        403,
+        "only whoever configures the bucket starts a sweep"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_save_naming_a_version_set_again_since_is_refused_and_changes_nothing() {
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    assert_eq!(
+        call_as(&state, ann.pair(), "PUT", "/pics", vec![], vec![], b"")
+            .await
+            .status,
+        200
+    );
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    let read = || async {
+        send(&console, "GET", MEDIA, Some(&token), None)
+            .await
+            .json()
+    };
+    assert_eq!(read().await["version"], json!(0));
+    let rules = |output: &str| json!([{"id": "p", "content_types": ["image/*"], "prefix": "", "outputs": [output]}]);
+    let (console, token) = (&console, &token);
+    let save = |body: Value| async move {
+        send(console, "PUT", MEDIA, Some(token), Some(&body.to_string())).await
+    };
+    // Two editors read version 0; the first save wins and moves it to 1.
+    let first = save(json!({"rules": rules("image/320/jpeg"), "version": 0})).await;
+    assert_eq!(first.status, 204);
+    assert_eq!(read().await["version"], json!(1));
+    let second = save(json!({"rules": rules("image/640/webp"), "version": 0})).await;
+    assert_eq!(second.status, 412);
+    assert_eq!(second.code().as_deref(), Some("stale_media"));
+    assert_eq!(
+        read().await["rules"],
+        rules("image/320/jpeg"),
+        "the stale save changed nothing"
+    );
+    // Read again, the second editor saves at the current version; a save naming none is not checked.
+    assert_eq!(
+        save(json!({"rules": rules("image/640/webp"), "version": 1}))
+            .await
+            .status,
+        204
+    );
+    assert_eq!(save(json!({"rules": []})).await.status, 204);
+    assert_eq!(read().await, json!({"rules": [], "version": 3}));
 }

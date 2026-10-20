@@ -3,8 +3,8 @@
 
 use std::future::Future;
 
-use tessari_s3_core::media::{ImageFormat, RENDITIONS};
-use tessari_s3_infrastructure::media_image::Encoding;
+use tessari_s3_core::media::{Fit, ImageFormat, RENDITIONS, Size};
+use tessari_s3_infrastructure::media_image::{Encoding, Mode, Target};
 use tessari_s3_storage::encryption::Sealing;
 use tessari_s3_storage::media::{MediaService, Rendition, Task, TaskQueue};
 use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Written};
@@ -80,8 +80,35 @@ pub(crate) fn landed(written: &Written) -> Result<(), String> {
     }
 }
 
+/// What the renderer makes for an image or a poster of `size` in `format` at `quality`.
+pub(crate) const fn still(size: Size, format: ImageFormat, quality: Option<u8>) -> Target {
+    let (width, height, mode) = match size {
+        Size::Side(side) => (side, side, Mode::Fit),
+        Size::Box {
+            width,
+            height,
+            mode,
+        } => (
+            width,
+            height,
+            match mode {
+                Fit::Fit => Mode::Fit,
+                Fit::Cover => Mode::Cover,
+                Fit::Exact => Mode::Exact,
+            },
+        ),
+    };
+    Target {
+        width,
+        height,
+        mode,
+        encoding: encoding(format),
+        quality,
+    }
+}
+
 /// The image encoder for `format`.
-pub(crate) const fn encoding(format: ImageFormat) -> Encoding {
+const fn encoding(format: ImageFormat) -> Encoding {
     match format {
         ImageFormat::Jpeg => Encoding::Jpeg,
         ImageFormat::Png => Encoding::Png,

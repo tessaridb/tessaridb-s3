@@ -47,6 +47,8 @@ pub struct Bucket {
     pub tags: std::collections::BTreeMap<String, String>,
     /// Its media rules; `None` while none are set.
     pub media: Option<Vec<tessari_s3_core::media::Rule>>,
+    /// How many times its media rules were set: an edit naming an older count is refused.
+    pub media_version: u64,
     /// Who must hold an object write before it is acknowledged.
     pub acknowledgement: Acknowledgement,
     /// How a write that asks for no encryption is sealed; `None` while the bucket has no default.
@@ -191,6 +193,7 @@ impl TryFrom<BucketEntity> for Bucket {
                     .collect::<Result<_>>()?,
                 _ => std::collections::BTreeMap::new(),
             },
+            media_version: entity.media_version,
             media: entity
                 .media
                 .as_ref()

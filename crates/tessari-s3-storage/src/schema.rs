@@ -79,6 +79,7 @@ DEFINE FIELD IF NOT EXISTS cors ON buckets TYPE array;
 DEFINE FIELD IF NOT EXISTS replication ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS notify ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS media ON buckets TYPE array;
+DEFINE FIELD IF NOT EXISTS media_version ON buckets TYPE int;
 DEFINE FIELD IF NOT EXISTS acknowledge ON buckets TYPE 'local';
 DEFINE FIELD IF NOT EXISTS object_lock ON buckets TYPE object;
 DEFINE FIELD IF NOT EXISTS tags ON buckets TYPE object;
@@ -305,6 +306,14 @@ string::concat(type::string($after.seq), string::concat('/', $after.key))))); \
 CREATE replication_tasks:$named = { bucket_name: $after.bucket_name, key: $after.key, \
 version_id: $after.version_id, seq: $after.seq, marker: $after.marker, destination: $after.replicate_to, \
 at: $after.modified }; };
+DEFINE QUEUE IF NOT EXISTS media_sweeps TIMEOUT 300s SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS name ON media_sweeps TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS after ON media_sweeps TYPE string REQUIRED;
+DEFINE FIELD IF NOT EXISTS listed ON media_sweeps TYPE int REQUIRED;
+DEFINE FIELD IF NOT EXISTS queued ON media_sweeps TYPE int REQUIRED;
+DEFINE FIELD IF NOT EXISTS started ON media_sweeps TYPE datetime REQUIRED;
+DEFINE TABLE IF NOT EXISTS media_swept (name string REQUIRED, listed int REQUIRED, queued int REQUIRED, \
+started datetime REQUIRED, finished datetime REQUIRED);
 DEFINE QUEUE IF NOT EXISTS lifecycle_runs TIMEOUT 300s SCHEMAFULL NOT BEFORE due;
 DEFINE FIELD IF NOT EXISTS name ON lifecycle_runs TYPE string REQUIRED;
 DEFINE FIELD IF NOT EXISTS due ON lifecycle_runs TYPE datetime REQUIRED;

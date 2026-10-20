@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use super::model::{Rendition, Task, TaskQueue};
+use super::model::{Rendition, Sweep, SweepProgress, Task, TaskQueue};
 use crate::Result;
 use crate::topic_groups::MessageEntity;
 
@@ -52,4 +52,17 @@ pub(crate) trait TaskRepository: Send + Sync {
         attempts: i64,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<Task>>> + Send;
+}
+
+/// Sweep queries over `media_sweeps` and `media_swept`.
+pub(crate) trait SweepRepository: Send + Sync {
+    /// Starts `bucket`'s sweep from its first key, over one still under way.
+    fn start(&self, bucket: &str) -> impl Future<Output = Result<()>> + Send;
+    /// Holds the next sweep with keys left, if one has.
+    fn claim(&self) -> impl Future<Output = Result<Option<Sweep>>> + Send;
+    /// Records `sweep` planned up to its `after` and hands it back, or, when `last`, records it finished; `false`
+    /// when it was started again meanwhile and nothing was recorded.
+    fn advance(&self, sweep: &Sweep, last: bool) -> impl Future<Output = Result<bool>> + Send;
+    /// Where `bucket`'s sweep stands.
+    fn progress(&self, bucket: &str) -> impl Future<Output = Result<SweepProgress>> + Send;
 }

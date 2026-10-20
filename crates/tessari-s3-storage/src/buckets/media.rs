@@ -65,7 +65,7 @@ pub(crate) fn from_values(rules: &[Value]) -> Result<Vec<Rule>> {
             };
             let outputs = strings(fields.get("outputs"), "a media rule's outputs")?
                 .iter()
-                .map(|name| Output::parse(name).ok_or(malformed("a media rule's output")))
+                .map(|name| Output::parse(name).map_err(|_| malformed("a media rule's output")))
                 .collect::<Result<Vec<_>>>()?;
             Ok(Rule {
                 id: text("id")?,

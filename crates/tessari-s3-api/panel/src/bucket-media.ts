@@ -4,8 +4,8 @@
 //! changes nothing; saving none turns media processing off.
 
 import { call } from "./api.ts";
-import { announce, el, field, fill, mono } from "./dom.ts";
-import { isKind, KINDS, outputOf, readMediaRules, spell, typesOf, type MediaRule, type Output } from "./media-model.ts";
+import { announce, el, field, fill, mono, segmented } from "./dom.ts";
+import { isKind, KINDS, outputOf, readMediaSet, readSweep, spell, sweepText, typesOf, type MediaRule, type Output } from "./media-model.ts";
 import { ignored, type Bucket } from "./models.ts";
 import { refusal, type Screen } from "./screen.ts";
 
@@ -14,35 +14,71 @@ type Editor = { readonly box: HTMLFieldSetElement; readonly read: () => Readonly
 
 let made = 0;
 
-/** One output's three choices, each from the server's lists; the size and format lists follow the kind. */
+/** The box modes a size written as `WxH` takes. */
+const MODES = ["fit", "cover", "exact"] as const;
+
+/** One output's choices, each a row of options rather than a popup: the kind, the format and a video's size from the
+ *  server's lists; an image's or a poster's size written as a side or a box, the box's mode picked beside it; a
+ *  stream's ladder written as `360p+720p`; and an optional quality. The options follow the kind. */
 function outputRow(id: string, spelled: string | null, remove: (row: HTMLElement) => void): { readonly row: HTMLElement; readonly read: () => string } {
-  const fallback: Output = { kind: "image", size: "1280", format: "webp" };
+  const fallback: Output = { kind: "image", size: "1280", format: "webp", quality: "" };
   const start = (spelled === null ? null : outputOf(spelled)) ?? fallback;
-  const choice = (suffix: string, label: string): HTMLSelectElement => el("select", { id: `${id}-${suffix}`, "aria-label": label });
-  const kind = choice("kind", "Kind");
-  const size = choice("size", "Size");
-  const format = choice("format", "Format");
-  kind.append(...Object.entries(KINDS).map(([name, lists]) => el("option", { value: name }, lists.label)));
-  const offer = (select: HTMLSelectElement, values: readonly string[], keep: string): void => {
-    select.replaceChildren(...values.map((value) => el("option", { value }, value)));
-    select.value = values.includes(keep) ? keep : (values[0] ?? "");
+  const kind = segmented(`${id}-kind`, "Kind", Object.keys(KINDS));
+  kind.choose(start.kind);
+  const lines = segmented(`${id}-lines`, "Video size", KINDS.video.sizes);
+  lines.choose(start.kind === "video" && start.format !== "hls" ? start.size : "720p");
+  const [dimensions = "", mode = "fit"] = start.kind === "video" ? ["", "fit"] : start.size.split("-");
+  const box = segmented(`${id}-mode`, "Box mode", MODES);
+  box.choose(mode);
+  const written = (suffix: string, label: string, hint: string): HTMLInputElement =>
+    el("input", { id: `${id}-${suffix}`, "aria-label": label, placeholder: hint, spellcheck: "false", autocomplete: "off", size: "14" });
+  const side = written("size", "Size: a side such as 1280 or a box such as 400x400", "1280 or 400x400");
+  side.value = start.kind === "video" ? (start.format === "hls" ? start.size : "360p+720p") : dimensions;
+  const quality = written("quality", "Quality, 1-100, for JPEG, WebP or AVIF", "quality");
+  quality.value = start.quality;
+  const formats = el("span", {});
+  let format = segmented(`${id}-format`, "Format", KINDS[start.kind].formats);
+  format.choose(start.format);
+  formats.append(format.group);
+  const chosenKind = (): keyof typeof KINDS => {
+    const picked = kind.chosen();
+    return isKind(picked) ? picked : "image";
   };
   const follow = (): void => {
-    if (!isKind(kind.value)) {
-      return;
-    }
-    const lists = KINDS[kind.value];
-    offer(size, lists.sizes, size.value);
-    offer(format, lists.formats, format.value);
+    const video = chosenKind() === "video";
+    const stream = video && format.chosen() === "hls";
+    lines.group.hidden = !video || stream;
+    side.hidden = video && !stream;
+    side.placeholder = stream ? "360p+720p+1080p" : "1280 or 400x400";
+    box.group.hidden = video || !side.value.includes("x");
+    quality.hidden = video || format.chosen() === "png";
   };
-  kind.value = start.kind;
-  offer(size, KINDS[start.kind].sizes, start.size);
-  offer(format, KINDS[start.kind].formats, start.format);
-  kind.addEventListener("change", follow);
+  kind.group.addEventListener("change", () => {
+    const keep = format.chosen();
+    format = segmented(`${id}-format`, "Format", KINDS[chosenKind()].formats);
+    format.choose(keep);
+    if (format.chosen() === "") {
+      format.choose(KINDS[chosenKind()].formats[0] ?? "");
+    }
+    formats.replaceChildren(format.group);
+    follow();
+  });
+  formats.addEventListener("change", follow);
+  side.addEventListener("input", follow);
+  follow();
   const drop = el("button", { type: "button", class: "quiet", "aria-label": "Remove output" }, "Remove");
-  const row = el("div", { class: "actions" }, kind, size, format, drop);
+  const row = el("div", { class: "actions" }, kind.group, lines.group, side, box.group, formats, quality, drop);
   drop.addEventListener("click", () => remove(row));
-  return { row, read: () => `${kind.value}/${size.value}/${format.value}` };
+  const read = (): string => {
+    const picked = chosenKind();
+    const video = picked === "video";
+    const stream = video && format.chosen() === "hls";
+    const typed = side.value.trim();
+    const size = video && !stream ? lines.chosen() : !video && typed.includes("x") && box.chosen() !== "fit" ? `${typed}-${box.chosen()}` : typed;
+    const named = video || quality.hidden ? "" : quality.value.trim();
+    return `${picked}/${size}/${format.chosen()}${named === "" ? "" : `@${named}`}`;
+  };
+  return { row, read };
 }
 
 function ruleEditor(base: string, rule: MediaRule | null, remove: (editor: Editor) => void): Editor {
@@ -70,9 +106,9 @@ function ruleEditor(base: string, rule: MediaRule | null, remove: (editor: Edito
   const addOutput = el("button", { type: "button", class: "quiet" }, "Add output");
   addOutput.addEventListener("click", () => {
     appendOutput(null);
-    rows.at(-1)?.row.querySelector("select")?.focus();
+    rows.at(-1)?.row.querySelector("input")?.focus();
   });
-  (rule?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg" })]).forEach(appendOutput);
+  (rule?.outputs ?? [spell({ kind: "image", size: "320", format: "jpeg", quality: "" })]).forEach(appendOutput);
   name.input.value = rule?.id ?? "";
   types.input.value = rule?.content_types.join(", ") ?? "";
   prefix.input.value = rule?.prefix ?? "";
@@ -109,7 +145,7 @@ export function mediaForm(screen: Screen, bucket: Bucket, close: () => void): HT
     "form",
     { class: "confirm", novalidate: "", "aria-labelledby": `${base}-title` },
     el("p", { id: `${base}-title` }, el("strong", {}, "Media: "), mono(bucket.name)),
-    el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Image sizes are the long side in pixels, video sizes the shorter side. Without rules nothing is processed."),
+    el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. An image size is the long side in pixels (1280) or a box (400x400) fitted, covered or exact, and JPEG, WebP or AVIF may name a quality; video sizes are the shorter side, and an HLS stream names its ladder (360p+720p). Without rules nothing is processed."),
     body,
     said,
   );
@@ -119,7 +155,7 @@ export function mediaForm(screen: Screen, bucket: Bucket, close: () => void): HT
     }
   });
   const route = `/buckets/${encodeURIComponent(bucket.name)}/media`;
-  void call("GET", route, readMediaRules).then((answer) => {
+  void call("GET", route, readMediaSet).then((answer) => {
     if (!answer.ok) {
       if (answer.status === 401) {
         screen.signIn();
@@ -152,17 +188,39 @@ export function mediaForm(screen: Screen, bucket: Bucket, close: () => void): HT
     };
     const add = el("button", { type: "button", class: "quiet" }, "Add rule");
     add.addEventListener("click", () => append(null).box.querySelector("input")?.focus());
-    answer.value.forEach(append);
+    answer.value.rules.forEach(append);
+    const version = answer.value.version;
     show();
     const reason = field(`${base}-reason`, "Reason (optional)", { maxlength: "500" }, "Recorded with your key id.");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     cancel.addEventListener("click", close);
-    fill(body, none, list, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel));
+    const swept = el("p", { class: "muted", "aria-live": "polite" }, "Reading how far the objects already here are rendered…");
+    const sweep = el("button", { type: "button", class: "quiet" }, "Render existing objects");
+    const showSweep = async (): Promise<void> => {
+      const seen = await call("GET", `${route}/sweep`, readSweep);
+      swept.textContent = seen.ok ? sweepText(seen.value) : "How far the objects already here are rendered could not be read.";
+    };
+    sweep.addEventListener("click", async () => {
+      const why = reason.input.value.trim();
+      const started = await call("POST", `${route}/sweep`, readSweep, why === "" ? {} : { reason: why });
+      if (started.ok) {
+        announce(`Rendering the objects already in ${bucket.name} by its saved rules.`);
+        await showSweep();
+        return;
+      }
+      if (started.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(started));
+    });
+    void showSweep();
+    fill(body, none, list, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel), swept, el("div", { class: "actions" }, sweep));
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const why = reason.input.value.trim();
       const rules = editors.map((editor) => editor.read());
-      const saved = await call("PUT", route, ignored, why === "" ? { rules } : { rules, reason: why });
+      const saved = await call("PUT", route, ignored, why === "" ? { rules, version } : { rules, version, reason: why });
       if (saved.ok) {
         announce(`Saved the media rules of ${bucket.name}.`);
         screen.redraw();

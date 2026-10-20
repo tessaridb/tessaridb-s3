@@ -112,11 +112,14 @@ pub(crate) trait BucketRepository: Send + Sync {
     ) -> impl Future<Output = Result<()>> + Send;
 
     /// Sets `name`'s media rules, or removes them when `rules` is `None`.
+    /// Sets `name`'s media rules and counts the change; with `expected`, only while the count is still that, else
+    /// `false` and nothing written.
     fn set_media(
         &self,
         name: &BucketName,
         rules: Option<Value>,
-    ) -> impl Future<Output = Result<()>> + Send;
+        expected: Option<u64>,
+    ) -> impl Future<Output = Result<bool>> + Send;
 
     /// Sets `name`'s acknowledgement to its region's majority (`local`) or back to the default.
     fn set_acknowledge(

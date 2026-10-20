@@ -32,6 +32,17 @@ pub enum AcknowledgementSet {
     Refused(String),
 }
 
+/// What setting a bucket's media rules ended in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaSet {
+    /// The rules are stored.
+    Set,
+    /// They were set again since the version the edit named; nothing was changed.
+    Stale,
+    /// There was no such bucket.
+    NoSuchBucket,
+}
+
 /// What deleting a bucket ended in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Deleted {
@@ -307,8 +318,8 @@ impl BucketService {
         Ok(true)
     }
 
-    /// Sets `name`'s media rules (already validated); no rules turns media processing off. `false` when there is no
-    /// such bucket.
+    /// Sets `name`'s media rules (already validated); no rules turns media processing off. With `expected`, only while
+    /// they were last set at that version.
     ///
     /// # Errors
     /// The metadata store's refusal or outage.
@@ -316,13 +327,19 @@ impl BucketService {
         &self,
         name: &BucketName,
         rules: &[tessari_s3_core::media::Rule],
-    ) -> Result<bool> {
+        expected: Option<u64>,
+    ) -> Result<MediaSet> {
         if self.repository.get(name).await?.is_none() {
-            return Ok(false);
+            return Ok(MediaSet::NoSuchBucket);
         }
         let stored = (!rules.is_empty()).then(|| super::media::to_value(rules));
-        self.repository.set_media(name, stored).await?;
-        Ok(true)
+        Ok(
+            if self.repository.set_media(name, stored, expected).await? {
+                MediaSet::Set
+            } else {
+                MediaSet::Stale
+            },
+        )
     }
 
     /// The buckets `visible` covers, in byte order of their names.

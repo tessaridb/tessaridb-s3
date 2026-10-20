@@ -156,7 +156,7 @@ fn task(queue: TaskQueue, record: Value) -> Result<Task> {
         return Err(malformed("source"));
     };
     let output = tessari_s3_core::media::Output::parse(&required("output")?)
-        .ok_or_else(|| malformed("output"))?;
+        .map_err(|_| malformed("output"))?;
     let consumer = match fields.get("claimed_by") {
         Some(Value::Object(holder)) => match holder.get("consumer") {
             Some(Value::String(consumer)) => Some(consumer.clone()),

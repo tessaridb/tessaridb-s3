@@ -300,6 +300,10 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
             get(media::get).put(media::set),
         )
         .route(
+            "/api/v1/buckets/{bucket}/media/sweep",
+            get(media::sweep).post(media::start_sweep),
+        )
+        .route(
             "/api/v1/buckets/{bucket}/upload-keys",
             post(upload_keys::issue),
         )

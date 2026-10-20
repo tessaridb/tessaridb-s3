@@ -1,6 +1,7 @@
 //! Video renditions and poster frames through the operator's ffmpeg, run as a separate process: no shell, every codec,
 //! pixel format and container stated, the input and output files named by the caller, the process killed when its
-//! wall-clock limit passes or its future is dropped. This server links no video codec.
+//! wall-clock limit passes or its future is dropped. This server links no video codec. An HLS stream is written into a
+//! directory the caller names and then reads back file by file.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -17,6 +18,18 @@ pub enum VideoEncoding {
     Mp4,
     /// WebM: VP9 at constant quality, 8-bit 4:2:0, Opus.
     Webm,
+}
+
+/// The most kilobits a second a stream rung of `side` lines may take: the common streaming ladder's figures.
+const fn rung_cap_kbps(side: u32) -> u32 {
+    match side {
+        0..=360 => 1_000,
+        361..=480 => 1_500,
+        481..=720 => 3_000,
+        721..=1080 => 6_000,
+        1081..=1440 => 10_000,
+        _ => 16_000,
+    }
 }
 
 /// Why ffmpeg made nothing.
@@ -103,6 +116,110 @@ impl Ffmpeg {
             ],
         });
         self.run(input, &args, output).await
+    }
+
+    /// Whether `input` has an audio track ffmpeg decodes: one frame of it is decoded and thrown away.
+    ///
+    /// # Errors
+    /// [`VideoError`] when ffmpeg cannot start or runs too long.
+    pub async fn has_audio(&self, input: &Path) -> Result<bool, VideoError> {
+        let args = ["-map", "0:a:0", "-frames:a", "1", "-f", "null"];
+        match self.run(input, &args, Path::new("-")).await {
+            Ok(()) => Ok(true),
+            Err(VideoError::Failed) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// `input` as an HLS stream in `directory`: per rung of `rungs` (shorter sides, ascending) an H.264 rendition, never
+    /// enlarged, in six-second segments starting on keyframes under `<rung>p/index.m3u8`, and `master.m3u8` naming
+    /// them with their bandwidth, resolution and codecs; AAC audio when `audio`.
+    ///
+    /// # Errors
+    /// [`VideoError`] when ffmpeg cannot start, runs too long, or fails.
+    pub async fn stream(
+        &self,
+        input: &Path,
+        directory: &Path,
+        rungs: &[u32],
+        audio: bool,
+    ) -> Result<(), VideoError> {
+        let labels: Vec<String> = (0..rungs.len())
+            .map(|index| format!("[s{index}]"))
+            .collect();
+        let mut graph = format!("[0:v:0]split={}{}", rungs.len(), labels.concat());
+        let mut args: Vec<String> = Vec::new();
+        let mut variants = Vec::new();
+        for (index, side) in rungs.iter().enumerate() {
+            graph.push_str(&format!(
+                ";[s{index}]scale='if(gt(iw,ih),-2,trunc(min({side},iw)/2)*2)':'if(gt(iw,ih),trunc(min({side},ih)/2)*2,-2)'[o{index}]"
+            ));
+            args.extend(["-map".to_owned(), format!("[o{index}]")]);
+            if audio {
+                args.extend(["-map".to_owned(), "0:a:0".to_owned()]);
+            }
+            // CRF capped per rung, so a player can trust the master's bandwidth to pick one.
+            let cap = rung_cap_kbps(*side);
+            args.extend([
+                format!("-maxrate:v:{index}"),
+                format!("{cap}k"),
+                format!("-bufsize:v:{index}"),
+                format!("{}k", cap.saturating_mul(2)),
+            ]);
+            variants.push(if audio {
+                format!("v:{index},a:{index},name:{side}p")
+            } else {
+                format!("v:{index},name:{side}p")
+            });
+        }
+        let segments = directory.join("%v").join("seg-%05d.ts");
+        let mut all = vec!["-filter_complex".to_owned(), graph];
+        all.extend(args);
+        all.extend(
+            [
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                "high",
+                "-preset",
+                "medium",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                // A keyframe every six seconds and none placed by scene cuts: every segment starts on one.
+                "-force_key_frames",
+                "expr:gte(t,n_forced*6)",
+                "-sc_threshold",
+                "0",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-f",
+                "hls",
+                "-hls_time",
+                "6",
+                "-hls_playlist_type",
+                "vod",
+                "-hls_flags",
+                "independent_segments",
+                "-hls_segment_type",
+                "mpegts",
+                "-master_pl_name",
+                "master.m3u8",
+            ]
+            .map(str::to_owned),
+        );
+        all.extend([
+            "-hls_segment_filename".to_owned(),
+            segments.to_string_lossy().into_owned(),
+            "-var_stream_map".to_owned(),
+            variants.join(" "),
+        ]);
+        let borrowed: Vec<&str> = all.iter().map(String::as_str).collect();
+        self.run(input, &borrowed, &directory.join("%v").join("index.m3u8"))
+            .await
     }
 
     /// A representative frame of `input` at its own size, as PNG into `output`.

@@ -336,6 +336,9 @@ pub const MEDIA_IN_FLIGHT: usize = 16;
 /// Objects one media worker takes per read.
 pub const MEDIA_BATCH: usize = 4;
 
+/// Keys one pass of a bucket's sweep lists and plans before it hands the sweep back.
+pub const MEDIA_SWEEP_PAGE: usize = 100;
+
 /// The first wait before an object whose renditions failed is tried again; each later wait doubles, up to
 /// [`MEDIA_RETRY_MAX_SECS`].
 pub const MEDIA_RETRY_STEP_SECS: u64 = 10;

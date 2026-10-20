@@ -234,17 +234,39 @@ impl BucketRepository for TessariBuckets {
         Ok(())
     }
 
-    async fn set_media(&self, name: &BucketName, rules: Option<Value>) -> Result<()> {
+    async fn set_media(
+        &self,
+        name: &BucketName,
+        rules: Option<Value>,
+        expected: Option<u64>,
+    ) -> Result<bool> {
         let mut parameters = name_param(name);
-        let script = match rules {
+        let value = match rules {
             Some(rules) => {
                 parameters.push(("rules".to_owned(), rules));
-                "UPDATE buckets:$name SET media = $rules;"
+                "$rules"
             }
-            None => "UPDATE buckets:$name SET media = NONE;",
+            None => "NONE",
         };
-        self.pool.run(script, parameters).await?;
-        Ok(())
+        // A WHERE on an edit is compare-and-set: a count moved since is refused and nothing is written.
+        let condition = match expected {
+            Some(expected) => {
+                parameters.push((
+                    "expected".to_owned(),
+                    Value::Number(Number::Integer(i64::try_from(expected).unwrap_or(i64::MAX))),
+                ));
+                " WHERE (media_version ?? 0) = $expected"
+            }
+            None => "",
+        };
+        let script = format!(
+            "UPDATE buckets:$name SET media = {value}, media_version = (media_version ?? 0) + 1{condition};"
+        );
+        match self.pool.run(&script, parameters).await {
+            Ok(_) => Ok(true),
+            Err(error) if expected.is_some() && error.is_class(RefusalClass::Conflict) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn set_acknowledge(&self, name: &BucketName, local: bool) -> Result<()> {

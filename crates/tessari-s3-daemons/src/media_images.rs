@@ -13,7 +13,7 @@ use tessari_s3_storage::media::{MediaService, Task, TaskQueue};
 use tessari_s3_storage::objects::ObjectService;
 
 use crate::daemon::{Daemon, DaemonFuture, Report};
-use crate::media_work::{encoding, landed, original, sealed, target, work};
+use crate::media_work::{landed, original, sealed, still, target, work};
 
 /// Renders image tasks.
 pub struct ImageWorker {
@@ -36,7 +36,12 @@ impl ImageWorker {
     /// Makes `task`'s rendition; `Err` carries why it was not made. A version gone or replaced since needs none.
     async fn make(&self, task: &Task) -> Result<(), String> {
         let rendition = &task.rendition;
-        let Output::Image { size, format } = rendition.output else {
+        let Output::Image {
+            size,
+            format,
+            quality,
+        } = rendition.output
+        else {
             return Err("not an image output".to_owned());
         };
         let Some((bucket, object)) = original(&self.objects, rendition).await? else {
@@ -48,9 +53,9 @@ impl ImageWorker {
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "the original is larger than a media worker reads".to_owned())?;
-        let encoder = encoding(format);
+        let wanted = still(size, format, quality);
         // Bounded by the input guards before any decoding starts; it cannot be cancelled once running.
-        let made = tokio::task::spawn_blocking(move || render(&bytes, &[(size, encoder)]))
+        let made = tokio::task::spawn_blocking(move || render(&bytes, &[wanted]))
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| error.to_string())?

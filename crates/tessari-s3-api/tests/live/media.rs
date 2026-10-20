@@ -235,7 +235,7 @@ pub(crate) fn png(width: u32, height: u32) -> Vec<u8> {
 }
 
 /// The size of the image at `path`, which must be served as `content_type` and be written in `format`.
-async fn image_at(
+pub(crate) async fn image_at(
     state: &tessari_s3_api::ApiState,
     path: &str,
     content_type: &str,
@@ -345,14 +345,14 @@ async fn an_uploaded_image_gets_its_renditions_from_two_nodes_and_a_rendition_ge
 }
 
 /// The ffmpeg the video test runs, named by `TESSARIDB_S3_TEST_FFMPEG`; its ffprobe sits beside it.
-fn ffmpeg() -> std::path::PathBuf {
+pub(crate) fn ffmpeg() -> std::path::PathBuf {
     std::env::var_os("TESSARIDB_S3_TEST_FFMPEG")
         .map(std::path::PathBuf::from)
         .expect("set TESSARIDB_S3_TEST_FFMPEG to an ffmpeg with libx264, libvpx-vp9 and libopus")
 }
 
 /// What ffprobe reports of the first stream of `kind` (`v` or `a`) in `bytes`, as `codec,width,height,pix_fmt`.
-async fn probe(bytes: &[u8], kind: &str) -> String {
+pub(crate) async fn probe(bytes: &[u8], kind: &str) -> String {
     let file = std::env::temp_dir().join(format!(
         "tessaridb-s3-probe-{}",
         uuid::Uuid::new_v4().simple()

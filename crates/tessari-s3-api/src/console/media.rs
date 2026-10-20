@@ -1,5 +1,6 @@
 //! A bucket's media rules through the console (G004 C1): read by whoever reads the bucket, set by whoever configures
-//! it, checked as a whole and stored whole; every change is recorded.
+//! it, checked as a whole and stored whole; every change is recorded. Whoever configures it also starts a sweep, which
+//! gives the objects already there their renditions, and whoever reads it sees how far the sweep is.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -10,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use tessari_s3_core::authz::policy::Context;
 use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
-use tessari_s3_core::media::{MediaError, Output, Rule, validate};
+use tessari_s3_core::media::{MediaError, Output, OutputError, Rule, validate};
 use tessari_s3_storage::actions::NewAction;
+use tessari_s3_storage::buckets::MediaSet;
+use tessari_s3_storage::media::SweepProgress;
 
 use super::ConsoleState;
 use super::access::on_bucket;
@@ -33,13 +36,45 @@ pub(super) struct MediaRule {
 #[derive(Serialize)]
 pub(super) struct MediaRules {
     rules: Vec<MediaRule>,
+    /// How many times the rules were set; a save naming it is refused if they were set again since.
+    version: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct SetMedia {
     rules: Vec<MediaRule>,
+    version: Option<u64>,
     reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct StartSweep {
+    reason: Option<String>,
+}
+
+/// Where a bucket's sweep stands: `none`, `running` or `done`, with the objects listed and renditions queued.
+#[derive(Serialize)]
+pub(super) struct Sweep {
+    state: &'static str,
+    listed: u64,
+    queued: u64,
+}
+
+impl From<SweepProgress> for Sweep {
+    fn from(progress: SweepProgress) -> Self {
+        let (state, listed, queued) = match progress {
+            SweepProgress::None => ("none", 0, 0),
+            SweepProgress::Running { listed, queued } => ("running", listed, queued),
+            SweepProgress::Done { listed, queued } => ("done", listed, queued),
+        };
+        Self {
+            state,
+            listed,
+            queued,
+        }
+    }
 }
 
 /// A refusal in the console's own words: the message names what is wrong and never repeats the caller's input.
@@ -57,6 +92,19 @@ fn refused(error: &MediaError) -> ConsoleError {
             "a media rule cannot take keys under a '.renditions/' segment"
         }
         MediaError::TooManyRules => "a bucket holds at most 100 media rules",
+    };
+    ConsoleError::invalid("invalid_media", message)
+}
+
+/// An output refused in the console's own words.
+fn unspelled(error: OutputError) -> ConsoleError {
+    let message = match error {
+        OutputError::Unknown => "an output is image, video or poster, a size and a listed format",
+        OutputError::SizeOutOfRange => "an image side is between 16 and 7680 pixels",
+        OutputError::BoxTooLarge => "a box holds at most 50 000 000 pixels",
+        OutputError::ModeNeedsBox => "fit, cover and exact follow a box such as 400x400",
+        OutputError::QualityOutOfRange => "a quality is between 1 and 100",
+        OutputError::QualityOnLossless => "png is lossless and takes no quality",
     };
     ConsoleError::invalid("invalid_media", message)
 }
@@ -83,6 +131,7 @@ pub(super) async fn get(
         .get(&name)
         .await?
         .ok_or_else(|| ConsoleError::missing("no_such_bucket", "the bucket does not exist"))?;
+    let version = found.media_version;
     let rules = found
         .media
         .unwrap_or_default()
@@ -94,7 +143,7 @@ pub(super) async fn get(
             prefix: rule.prefix,
         })
         .collect();
-    Ok(Json(MediaRules { rules }))
+    Ok(Json(MediaRules { rules, version }))
 }
 
 pub(super) async fn set(
@@ -108,8 +157,13 @@ pub(super) async fn set(
 ) -> Result<Response, ConsoleError> {
     let SetMedia {
         rules,
+        version,
         reason: given,
-    } = json(&headers, &body, "expected rules and an optional reason")?;
+    } = json(
+        &headers,
+        &body,
+        "expected rules, an optional version and an optional reason",
+    )?;
     let why = reason(given, false)?;
     let name = bucket_name(&bucket)?;
     on_bucket(
@@ -127,12 +181,7 @@ pub(super) async fn set(
             let outputs = rule
                 .outputs
                 .iter()
-                .map(|output| {
-                    Output::parse(output).ok_or(ConsoleError::invalid(
-                        "invalid_media",
-                        "an output is image, video or poster, a listed size and a listed format",
-                    ))
-                })
+                .map(|output| Output::parse(output).map_err(unspelled))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Rule {
                 id: rule.id,
@@ -143,7 +192,11 @@ pub(super) async fn set(
         })
         .collect::<Result<Vec<_>, ConsoleError>>()?;
     validate(&rules).map_err(|error| refused(&error))?;
-    let set = state.storage().buckets().set_media(&name, &rules).await?;
+    let set = state
+        .storage()
+        .buckets()
+        .set_media(&name, &rules, version)
+        .await?;
     record(
         &state,
         NewAction {
@@ -151,16 +204,99 @@ pub(super) async fn set(
             operation: "set_media".to_owned(),
             target: name.as_str().to_owned(),
             reason: why,
-            outcome: if set { "done" } else { "no_such_bucket" }.to_owned(),
+            outcome: match set {
+                MediaSet::Set => "done",
+                MediaSet::Stale => "stale_media",
+                MediaSet::NoSuchBucket => "no_such_bucket",
+            }
+            .to_owned(),
         },
     )
     .await?;
-    if set {
-        Ok(StatusCode::NO_CONTENT.into_response())
-    } else {
-        Err(ConsoleError::missing(
+    match set {
+        MediaSet::Set => Ok(StatusCode::NO_CONTENT.into_response()),
+        MediaSet::Stale => Err(ConsoleError::stale(
+            "stale_media",
+            "the media rules were changed since they were read; read them again",
+        )),
+        MediaSet::NoSuchBucket => Err(ConsoleError::missing(
             "no_such_bucket",
             "the bucket does not exist",
-        ))
+        )),
     }
+}
+
+pub(super) async fn sweep(
+    State(state): State<ConsoleState>,
+    Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
+    Path(bucket): Path<String>,
+) -> Result<Json<Sweep>, ConsoleError> {
+    let name = bucket_name(&bucket)?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ReadBucket,
+        ("s3:GetBucketMedia", None),
+    )
+    .await?;
+    Ok(Json(
+        state.storage().media().sweep_progress(&name).await?.into(),
+    ))
+}
+
+pub(super) async fn start_sweep(
+    State(state): State<ConsoleState>,
+    Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
+    Path(bucket): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ConsoleError> {
+    let given = if body.is_empty() {
+        None
+    } else {
+        json::<StartSweep>(&headers, &body, "expected an optional reason")?.reason
+    };
+    let why = reason(given, false)?;
+    let name = bucket_name(&bucket)?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ConfigureBucket,
+        ("s3:PutBucketMedia", None),
+    )
+    .await?;
+    let exists = state.storage().buckets().get(&name).await?.is_some();
+    if exists {
+        state.storage().media().start_sweep(&name).await?;
+    }
+    record(
+        &state,
+        NewAction {
+            operator: session.subject.operator(),
+            operation: "sweep_media".to_owned(),
+            target: name.as_str().to_owned(),
+            reason: why,
+            outcome: if exists { "done" } else { "no_such_bucket" }.to_owned(),
+        },
+    )
+    .await?;
+    if !exists {
+        return Err(ConsoleError::missing(
+            "no_such_bucket",
+            "the bucket does not exist",
+        ));
+    }
+    let started: Sweep = SweepProgress::Running {
+        listed: 0,
+        queued: 0,
+    }
+    .into();
+    Ok((StatusCode::ACCEPTED, Json(started)).into_response())
 }
