@@ -14,6 +14,7 @@
 mod signer;
 
 mod acknowledge;
+mod backup;
 mod bitrot;
 mod commit_crash;
 mod disk;

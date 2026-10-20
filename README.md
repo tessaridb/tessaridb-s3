@@ -235,6 +235,30 @@ no unreclaimed shard. One cuts a node off from its peers through a proxy that sw
 through the others, and checks that the node is healed once the cut ends. Another heals a returning node while
 readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once. The soak runs mixed
 traffic for `TESSARIDB_S3_SOAK_SECS` seconds (7200 for two hours) and only when that is set.
+Two drills run when their binaries are named: `TESSARIDB_S3_TEST_PREVIOUS` (the previous release's
+`tessaridb-s3`) rolls the cluster onto this build one node at a time under writes, and `TESSARIDB_S3_TEST_ENGINE`
+(a `tessaridb` binary) takes the backup below under writes, restores it and reads every object back.
+
+### Backing up
+
+A backup is two halves taken in one order, while the cluster keeps serving:
+
+1. the metadata store's snapshot first: `tessaridb --at <node> --user <owner> --backup meta.snapshot`
+   (the password from `TESSARIDB_PASSWORD`);
+2. then every node's `TESSARIDB_S3_DATA_DIR`, copied whole, all of it within the reclaim grace
+   (`TESSARIDB_S3_RECLAIM_GRACE_SECS`, 24 hours by default).
+
+An object's bytes are durable before the commit that names it, and a file freed by a delete, an overwrite or
+lifecycle waits out the grace before it is removed, so the copy holds the bytes of every object the snapshot names,
+including one deleted or overwritten after it. Bytes written after the snapshot have no record after a restore and
+are reclaimed. Copying the drives first and the snapshot after is the wrong order: objects written in between are
+listed and cannot be read. Do not change the layout while a backup is being taken.
+
+To restore, `tessaridb <store> --restore meta.snapshot` into an empty store, serve it, put each node's copy back at
+its `TESSARIDB_S3_DATA_DIR` and start the same nodes (same ids, addresses and certificates) against it. Keep the
+root secret, `TESSARIDB_S3_IAM_KEY`, the keys passphrase, the cluster secret and the internal authority with the node
+certificates outside both halves: the backup cannot be opened without them and gives nothing away with them. The
+drill on six nodes with 36 objects measured the backup at 2.0 s and the restore at 1.3 s; both grow with the data.
 
 ## Measuring
 

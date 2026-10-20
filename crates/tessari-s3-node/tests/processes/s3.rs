@@ -392,6 +392,20 @@ impl Cluster {
         Ok(())
     }
 
+    /// Starts every (stopped) node again over its own drive, with the same name, addresses and credentials, signing
+    /// in to the metadata `meta` names instead — a cluster brought back on a restored metadata store.
+    pub async fn reopen_on(&mut self, meta: Meta) {
+        self.meta = MetaPool::new(settings(&meta, &self.namespace)).expect("pool");
+        self.settings = meta;
+        let binary = self.binary.clone();
+        for index in 0..self.nodes.len() {
+            let name = self.nodes[index].name.clone();
+            self.restart_on(index, &binary, &[])
+                .await
+                .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
+        }
+    }
+
     /// Stops node `index` as an operator would — SIGTERM — and waits until its process has exited.
     pub async fn stop(&mut self, index: usize) {
         let node = &mut self.nodes[index];
