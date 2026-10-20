@@ -168,6 +168,10 @@ pub fn policy_action(operation: Operation, naming_version: bool) -> Option<(&'st
             versioned("s3:PutObjectAcl", "s3:PutObjectVersionAcl"),
             Object,
         ),
+        O::GetObjectAttributes => (
+            versioned("s3:GetObjectAttributes", "s3:GetObjectVersionAttributes"),
+            Object,
+        ),
         O::GetObjectRetention => ("s3:GetObjectRetention", Object),
         O::PutObjectRetention => ("s3:PutObjectRetention", Object),
         O::GetObjectLegalHold => ("s3:GetObjectLegalHold", Object),
@@ -188,4 +192,18 @@ pub fn policy_action(operation: Operation, naming_version: bool) -> Option<(&'st
         O::DeleteObjects => ("s3:DeleteObject", Object),
         _ => return None,
     })
+}
+
+/// A second action `operation` is also asked as, on the same resource: GetObjectAttributes answers what a read of the
+/// object would, so it needs the read as well as its own action.
+#[must_use]
+pub fn also_asked(operation: Operation, naming_version: bool) -> Option<&'static str> {
+    match operation {
+        Operation::GetObjectAttributes => Some(if naming_version {
+            "s3:GetObjectVersion"
+        } else {
+            "s3:GetObject"
+        }),
+        _ => None,
+    }
 }

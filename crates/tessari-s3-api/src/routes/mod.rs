@@ -95,6 +95,7 @@ pub(crate) async fn route(
         Operation::CopyObject => objects::copy(call, objects::key(call)?).await,
         Operation::GetObject => objects::read(call, objects::key(call)?, false).await,
         Operation::HeadObject => objects::read(call, objects::key(call)?, true).await,
+        Operation::GetObjectAttributes => objects::attributes(call, objects::key(call)?).await,
         Operation::GetObjectTagging => tagging::get_object(call, objects::key(call)?).await,
         Operation::PutObjectTagging => tagging::put_object(call, objects::key(call)?, body).await,
         Operation::DeleteObjectTagging => tagging::delete_object(call, objects::key(call)?).await,

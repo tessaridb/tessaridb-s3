@@ -34,6 +34,7 @@ const IMPLEMENTED: &[Operation] = &[
     Operation::GetBucketVersioning,
     Operation::GetObject,
     Operation::GetObjectAcl,
+    Operation::GetObjectAttributes,
     Operation::GetObjectLegalHold,
     Operation::GetObjectLockConfiguration,
     Operation::GetObjectRetention,

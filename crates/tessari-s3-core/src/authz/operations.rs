@@ -110,7 +110,8 @@ pub const fn required(operation: Operation) -> Option<Required> {
         | Operation::GetObjectTagging
         | Operation::GetObjectRetention
         | Operation::GetObjectLegalHold
-        | Operation::GetObjectAcl => on(Need::ReadObject),
+        | Operation::GetObjectAcl
+        | Operation::GetObjectAttributes => on(Need::ReadObject),
         // Extending a retention is a write; shortening a GOVERNANCE one also needs who administers the bucket.
         Operation::PutObjectRetention => on(Need::WriteObject),
         Operation::PutObjectTagging | Operation::DeleteObjectTagging | Operation::PutObjectAcl => {

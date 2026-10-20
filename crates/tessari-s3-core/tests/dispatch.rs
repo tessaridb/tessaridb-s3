@@ -253,6 +253,7 @@ fn exactly_the_operations_with_handlers_are_implemented() {
         "GetBucketVersioning",
         "GetObject",
         "GetObjectAcl",
+        "GetObjectAttributes",
         "GetObjectLegalHold",
         "GetObjectLockConfiguration",
         "GetObjectRetention",

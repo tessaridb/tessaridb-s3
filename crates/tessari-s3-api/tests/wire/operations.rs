@@ -66,6 +66,9 @@ async fn every_catalog_operation_signed_and_sent_reaches_its_handler_or_is_not_i
         } else if answering == Operation::ListParts {
             // `uploadId=1` is not an id this server could have issued: refused before reading the store.
             (404, "NoSuchUpload")
+        } else if answering == Operation::GetObjectAttributes {
+            // `x-amz-object-attributes: value` names no attribute: refused before reading the store.
+            (400, "InvalidArgument")
         } else if is_implemented(answering) {
             (503, "ServiceUnavailable")
         } else {
