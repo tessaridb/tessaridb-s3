@@ -469,14 +469,7 @@ async fn a_save_naming_a_version_set_again_since_is_refused_and_changes_nothing(
     let rules = |output: &str| json!([{"id": "p", "content_types": ["image/*"], "prefix": "", "outputs": [output]}]);
     let (console, token) = (&console, &token);
     let save = |body: Value| async move {
-        send(
-            console,
-            "PUT",
-            MEDIA,
-            Some(token),
-            Some(&body.to_string()),
-        )
-        .await
+        send(console, "PUT", MEDIA, Some(token), Some(&body.to_string())).await
     };
     // Two editors read version 0; the first save wins and moves it to 1.
     let first = save(json!({"rules": rules("image/320/jpeg"), "version": 0})).await;
