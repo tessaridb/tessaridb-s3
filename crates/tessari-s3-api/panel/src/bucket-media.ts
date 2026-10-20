@@ -5,7 +5,7 @@
 
 import { call } from "./api.ts";
 import { announce, el, field, fill, mono } from "./dom.ts";
-import { isKind, KINDS, outputOf, readMediaRules, spell, typesOf, type MediaRule, type Output } from "./media-model.ts";
+import { isKind, KINDS, outputOf, readMediaRules, readSweep, spell, sweepText, typesOf, type MediaRule, type Output } from "./media-model.ts";
 import { ignored, type Bucket } from "./models.ts";
 import { refusal, type Screen } from "./screen.ts";
 
@@ -126,7 +126,7 @@ export function mediaForm(screen: Screen, bucket: Bucket, close: () => void): HT
     "form",
     { class: "confirm", novalidate: "", "aria-labelledby": `${base}-title` },
     el("p", { id: `${base}-title` }, el("strong", {}, "Media: "), mono(bucket.name)),
-    el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Image sizes are the long side in pixels, video sizes the shorter side. Without rules nothing is processed."),
+    el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. An image size is the long side in pixels (1280) or a box (400x400, with -cover or -exact), and JPEG, WebP or AVIF may name a quality; video sizes are the shorter side. Without rules nothing is processed."),
     body,
     said,
   );
@@ -174,7 +174,28 @@ export function mediaForm(screen: Screen, bucket: Bucket, close: () => void): HT
     const reason = field(`${base}-reason`, "Reason (optional)", { maxlength: "500" }, "Recorded with your key id.");
     const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
     cancel.addEventListener("click", close);
-    fill(body, none, list, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel));
+    const swept = el("p", { class: "muted", "aria-live": "polite" }, "Reading how far the objects already here are rendered…");
+    const sweep = el("button", { type: "button", class: "quiet" }, "Render existing objects");
+    const showSweep = async (): Promise<void> => {
+      const seen = await call("GET", `${route}/sweep`, readSweep);
+      swept.textContent = seen.ok ? sweepText(seen.value) : "How far the objects already here are rendered could not be read.";
+    };
+    sweep.addEventListener("click", async () => {
+      const why = reason.input.value.trim();
+      const started = await call("POST", `${route}/sweep`, readSweep, why === "" ? {} : { reason: why });
+      if (started.ok) {
+        announce(`Rendering the objects already in ${bucket.name} by its saved rules.`);
+        await showSweep();
+        return;
+      }
+      if (started.status === 401) {
+        screen.signIn();
+        return;
+      }
+      fill(said, refusal(started));
+    });
+    void showSweep();
+    fill(body, none, list, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel), swept, el("div", { class: "actions" }, sweep));
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const why = reason.input.value.trim();

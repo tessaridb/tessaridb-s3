@@ -5,7 +5,7 @@
 //! of 16-7680 pixels, and a lossy still format may carry `@quality`. The server
 //! checks a rule set as a whole, this page only reads the answer and shapes the form.
 
-import { list, record, text } from "./models.ts";
+import { count, list, record, text } from "./models.ts";
 
 const IMAGE_SIZES = ["150", "320", "640", "768", "1024", "1280", "1440", "1920", "2560", "3840"] as const;
 const STILL_FORMATS = ["jpeg", "png", "webp", "avif"] as const;
@@ -85,3 +85,26 @@ export const typesOf = (written: string): string[] =>
     .split(",")
     .map((part) => part.trim())
     .filter((part) => part !== "");
+
+/** Where a bucket's sweep of its existing objects stands. */
+export type Sweep = { readonly state: "none" | "running" | "done"; readonly listed: number; readonly queued: number };
+
+export function readSweep(v: unknown): Sweep | null {
+  if (!record(v) || !count(v["listed"]) || !count(v["queued"])) {
+    return null;
+  }
+  const state = v["state"];
+  return state === "none" || state === "running" || state === "done" ? { state, listed: v["listed"], queued: v["queued"] } : null;
+}
+
+/** The sweep in a sentence. */
+export function sweepText(sweep: Sweep): string {
+  switch (sweep.state) {
+    case "none":
+      return "The objects already here have not been rendered.";
+    case "running":
+      return `Rendering the objects already here: ${sweep.listed} listed, ${sweep.queued} renditions queued so far.`;
+    case "done":
+      return `The objects already here were rendered: ${sweep.listed} listed, ${sweep.queued} renditions queued.`;
+  }
+}

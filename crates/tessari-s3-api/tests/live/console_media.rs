@@ -309,3 +309,140 @@ async fn an_output_names_a_box_a_mode_and_a_quality_and_is_rendered_so() {
         );
     }
 }
+
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn a_sweep_renders_the_objects_written_before_a_rule_once_a_page_at_a_time() {
+    use tessari_s3_daemons::{Daemon, ImageWorker, MediaPlanner};
+
+    use crate::media::{image_at, png};
+    const SWEEP: &str = "/api/v1/buckets/pics/media/sweep";
+    let _why = IGNORED;
+    let (state, console, _) = states().await;
+    let ann = user_with_key(state.storage(), "ann", "alpha", Role::Member, true).await;
+    let put = |path: String, content_type: &'static str, body: Vec<u8>| {
+        let state = &state;
+        let pair = ann.pair();
+        async move {
+            call_as(
+                state,
+                pair,
+                "PUT",
+                &path,
+                vec![],
+                vec![("content-type", content_type)],
+                &body,
+            )
+            .await
+            .status
+        }
+    };
+    assert_eq!(put("/pics".to_owned(), "text/plain", Vec::new()).await, 200);
+    for name in ["a", "b", "c"] {
+        assert_eq!(
+            put(format!("/pics/{name}.png"), "image/png", png(400, 200)).await,
+            200
+        );
+    }
+    // More than one page: 104 objects, of which three are images.
+    for n in 0..101 {
+        assert_eq!(
+            put(format!("/pics/t/{n:03}"), "text/plain", b"x".to_vec()).await,
+            200
+        );
+    }
+    let (media, objects) = (state.storage().media(), state.storage().objects().clone());
+    media.define().await.expect("group defined");
+    let planner = MediaPlanner::new(media.clone(), objects.clone());
+    // Without rules the created objects are settled unplanned: only a sweep reaches them now.
+    planner.run_once().await.expect("planned");
+    let token = sign_in_as(&console, &ann).await.expect("ann signed in");
+    let progress = || async {
+        let seen = send(&console, "GET", SWEEP, Some(&token), None).await;
+        assert_eq!(seen.status, 200);
+        seen.json()
+    };
+    assert_eq!(
+        progress().await,
+        json!({"state": "none", "listed": 0, "queued": 0})
+    );
+    let rules = json!({"rules": [{"id": "p", "content_types": ["image/*"], "prefix": "",
+        "outputs": ["image/320/jpeg", "image/64x64-cover/webp"]}]});
+    let set = send(
+        &console,
+        "PUT",
+        MEDIA,
+        Some(&token),
+        Some(&rules.to_string()),
+    )
+    .await;
+    assert_eq!(set.status, 204);
+    let start = || async {
+        let seen = send(&console, "POST", SWEEP, Some(&token), None).await;
+        assert_eq!(seen.status, 202, "{:?}", seen.code());
+    };
+    start().await;
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 0, "queued": 0})
+    );
+    planner.run_once().await.expect("first page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 100, "queued": 6})
+    );
+    // Started again mid-way, it begins from the first key.
+    start().await;
+    planner.run_once().await.expect("first page again");
+    assert_eq!(
+        progress().await,
+        json!({"state": "running", "listed": 100, "queued": 6})
+    );
+    planner.run_once().await.expect("last page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "done", "listed": 104, "queued": 6})
+    );
+    let worker = ImageWorker::new(media.clone(), objects.clone(), "node-a".to_owned());
+    for _ in 0..3 {
+        worker.run_once().await.expect("rendered");
+    }
+    for name in ["a", "b", "c"] {
+        let at = format!("/pics/{name}.png.renditions");
+        assert_eq!(
+            image_at(
+                &state,
+                &format!("{at}/image-320.jpg"),
+                "image/jpeg",
+                image::ImageFormat::Jpeg
+            )
+            .await,
+            (320, 160)
+        );
+        assert_eq!(
+            image_at(
+                &state,
+                &format!("{at}/image-64x64-cover.webp"),
+                "image/webp",
+                image::ImageFormat::WebP
+            )
+            .await,
+            (64, 64)
+        );
+    }
+    // A repeat lists the same objects and queues nothing: every rendition was written since its original.
+    start().await;
+    planner.run_once().await.expect("first page");
+    planner.run_once().await.expect("last page");
+    assert_eq!(
+        progress().await,
+        json!({"state": "done", "listed": 104, "queued": 0})
+    );
+    let member = user_with_key(state.storage(), "bob", "alpha", Role::Member, false).await;
+    let bob = sign_in_as(&console, &member).await.expect("bob signed in");
+    assert_eq!(
+        send(&console, "POST", SWEEP, Some(&bob), None).await.status,
+        403,
+        "only whoever configures the bucket starts a sweep"
+    );
+}

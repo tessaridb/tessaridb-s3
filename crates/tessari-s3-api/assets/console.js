@@ -1459,6 +1459,23 @@
     return record(v) ? list(v["rules"], rule) : null;
   }
   var typesOf = (written) => written.split(",").map((part) => part.trim()).filter((part) => part !== "");
+  function readSweep(v) {
+    if (!record(v) || !count(v["listed"]) || !count(v["queued"])) {
+      return null;
+    }
+    const state2 = v["state"];
+    return state2 === "none" || state2 === "running" || state2 === "done" ? { state: state2, listed: v["listed"], queued: v["queued"] } : null;
+  }
+  function sweepText(sweep) {
+    switch (sweep.state) {
+      case "none":
+        return "The objects already here have not been rendered.";
+      case "running":
+        return `Rendering the objects already here: ${sweep.listed} listed, ${sweep.queued} renditions queued so far.`;
+      case "done":
+        return `The objects already here were rendered: ${sweep.listed} listed, ${sweep.queued} renditions queued.`;
+    }
+  }
 
   // src/bucket-media.ts
   //! A bucket's media rules, inline under its row: anyone who reads the bucket
@@ -1572,7 +1589,7 @@
       "form",
       { class: "confirm", novalidate: "", "aria-labelledby": `${base}-title` },
       el("p", { id: `${base}-title` }, el("strong", {}, "Media: "), mono(bucket2.name)),
-      el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. Image sizes are the long side in pixels, video sizes the shorter side. Without rules nothing is processed."),
+      el("p", { class: "muted" }, "An upload whose content type and key match a rule gets the rule's renditions, written under the key's .renditions/ folder. An image size is the long side in pixels (1280) or a box (400x400, with -cover or -exact), and JPEG, WebP or AVIF may name a quality; video sizes are the shorter side. Without rules nothing is processed."),
       body,
       said
     );
@@ -1620,7 +1637,28 @@
       const reason = field(`${base}-reason`, "Reason (optional)", { maxlength: "500" }, "Recorded with your key id.");
       const cancel = el("button", { type: "button", class: "quiet" }, "Cancel");
       cancel.addEventListener("click", close);
-      fill(body, none, list2, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel));
+      const swept = el("p", { class: "muted", "aria-live": "polite" }, "Reading how far the objects already here are rendered…");
+      const sweep = el("button", { type: "button", class: "quiet" }, "Render existing objects");
+      const showSweep = async () => {
+        const seen = await call("GET", `${route}/sweep`, readSweep);
+        swept.textContent = seen.ok ? sweepText(seen.value) : "How far the objects already here are rendered could not be read.";
+      };
+      sweep.addEventListener("click", async () => {
+        const why = reason.input.value.trim();
+        const started = await call("POST", `${route}/sweep`, readSweep, why === "" ? {} : { reason: why });
+        if (started.ok) {
+          announce(`Rendering the objects already in ${bucket2.name} by its saved rules.`);
+          await showSweep();
+          return;
+        }
+        if (started.status === 401) {
+          screen.signIn();
+          return;
+        }
+        fill(said, refusal(started));
+      });
+      void showSweep();
+      fill(body, none, list2, el("div", { class: "actions" }, add), reason.row, el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Save rules"), cancel), swept, el("div", { class: "actions" }, sweep));
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const why = reason.input.value.trim();

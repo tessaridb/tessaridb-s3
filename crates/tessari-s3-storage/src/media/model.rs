@@ -72,3 +72,39 @@ pub struct Task {
     /// Why the last attempt failed, if one did.
     pub error: Option<String>,
 }
+
+/// A bucket's sweep of its existing objects, as a pass holds it: the keys up to `after` are planned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sweep {
+    /// The bucket swept.
+    pub bucket: String,
+    /// The last key planned; empty before the first page.
+    pub after: String,
+    /// Objects listed so far.
+    pub listed: u64,
+    /// Renditions queued so far.
+    pub queued: u64,
+    /// When it was started, which tells this sweep from one started again since.
+    pub started: (i64, u32),
+}
+
+/// Where a bucket's sweep stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SweepProgress {
+    /// No sweep was started.
+    None,
+    /// Under way: so many objects listed and renditions queued.
+    Running {
+        /// Objects listed so far.
+        listed: u64,
+        /// Renditions queued so far.
+        queued: u64,
+    },
+    /// The last sweep finished.
+    Done {
+        /// Objects listed.
+        listed: u64,
+        /// Renditions queued.
+        queued: u64,
+    },
+}

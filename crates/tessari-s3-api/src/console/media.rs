@@ -1,5 +1,6 @@
 //! A bucket's media rules through the console (G004 C1): read by whoever reads the bucket, set by whoever configures
-//! it, checked as a whole and stored whole; every change is recorded.
+//! it, checked as a whole and stored whole; every change is recorded. Whoever configures it also starts a sweep, which
+//! gives the objects already there their renditions, and whoever reads it sees how far the sweep is.
 
 use axum::Json;
 use axum::body::Bytes;
@@ -12,6 +13,7 @@ use tessari_s3_core::authz::{Action, Principal};
 use tessari_s3_core::console::Session;
 use tessari_s3_core::media::{MediaError, Output, OutputError, Rule, validate};
 use tessari_s3_storage::actions::NewAction;
+use tessari_s3_storage::media::SweepProgress;
 
 use super::ConsoleState;
 use super::access::on_bucket;
@@ -40,6 +42,35 @@ pub(super) struct MediaRules {
 pub(super) struct SetMedia {
     rules: Vec<MediaRule>,
     reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct StartSweep {
+    reason: Option<String>,
+}
+
+/// Where a bucket's sweep stands: `none`, `running` or `done`, with the objects listed and renditions queued.
+#[derive(Serialize)]
+pub(super) struct Sweep {
+    state: &'static str,
+    listed: u64,
+    queued: u64,
+}
+
+impl From<SweepProgress> for Sweep {
+    fn from(progress: SweepProgress) -> Self {
+        let (state, listed, queued) = match progress {
+            SweepProgress::None => ("none", 0, 0),
+            SweepProgress::Running { listed, queued } => ("running", listed, queued),
+            SweepProgress::Done { listed, queued } => ("done", listed, queued),
+        };
+        Self {
+            state,
+            listed,
+            queued,
+        }
+    }
 }
 
 /// A refusal in the console's own words: the message names what is wrong and never repeats the caller's input.
@@ -171,4 +202,79 @@ pub(super) async fn set(
             "the bucket does not exist",
         ))
     }
+}
+
+pub(super) async fn sweep(
+    State(state): State<ConsoleState>,
+    Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
+    Path(bucket): Path<String>,
+) -> Result<Json<Sweep>, ConsoleError> {
+    let name = bucket_name(&bucket)?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ReadBucket,
+        ("s3:GetBucketMedia", None),
+    )
+    .await?;
+    Ok(Json(
+        state.storage().media().sweep_progress(&name).await?.into(),
+    ))
+}
+
+pub(super) async fn start_sweep(
+    State(state): State<ConsoleState>,
+    Extension(session): Extension<Session>,
+    Extension(principal): Extension<Principal>,
+    Extension(context): Extension<Context>,
+    Path(bucket): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ConsoleError> {
+    let given = if body.is_empty() {
+        None
+    } else {
+        json::<StartSweep>(&headers, &body, "expected an optional reason")?.reason
+    };
+    let why = reason(given, false)?;
+    let name = bucket_name(&bucket)?;
+    on_bucket(
+        &state,
+        &principal,
+        &context,
+        &name,
+        Action::ConfigureBucket,
+        ("s3:PutBucketMedia", None),
+    )
+    .await?;
+    let exists = state.storage().buckets().get(&name).await?.is_some();
+    if exists {
+        state.storage().media().start_sweep(&name).await?;
+    }
+    record(
+        &state,
+        NewAction {
+            operator: session.subject.operator(),
+            operation: "sweep_media".to_owned(),
+            target: name.as_str().to_owned(),
+            reason: why,
+            outcome: if exists { "done" } else { "no_such_bucket" }.to_owned(),
+        },
+    )
+    .await?;
+    if !exists {
+        return Err(ConsoleError::missing(
+            "no_such_bucket",
+            "the bucket does not exist",
+        ));
+    }
+    let started: Sweep = SweepProgress::Running {
+        listed: 0,
+        queued: 0,
+    }
+    .into();
+    Ok((StatusCode::ACCEPTED, Json(started)).into_response())
 }

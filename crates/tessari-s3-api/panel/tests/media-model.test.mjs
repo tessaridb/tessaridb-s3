@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { KINDS, outputOf, readMediaRules, spell, typesOf } from "../src/media-model.ts";
+import { KINDS, outputOf, readMediaRules, readSweep, spell, sweepText, typesOf } from "../src/media-model.ts";
 
 const rule = { id: "photos", content_types: ["image/*"], prefix: "photos/", outputs: ["image/320/jpeg", "image/1920/webp"] };
 
@@ -49,4 +49,13 @@ test("the lists are the server's", () => {
 test("content types are written comma-separated and sent trimmed, without empties", () => {
   assert.deepEqual(typesOf(" image/* , video/mp4,, "), ["image/*", "video/mp4"]);
   assert.deepEqual(typesOf("  "), []);
+});
+
+test("a sweep reads as the server sends it and says where it stands", () => {
+  assert.deepEqual(readSweep({ state: "running", listed: 100, queued: 6 }), { state: "running", listed: 100, queued: 6 });
+  assert.equal(readSweep({ state: "paused", listed: 0, queued: 0 }), null);
+  assert.equal(readSweep({ state: "done", listed: -1, queued: 0 }), null);
+  assert.equal(readSweep({ state: "done", listed: 4 }), null);
+  assert.equal(sweepText({ state: "done", listed: 104, queued: 6 }), "The objects already here were rendered: 104 listed, 6 renditions queued.");
+  assert.match(sweepText({ state: "none", listed: 0, queued: 0 }), /not been rendered/);
 });
