@@ -290,7 +290,7 @@ async fn a_copy_is_refused_by_name_before_it_writes() {
     for (headers, code) in [
         (vec![source("cpr/missing")], "NoSuchKey"),
         (vec![source("cpr-nowhere/src")], "NoSuchBucket"),
-        (vec![source("cpr/src?versionId=1")], "NotImplemented"),
+        (vec![source("cpr/src?versionId=1")], "InvalidArgument"),
         (vec![source("cpr")], "InvalidArgument"),
         (
             vec![

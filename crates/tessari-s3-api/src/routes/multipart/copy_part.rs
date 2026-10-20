@@ -72,7 +72,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
             "a part copy has no body for Content-MD5 or a checksum to describe",
         ));
     }
-    let (source_bucket, source_key) = source::source_of(call.headers)?;
+    let from = source::source_of(call.headers)?;
     let bucket = call.bucket()?;
     let storage = call.state.storage();
     let Some(declared) = storage.multipart().find(bucket, key, id).await? else {
@@ -81,7 +81,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
     // The part is sealed under the upload's key, which the request brings beside the source's.
     admit_key(call, declared.customer.as_ref(), customer.as_ref())?;
     let objects = storage.objects();
-    let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
+    let object = source::read_source(objects, call.headers, &from).await?;
     admit_read(call, &object, source_customer.as_ref())?;
     let (first, last, length) = wanted(call, object.size)?;
     if length > SINGLE_PUT_MAX {
@@ -148,6 +148,7 @@ pub(crate) async fn copy_part(call: &Call<'_>, key: &ObjectKey) -> Result<Respon
             }
             out.push_str("</CopyPartResult>");
             let mut response = xml_response(StatusCode::OK, out);
+            source::answer_version_id(response.headers_mut(), object.version.as_deref());
             if let Some(sealing) = &declared.encryption {
                 answer_sse(response.headers_mut(), sealing);
             }

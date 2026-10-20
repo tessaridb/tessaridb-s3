@@ -9,14 +9,14 @@ pub struct CopySource {
     pub bucket: String,
     /// The source key, not yet validated as one.
     pub key: String,
+    /// The version it names; none for the current one.
+    pub version: Option<String>,
 }
 
 /// Why a copy source was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopySourceError {
-    /// It names a version, and this server keeps none.
-    Version,
-    /// It is not a percent-encoded `bucket/key`.
+    /// It is not a percent-encoded `bucket/key`, with a non-empty `versionId` alone after it if any.
     Malformed,
 }
 
@@ -25,18 +25,20 @@ impl CopySource {
     /// `%3F`, so the first raw `?` starts the version), decoded exactly once.
     ///
     /// # Errors
-    /// [`CopySourceError::Version`] for a `versionId`; [`CopySourceError::Malformed`] for anything that is not a
-    /// bucket and a non-empty key.
+    /// [`CopySourceError::Malformed`] for anything that is not a bucket and a non-empty key, or a query that is
+    /// not one non-empty `versionId`.
     pub fn parse(header: &str) -> Result<Self, CopySourceError> {
         let (path, query) = match header.split_once('?') {
             Some((path, query)) => (path, Some(query)),
             None => (header, None),
         };
-        match query {
-            None => {}
-            Some(query) if query.starts_with("versionId=") => return Err(CopySourceError::Version),
-            Some(_) => return Err(CopySourceError::Malformed),
-        }
+        let version = match query {
+            None => None,
+            Some(query) => match query.strip_prefix("versionId=") {
+                Some(id) if !id.is_empty() && !id.contains('&') => Some(id.to_owned()),
+                _ => return Err(CopySourceError::Malformed),
+            },
+        };
         let decoded = percent_decode(path).map_err(|_| CopySourceError::Malformed)?;
         let decoded = String::from_utf8(decoded).map_err(|_| CopySourceError::Malformed)?;
         let decoded = decoded.strip_prefix('/').unwrap_or(&decoded);
@@ -44,6 +46,7 @@ impl CopySource {
             Some((bucket, key)) if !bucket.is_empty() && !key.is_empty() => Ok(Self {
                 bucket: bucket.to_owned(),
                 key: key.to_owned(),
+                version,
             }),
             _ => Err(CopySourceError::Malformed),
         }

@@ -90,11 +90,16 @@ pub async fn authorize_operation(
     };
     allowed(principal, &action, asked_action.map(asked).as_ref())?;
     if needs.source_read {
-        let (source, source_key) = source_of(headers)?;
-        let read = Action::ReadObject(bucket(state, principal, Some(&source)).await?);
+        let from = source_of(headers)?;
+        let read = Action::ReadObject(bucket(state, principal, Some(&from.bucket)).await?);
         let asked = Asked {
-            action: "s3:GetObject",
-            key: Some(source_key.as_str()),
+            // A named version is read as one, as GetObject with `versionId` is.
+            action: if from.version.is_some() {
+                "s3:GetObjectVersion"
+            } else {
+                "s3:GetObject"
+            },
+            key: Some(from.key.as_str()),
             context,
         };
         allowed(principal, &read, Some(&asked))?;
