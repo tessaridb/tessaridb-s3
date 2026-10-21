@@ -14,6 +14,7 @@
 mod signer;
 
 mod acknowledge;
+mod backup;
 mod bitrot;
 mod commit_crash;
 mod disk;
@@ -28,6 +29,7 @@ mod partition;
 mod requests;
 mod s3;
 mod soak;
+mod upgrade;
 mod zones;
 
 use std::time::{Duration, Instant};

@@ -87,10 +87,10 @@ fn respond(
     listing: &Listing<'_>,
     version: &Version<'_>,
 ) -> Result<Response<Body>> {
-    let owner = call.verified.access_key();
+    let owner = call.owner();
     Ok(xml_response(
         StatusCode::OK,
-        document::render(listing, version, owner)?,
+        document::render(listing, version, &owner)?,
     ))
 }
 

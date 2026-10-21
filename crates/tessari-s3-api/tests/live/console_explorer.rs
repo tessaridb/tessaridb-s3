@@ -104,7 +104,7 @@ fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
             let path = entry.expect("an entry").path();
             if path.is_dir() {
                 pending.push(path);
-            } else {
+            } else if !crate::large::is_layout_marker(&path) {
                 found.push(path);
             }
         }

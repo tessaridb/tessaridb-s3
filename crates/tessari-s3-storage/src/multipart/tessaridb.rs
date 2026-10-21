@@ -54,7 +54,7 @@ fn strings(map: &BTreeMap<String, String>) -> Value {
     )
 }
 
-pub(super) fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
+pub(crate) fn string_map(value: Option<&Value>) -> Result<BTreeMap<String, String>> {
     let Some(Value::Object(map)) = value else {
         return Err(malformed("checksums"));
     };

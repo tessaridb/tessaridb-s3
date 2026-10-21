@@ -31,10 +31,29 @@ fn a_copy_source_is_a_bucket_and_a_key_percent_decoded_once() {
 }
 
 #[test]
-fn a_version_is_not_implemented_and_anything_else_malformed() {
-    assert_eq!(parsed("b/k?versionId=abc"), Err(CopySourceError::Version));
+fn a_version_is_named_after_the_key_and_anything_else_is_malformed() {
+    let source = CopySource::parse("b/k%3Fx?versionId=abc").expect("a source");
+    assert_eq!(
+        (
+            source.bucket.as_str(),
+            source.key.as_str(),
+            source.version.as_deref()
+        ),
+        ("b", "k?x", Some("abc"))
+    );
+    assert_eq!(CopySource::parse("b/k").expect("a source").version, None);
     for bad in [
-        "", "/", "b", "b/", "/b/", "b/k?x=1", "b/%ZZ", "b/%FF", "b/k?",
+        "",
+        "/",
+        "b",
+        "b/",
+        "/b/",
+        "b/k?x=1",
+        "b/%ZZ",
+        "b/%FF",
+        "b/k?",
+        "b/k?versionId=",
+        "b/k?versionId=a&x=1",
     ] {
         assert_eq!(parsed(bad), Err(CopySourceError::Malformed), "{bad:?}");
     }

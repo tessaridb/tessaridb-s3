@@ -11,6 +11,8 @@ pub use notify::{
     NOTIFY_DELIVERY_TIMEOUT_SECS, NOTIFY_IN_FLIGHT, NOTIFY_POLL_SECS, NOTIFY_RETRY_MAX_SECS,
     NOTIFY_RETRY_STEP_SECS,
 };
+mod listeners;
+pub use listeners::{SERVE_BODY_IDLE_SECS, SERVE_HEADER_READ_SECS, SERVE_MAX_CONNECTIONS};
 mod replication;
 mod versions;
 pub use replication::{
@@ -353,6 +355,9 @@ pub const MEDIA_TASK_ATTEMPTS: i64 = 5;
 /// The longest one ffmpeg run may take before it is stopped: under the `media_videos` queue's 3600 s hold, so a live
 /// worker is not raced.
 pub const MEDIA_FFMPEG_TIMEOUT_SECS: u64 = 3000;
+
+/// The demuxers ffmpeg reads a video original with; never a playlist, a concat list or an image sequence.
+pub const MEDIA_FFMPEG_INPUT_FORMATS: &str = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts";
 
 /// The largest video original a worker copies out for ffmpeg, in bytes.
 pub const MEDIA_MAX_VIDEO_INPUT_BYTES: u64 = 4 * 1024 * 1024 * 1024;

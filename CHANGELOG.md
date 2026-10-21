@@ -3,6 +3,24 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.6.0: 2026-10-21
+
+Metadata on TessariDB `0.36.2`.
+
+- ACL reads answer the owner's `FULL_CONTROL`; an ACL write is taken only as `private` or `bucket-owner-full-control`
+  and changes nothing; CreateBucket refuses ACLs that grant others and ownership other than `BucketOwnerEnforced`.
+  Every owner an answer names is the bucket's space.
+- CopyObject and UploadPartCopy copy a named source version (`?versionId=`) and answer
+  `x-amz-copy-source-version-id`; a named delete marker is refused.
+- GetObjectAttributes answers the ETag, the stored checksum and its type, a multipart object's parts (paged), the
+  storage class and the size, of a version or the current one. A read of one part answers that part's checksum.
+- A node marks its data directory with the layout it writes and refuses to start on another.
+- Every listener holds at most 4096 connections, closes one whose headers take over 30 s and fails a body that pauses
+  over 60 s. STS answers another machine only over TLS. ffmpeg reads an original only as a local file in a video
+  container.
+- The README states the durability model and the measured healing rate, and the online backup procedure.
+- Certificate checks take rustls-webpki 0.103.16 and webpki-root-certs 1.0.10 (RUSTSEC-2026-0382, RUSTSEC-2026-0383).
+
 ## 0.5.0: 2026-10-20
 
 Metadata on TessariDB `0.36.2`.

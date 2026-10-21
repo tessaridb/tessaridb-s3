@@ -272,7 +272,7 @@ pub(crate) async fn list_parts(call: &Call<'_>, key: &ObjectKey) -> Result<Respo
         return Err(no_such_upload());
     };
     let page = multipart.parts(id, marker, max).await?;
-    let owner = escape(call.verified.access_key());
+    let owner = escape(&call.owner());
     let mut out = format!(
         "<ListPartsResult xmlns=\"{S3_NAMESPACE}\"><Bucket>{}</Bucket><Key>{}</Key><UploadId>{}</UploadId>\
          <PartNumberMarker>{marker}</PartNumberMarker>",

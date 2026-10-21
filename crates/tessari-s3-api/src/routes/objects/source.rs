@@ -1,14 +1,14 @@
-//! The source of a copy (CopyObject, UploadPartCopy): the object `x-amz-copy-source` names, read only when the
-//! copy-source conditions hold, its verified bytes over any range, and those bytes written to a data file of the
+//! The source of a copy (CopyObject, UploadPartCopy): the object `x-amz-copy-source` names — its current version or
+//! the one `?versionId=` names — read only when the copy-source conditions hold, its verified bytes over any range, and those bytes written to a data file of the
 //! copy's own — never the source's file, so either side can be deleted without touching the other.
 
 use axum::body::Bytes;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
 use futures_util::stream::BoxStream;
 use tessari_s3_core::objects::conditions::{ReadConditions, ReadVerdict, evaluate};
 use tessari_s3_core::objects::copy::{CopySource, CopySourceError};
-use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Uploaded};
+use tessari_s3_storage::objects::{Content, ObjectService, StoredObject, Uploaded, VersionRead};
 use tessari_s3_types::{BucketName, ErrorCode, ObjectKey};
 
 use tessari_s3_storage::encryption::CustomerKey;
@@ -24,50 +24,91 @@ pub(super) fn text<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
         .map(str::trim)
 }
 
+/// What a copy reads: a bucket's key, at the version named or the current one.
+pub(crate) struct CopyFrom {
+    pub(crate) bucket: BucketName,
+    pub(crate) key: ObjectKey,
+    pub(crate) version: Option<String>,
+}
+
 /// The object `x-amz-copy-source` names.
-pub(crate) fn source_of(headers: &HeaderMap) -> Result<(BucketName, ObjectKey)> {
+pub(crate) fn source_of(headers: &HeaderMap) -> Result<CopyFrom> {
     let malformed = || {
         Error::new(
             ErrorCode::InvalidArgument,
             "x-amz-copy-source is not bucket/key",
         )
     };
-    let source =
-        CopySource::parse(text(headers, "x-amz-copy-source").unwrap_or("")).map_err(|error| {
-            match error {
-                CopySourceError::Version => Error::new(
-                    ErrorCode::NotImplemented,
-                    "copying a version is not implemented",
-                ),
-                CopySourceError::Malformed => malformed(),
-            }
-        })?;
-    let bucket = BucketName::new(&source.bucket).map_err(|_| malformed())?;
-    let key = ObjectKey::new(&source.key).map_err(|_| malformed())?;
-    Ok((bucket, key))
+    let source = CopySource::parse(text(headers, "x-amz-copy-source").unwrap_or(""))
+        .map_err(|CopySourceError::Malformed| malformed())?;
+    Ok(CopyFrom {
+        bucket: BucketName::new(&source.bucket).map_err(|_| malformed())?,
+        key: ObjectKey::new(&source.key).map_err(|_| malformed())?,
+        version: source.version,
+    })
+}
+
+/// Names the version a copy read as `x-amz-copy-source-version-id`; a source never versioned has none to name.
+pub(crate) fn answer_version_id(headers: &mut HeaderMap, version: Option<&str>) {
+    if let Some(value) = version.and_then(|version| HeaderValue::from_str(version).ok()) {
+        headers.insert("x-amz-copy-source-version-id", value);
+    }
+}
+
+/// The version `version` names: a delete marker is no source (400), an id naming nothing `NoSuchVersion`.
+async fn named_version(
+    objects: &ObjectService,
+    from: &CopyFrom,
+    version: &str,
+) -> Result<StoredObject> {
+    match objects
+        .get_version(&from.bucket, &from.key, version)
+        .await?
+    {
+        VersionRead::Object(object) => Ok(*object),
+        VersionRead::Marker { .. } => Err(Error::new(
+            ErrorCode::InvalidRequest,
+            "The source of a copy request may not specifically refer to a delete marker by version id.",
+        )),
+        VersionRead::Absent => Err(Error::new(
+            ErrorCode::NoSuchVersion,
+            "The specified version does not exist.",
+        )),
+        VersionRead::Malformed => Err(Error::new(
+            ErrorCode::InvalidArgument,
+            "Invalid version id specified",
+        )),
+        VersionRead::NoSuchBucket => Err(Error::new(
+            ErrorCode::NoSuchBucket,
+            "the source bucket does not exist",
+        )),
+    }
+}
+
+/// The source key's current version; a current delete marker is as if the key were gone.
+async fn current(objects: &ObjectService, from: &CopyFrom) -> Result<StoredObject> {
+    match objects.get(&from.bucket, &from.key).await? {
+        Err(()) => Err(Error::new(
+            ErrorCode::NoSuchBucket,
+            "the source bucket does not exist",
+        )),
+        Ok(None) => Err(Error::new(
+            ErrorCode::NoSuchKey,
+            "the source key does not exist",
+        )),
+        Ok(Some(object)) => Ok(object),
+    }
 }
 
 /// The source object, when it exists and the copy-source conditions hold (412 when any does not, as S3 answers).
 pub(crate) async fn read_source(
     objects: &ObjectService,
     headers: &HeaderMap,
-    bucket: &BucketName,
-    key: &ObjectKey,
+    from: &CopyFrom,
 ) -> Result<StoredObject> {
-    let object = match objects.get(bucket, key).await? {
-        Err(()) => {
-            return Err(Error::new(
-                ErrorCode::NoSuchBucket,
-                "the source bucket does not exist",
-            ));
-        }
-        Ok(None) => {
-            return Err(Error::new(
-                ErrorCode::NoSuchKey,
-                "the source key does not exist",
-            ));
-        }
-        Ok(Some(object)) => object,
+    let object = match &from.version {
+        Some(version) => named_version(objects, from, version).await?,
+        None => current(objects, from).await?,
     };
     let conditions = ReadConditions {
         if_match: text(headers, "x-amz-copy-source-if-match"),

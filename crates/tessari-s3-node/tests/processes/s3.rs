@@ -95,6 +95,8 @@ pub struct Cluster {
     /// The authority and every node's credential.
     tls: PathBuf,
     settings: Meta,
+    /// The `tessaridb-s3` binary a node is started with unless a start names another.
+    binary: PathBuf,
 }
 
 impl Drop for Cluster {
@@ -208,23 +210,26 @@ pub fn settings(meta: &Meta, namespace: &str) -> MetaSettings {
 /// Starts node `name` at these addresses over `dir` and waits until its S3 port accepts, which the binary opens
 /// only once it is registered.
 async fn launch(
-    meta: &Meta,
-    tls: &Path,
-    namespace: &str,
+    (meta, tls, namespace, logs, binary): (&Meta, &Path, &str, &Path, &Path),
     name: &str,
-    logs: &Path,
     addresses: (String, String),
     dir: PathBuf,
 ) -> Node {
-    spawn((meta, tls, namespace, logs), name, addresses, dir, &[])
-        .await
-        .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"))
+    spawn(
+        (meta, tls, namespace, logs, binary),
+        name,
+        addresses,
+        dir,
+        &[],
+    )
+    .await
+    .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"))
 }
 
 /// Starts node `name` with the cluster's variables and then `extra`, which replace any of the same name; `Ok` once
 /// its S3 port accepts, `Err` with its log when the process ends first.
 async fn spawn(
-    (meta, tls, namespace, logs): (&Meta, &Path, &str, &Path),
+    (meta, tls, namespace, logs, binary): (&Meta, &Path, &str, &Path, &Path),
     name: &str,
     (s3, internal): (String, String),
     dir: PathBuf,
@@ -236,7 +241,7 @@ async fn spawn(
         .open(logs.join(format!("{name}.log")))
         .expect("log file");
     let metrics = format!("127.0.0.1:{}", free_port());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_tessaridb-s3"))
+    let mut child = Command::new(binary)
         .env_clear()
         .envs(environment(
             meta, tls, namespace, name, &s3, &internal, &dir,
@@ -253,7 +258,6 @@ async fn spawn(
     // deadline passes.
     while tokio::net::TcpStream::connect(&s3).await.is_err() {
         if let Ok(Some(status)) = child.try_wait() {
-            std::fs::remove_dir_all(&dir).ok();
             let log = std::fs::read_to_string(logs.join(format!("{name}.log"))).unwrap_or_default();
             return Err(format!("{name} exited ({status}): {log}"));
         }
@@ -278,6 +282,11 @@ impl Cluster {
     /// Six nodes (or one per zone `meta` names) over a fresh namespace of `meta`, started one after another: every node applies the schema, and
     /// concurrent applies conflict on the catalog (Q-S3-2).
     pub async fn start(meta: Meta) -> Self {
+        Self::start_on(meta, Path::new(env!("CARGO_BIN_EXE_tessaridb-s3"))).await
+    }
+
+    /// As [`Cluster::start`], every node running `binary` — an earlier release's, for an upgrade.
+    pub async fn start_on(meta: Meta, binary: &Path) -> Self {
         let namespace = format!("t_{}", uuid::Uuid::new_v4().simple());
         let logs = scratch("logs");
         std::fs::create_dir_all(&logs).expect("log directory");
@@ -291,11 +300,8 @@ impl Cluster {
             let name = format!("n{n}");
             nodes.push(
                 launch(
-                    &meta,
-                    &tls,
-                    &namespace,
+                    (&meta, &tls, &namespace, &logs, binary),
                     &name,
-                    &logs,
                     addresses,
                     scratch("data"),
                 )
@@ -309,6 +315,7 @@ impl Cluster {
             logs,
             tls,
             settings: meta,
+            binary: binary.to_path_buf(),
         }
     }
 
@@ -328,8 +335,15 @@ impl Cluster {
             self.tls.as_path(),
             self.namespace.as_str(),
             self.logs.as_path(),
+            self.binary.as_path(),
         );
-        let node = spawn(cluster, &name, addresses, scratch("data"), extra).await?;
+        let dir = scratch("data");
+        // A refused join leaves nothing behind; a refused restart keeps the node's drive as it was.
+        let node = spawn(cluster, &name, addresses, dir.clone(), extra)
+            .await
+            .inspect_err(|_| {
+                std::fs::remove_dir_all(&dir).ok();
+            })?;
         self.nodes.push(node);
         Ok(())
     }
@@ -346,6 +360,21 @@ impl Cluster {
 
     /// As [`Cluster::restart`], with `extra` added to the node's variables.
     pub async fn restart_with(&mut self, index: usize, extra: &[(&str, &str)]) {
+        let binary = self.binary.clone();
+        let name = self.nodes[index].name.clone();
+        self.restart_on(index, &binary, extra)
+            .await
+            .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
+    }
+
+    /// Starts node `index` again as it was, running `binary` with `extra` added; `Err` with its log when it refuses
+    /// to start. The node it replaces must have stopped.
+    pub async fn restart_on(
+        &mut self,
+        index: usize,
+        binary: &Path,
+        extra: &[(&str, &str)],
+    ) -> Result<(), String> {
         let old = &self.nodes[index];
         let (name, addresses, dir) = (
             old.name.clone(),
@@ -357,10 +386,37 @@ impl Cluster {
             self.tls.as_path(),
             self.namespace.as_str(),
             self.logs.as_path(),
+            binary,
         );
-        self.nodes[index] = spawn(cluster, &name, addresses, dir, extra)
+        self.nodes[index] = spawn(cluster, &name, addresses, dir, extra).await?;
+        Ok(())
+    }
+
+    /// Starts every (stopped) node again over its own drive, with the same name, addresses and credentials, signing
+    /// in to the metadata `meta` names instead — a cluster brought back on a restored metadata store.
+    pub async fn reopen_on(&mut self, meta: Meta) {
+        self.meta = MetaPool::new(settings(&meta, &self.namespace)).expect("pool");
+        self.settings = meta;
+        let binary = self.binary.clone();
+        for index in 0..self.nodes.len() {
+            let name = self.nodes[index].name.clone();
+            self.restart_on(index, &binary, &[])
+                .await
+                .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
+        }
+    }
+
+    /// Stops node `index` as an operator would — SIGTERM — and waits until its process has exited.
+    pub async fn stop(&mut self, index: usize) {
+        let node = &mut self.nodes[index];
+        let pid = node.child.id().expect("the node is running");
+        let status = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status()
             .await
-            .unwrap_or_else(|refused| panic!("{name} did not start: {refused}"));
+            .expect("kill runs");
+        assert!(status.success(), "{} was not running", node.name);
+        node.child.wait().await.expect("the node exits");
     }
 }
 

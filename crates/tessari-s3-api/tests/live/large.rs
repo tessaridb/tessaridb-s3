@@ -88,7 +88,12 @@ pub(crate) async fn data_of(planter: &MetaPool, bucket: &str, key: &str) -> Opti
         })
 }
 
-/// Every data file under `dir` (temporary names included).
+/// Whether `path` is the data directory's layout marker rather than a data file.
+pub(crate) fn is_layout_marker(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "LAYOUT")
+}
+
+/// Every data file under `dir` (temporary names included), the layout marker left out.
 pub(crate) fn files(dir: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -100,7 +105,7 @@ pub(crate) fn files(dir: &Path) -> Vec<PathBuf> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else {
+            } else if !is_layout_marker(&path) {
                 found.push(path);
             }
         }

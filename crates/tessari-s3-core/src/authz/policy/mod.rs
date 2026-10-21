@@ -11,7 +11,7 @@ mod public;
 mod session;
 mod wildcard;
 
-pub use actions::{S3_ACTIONS, Scope, policy_action};
+pub use actions::{S3_ACTIONS, Scope, also_asked, policy_action};
 pub use context::{Context, Requester};
 pub use document::{BucketPolicy, Effect, PolicyError, Statement};
 pub use evaluate::{PolicyAnswer, PolicyRequest};

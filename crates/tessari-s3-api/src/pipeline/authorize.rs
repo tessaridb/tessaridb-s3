@@ -5,7 +5,7 @@
 
 use axum::http::HeaderMap;
 use tessari_s3_core::authz::Need;
-use tessari_s3_core::authz::policy::{Context, policy_action};
+use tessari_s3_core::authz::policy::{Context, also_asked, policy_action};
 use tessari_s3_core::authz::{
     Action, Asked, BucketResource, Decision, Principal, authorize, authorize_asked, required,
     required_naming_version,
@@ -89,12 +89,20 @@ pub async fn authorize_operation(
         }
     };
     allowed(principal, &action, asked_action.map(asked).as_ref())?;
+    if let Some(second) = also_asked(operation, names_version) {
+        allowed(principal, &action, Some(&asked(second)))?;
+    }
     if needs.source_read {
-        let (source, source_key) = source_of(headers)?;
-        let read = Action::ReadObject(bucket(state, principal, Some(&source)).await?);
+        let from = source_of(headers)?;
+        let read = Action::ReadObject(bucket(state, principal, Some(&from.bucket)).await?);
         let asked = Asked {
-            action: "s3:GetObject",
-            key: Some(source_key.as_str()),
+            // A named version is read as one, as GetObject with `versionId` is.
+            action: if from.version.is_some() {
+                "s3:GetObjectVersion"
+            } else {
+                "s3:GetObject"
+            },
+            key: Some(from.key.as_str()),
             context,
         };
         allowed(principal, &read, Some(&asked))?;

@@ -232,6 +232,66 @@ async fn conditional_writes_are_one_compare_and_set() {
         call(&state, "GET", "/cas/k", vec![], b"").await.body,
         "three"
     );
+    let current = header(&swapped, "etag").expect("etag").to_owned();
+    assert_eq!(
+        call(&state, "DELETE", "/cas/k", vec![], b"").await.status,
+        204
+    );
+    let deleted = call_with(
+        &state,
+        "PUT",
+        "/cas/k",
+        vec![],
+        vec![("if-match", current.as_str())],
+        b"five",
+    )
+    .await;
+    assert_eq!(
+        (deleted.status, deleted.code.as_deref()),
+        (404, Some("NoSuchKey")),
+        "the tag of a deleted object matches nothing"
+    );
+}
+
+/// Writers racing to create one key with `If-None-Match: *`: exactly one wins, every other is refused, and the object
+/// read is the winner's.
+#[tokio::test]
+#[ignore = "needs a TessariDB node: set TESSARIDB_S3_TEST_META, _USER and _PASSWORD"]
+async fn racing_creates_of_one_key_leave_exactly_one_winner() {
+    let (state, _) = fresh().await;
+    bucket(&state, "race").await;
+    let mut writes = tokio::task::JoinSet::new();
+    for writer in 0..16_u8 {
+        let state = state.clone();
+        writes.spawn(async move {
+            let seen = call_with(
+                &state,
+                "PUT",
+                "/race/k",
+                vec![],
+                vec![("if-none-match", "*")],
+                &[writer],
+            )
+            .await;
+            (writer, seen)
+        });
+    }
+    let mut won = Vec::new();
+    while let Some(done) = writes.join_next().await {
+        let (writer, seen) = done.expect("the write ran");
+        match (seen.status, seen.code.as_deref()) {
+            (200, _) => won.push(writer),
+            (412, Some("PreconditionFailed")) | (409, Some("ConditionalRequestConflict")) => {}
+            other => panic!("writer {writer}: {other:?} {}", seen.body),
+        }
+    }
+    assert_eq!(won.len(), 1, "exactly one create wins: {won:?}");
+    let read = call(&state, "GET", "/race/k", vec![], b"").await;
+    assert_eq!(
+        read.body.as_bytes(),
+        [won[0]],
+        "the winner's bytes are kept"
+    );
 }
 
 #[tokio::test]

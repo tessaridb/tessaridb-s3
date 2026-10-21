@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use tessari_s3_constants::MEDIA_FFMPEG_TIMEOUT_SECS;
+use tessari_s3_constants::{MEDIA_FFMPEG_INPUT_FORMATS, MEDIA_FFMPEG_TIMEOUT_SECS};
 use tokio::process::Command;
 
 /// A video container and the codecs it is written with.
@@ -244,15 +244,8 @@ impl Ffmpeg {
     }
 
     async fn run(&self, input: &Path, args: &[&str], output: &Path) -> Result<(), VideoError> {
-        let mut all: Vec<OsString> = ["-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i"]
-            .iter()
-            .map(OsString::from)
-            .collect();
-        all.push(input.as_os_str().to_owned());
-        all.extend(args.iter().map(OsString::from));
-        all.push(output.as_os_str().to_owned());
         let mut child = Command::new(&self.binary)
-            .args(all)
+            .args(command_line(input, args, output))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -269,3 +262,32 @@ impl Ffmpeg {
         }
     }
 }
+
+/// The arguments one ffmpeg run is given: `input` read with `args` applied, written to `output`. The original is read
+/// through the file protocol only and by a listed container's demuxer only — a playlist or a concat list inside an
+/// uploaded file would otherwise make ffmpeg open other files or the network, whatever the operator's ffmpeg version.
+fn command_line(input: &Path, args: &[&str], output: &Path) -> Vec<OsString> {
+    let mut all: Vec<OsString> = [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-y",
+        "-protocol_whitelist",
+        "file",
+        "-format_whitelist",
+        MEDIA_FFMPEG_INPUT_FORMATS,
+        "-i",
+    ]
+    .iter()
+    .map(OsString::from)
+    .collect();
+    all.push(input.as_os_str().to_owned());
+    all.extend(args.iter().map(OsString::from));
+    all.push(output.as_os_str().to_owned());
+    all
+}
+
+#[cfg(test)]
+#[path = "media_video_tests.rs"]
+mod tests;

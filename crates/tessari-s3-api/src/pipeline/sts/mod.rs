@@ -2,7 +2,8 @@
 //! STS query protocol on `POST /`): the identity token is believed exactly as far as the console believes an ID token,
 //! the role is the user that identity is linked to, and what is issued is a session key of that user — which signs
 //! only with its own session token, stops at its expiry and ends with the link, the user or a provider logout.
-//! Unauthenticated by design, so it is rate-limited per client address like the console's sign-in.
+//! Unauthenticated by design, so it is rate-limited per client address like the console's sign-in, and served to
+//! another machine only over TLS.
 
 use axum::body::Body;
 use axum::http::request::Parts;
@@ -132,6 +133,21 @@ async fn assume(
             "no identity provider is configured",
         )
     })?;
+    // The identity token and the issued secret are bearer credentials: they cross a network only inside TLS. A client
+    // on the same machine, or an in-process caller with no peer address, never crosses one.
+    let peer = parts
+        .extensions
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|axum::extract::ConnectInfo(address)| address.ip());
+    if parts.extensions.get::<crate::OverTls>().is_none()
+        && peer.is_some_and(|ip| !ip.is_loopback())
+    {
+        return Err(StsError::new(
+            StatusCode::FORBIDDEN,
+            "AccessDenied",
+            "temporary credentials are issued only over TLS",
+        ));
+    }
     // Requests arriving without a peer address (in-process callers) share one budget.
     let address = client(&parts.extensions).unwrap_or_default();
     if !issuer

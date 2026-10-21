@@ -87,7 +87,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     if headers.lock.asked {
         crate::routes::retention::lock_bucket(call).await?;
     }
-    let (source_bucket, source_key) = source::source_of(call.headers)?;
+    let from = source::source_of(call.headers)?;
     let directive = |name: &str| {
         Directive::parse(source::text(call.headers, name)).ok_or_else(|| {
             invalid(
@@ -100,8 +100,9 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
     let tagging = directive("x-amz-tagging-directive")?;
     let bucket = call.bucket()?;
     // A copy onto itself that brings a customer's key changes the key it is sealed under.
-    if source_bucket == *bucket
-        && source_key == *key
+    if from.bucket == *bucket
+        && from.key == *key
+        && from.version.is_none()
         && metadata == Directive::Copy
         && headers.customer.is_none()
     {
@@ -112,7 +113,8 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
         ));
     }
     let objects = call.state.storage().objects();
-    let object = source::read_source(objects, call.headers, &source_bucket, &source_key).await?;
+    let object = source::read_source(objects, call.headers, &from).await?;
+    let source_version = object.version.clone();
     admit_read(call, &object, source_customer.as_ref())?;
     if object.size > SINGLE_PUT_MAX {
         return Err(invalid(
@@ -170,8 +172,8 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
             data::release(objects, id).await;
         }
         tracing::error!(
-            bucket = source_bucket.as_str(),
-            key = source_key.as_str(),
+            bucket = from.bucket.as_str(),
+            key = from.key.as_str(),
             "a copy source's bytes do not match its stored checksum"
         );
         return Err(invalid(
@@ -198,6 +200,7 @@ pub(crate) async fn copy(call: &Call<'_>, key: &ObjectKey) -> Result<Response<Bo
                 ),
                 version.as_deref(),
             );
+            source::answer_version_id(response.headers_mut(), source_version.as_deref());
             if let Some(sealing) = copied.encryption.as_ref().and_then(Sealing::of) {
                 answer_sse(response.headers_mut(), &sealing);
             }

@@ -104,6 +104,8 @@ pub enum ErrorCode {
     InvalidArgument,
     /// 400: the bucket name breaks the naming rules.
     InvalidBucketName,
+    /// 400: a bucket whose objects its owner owns cannot be given an ACL that grants anyone else.
+    InvalidBucketAclWithObjectOwnership,
     /// 400: the request is invalid as a whole.
     InvalidRequest,
     /// 400: a listed part is not stored, or its ETag or checksum differs.
@@ -191,6 +193,7 @@ impl ErrorCode {
             Self::InvalidAccessKeyId => "InvalidAccessKeyId",
             Self::InvalidArgument => "InvalidArgument",
             Self::InvalidBucketName => "InvalidBucketName",
+            Self::InvalidBucketAclWithObjectOwnership => "InvalidBucketAclWithObjectOwnership",
             Self::InvalidRequest => "InvalidRequest",
             Self::InvalidUri => "InvalidURI",
             Self::KeyTooLongError => "KeyTooLongError",
@@ -217,6 +220,7 @@ impl ErrorCode {
             | Self::IncompleteBody
             | Self::InvalidArgument
             | Self::InvalidBucketName
+            | Self::InvalidBucketAclWithObjectOwnership
             | Self::InvalidRequest
             | Self::InvalidUri
             | Self::KeyTooLongError
@@ -380,6 +384,11 @@ mod tests {
             (ErrorCode::InvalidAccessKeyId, "InvalidAccessKeyId", 403),
             (ErrorCode::InvalidArgument, "InvalidArgument", 400),
             (ErrorCode::InvalidBucketName, "InvalidBucketName", 400),
+            (
+                ErrorCode::InvalidBucketAclWithObjectOwnership,
+                "InvalidBucketAclWithObjectOwnership",
+                400,
+            ),
             (ErrorCode::InvalidRequest, "InvalidRequest", 400),
             (ErrorCode::InvalidUri, "InvalidURI", 400),
             (ErrorCode::KeyTooLongError, "KeyTooLongError", 400),

@@ -83,7 +83,7 @@ pub(crate) async fn list_versions(call: &Call<'_>) -> Result<Response<Body>> {
         let _ = write!(out, "<Delimiter>{}</Delimiter>", name(url, delimiter)?);
     }
     let _ = write!(out, "<IsTruncated>{}</IsTruncated>", page.truncated);
-    let owner = escape(call.verified.access_key());
+    let owner = escape(&call.owner());
     let mut prefixes = String::new();
     for entry in &page.entries {
         match entry {

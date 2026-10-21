@@ -10,6 +10,8 @@ mod access;
 mod access_crossing;
 mod access_probe;
 mod access_window;
+mod acl;
+mod attributes;
 mod audit;
 #[path = "../wire/authority.rs"]
 mod authority;
@@ -31,11 +33,13 @@ mod console_logout;
 mod console_media;
 mod console_members;
 mod console_oidc;
+mod console_probe;
 mod console_quota;
 mod console_store;
 mod console_users;
 mod copy;
 mod copy_part;
+mod copy_version;
 mod cors;
 mod delete_many;
 mod erasure;
@@ -71,6 +75,7 @@ mod objects;
     reason = "shared with the wire tests; each binary uses part of it"
 )]
 mod oidc_provider;
+mod ownership;
 mod policy;
 mod policy_enforced;
 mod policy_probe;
