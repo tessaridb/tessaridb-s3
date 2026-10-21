@@ -233,11 +233,35 @@ traffic, then check that every acknowledged object reads back whole and nothing 
 node inside a commit, at exit points only the test build has, and check that the write left no torn object and
 no unreclaimed shard. One cuts a node off from its peers through a proxy that swallows its traffic, writes
 through the others, and checks that the node is healed once the cut ends. Another heals a returning node while
-readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once. The soak runs mixed
+readers and writers keep the others busy, and reads one 64 MiB object sixteen times at once; it heals 40 objects of
+4 MiB, or `TESSARIDB_S3_TEST_HEAL_MISSED` of them, and prints the rate. The soak runs mixed
 traffic for `TESSARIDB_S3_SOAK_SECS` seconds (7200 for two hours) and only when that is set.
 Two drills run when their binaries are named: `TESSARIDB_S3_TEST_PREVIOUS` (the previous release's
 `tessaridb-s3`) rolls the cluster onto this build one node at a time under writes, and `TESSARIDB_S3_TEST_ENGINE`
 (a `tessaridb` binary) takes the backup below under writes, restores it and reads every object back.
+
+### Durability
+
+What the server keeps safe, how, and what it does not claim:
+
+- **One node.** Object bytes are 1 MiB blocks, each with its BLAKE3 hash, in data files under
+  `TESSARIDB_S3_DATA_DIR`. A write is acknowledged once its file is synced to the drive and its record is committed in
+  TessariDB. A block whose hash does not match is never served; the read is refused. The drive is the whole
+  durability, so keep a backup.
+- **A cluster.** `TESSARIDB_S3_ERASURE=k+m` splits each object into k data and m parity shards, one per node. A write
+  is acknowledged once k shards are durable (k + 1 when k = m, so the two halves of a cut cluster cannot both accept
+  one); with fewer it answers `503 SlowDown` and acknowledges nothing. A read needs any k verified shards. Up to m
+  nodes can be lost or cut off without losing an acknowledged object; losing m + 1 shards of one object before it is
+  healed loses that object. With `TESSARIDB_S3_ZONE` set, a code with no more than m shards per zone survives the loss
+  of a zone.
+- **Healing.** A write made while a node is away is listed in TessariDB, and every node's healing pass
+  (`TESSARIDB_S3_HEAL_INTERVAL_SECS`) rewrites missing or damaged shards. A shard that fails its hash on a read is
+  read around and rewritten. Measured on one machine (six nodes, RS(4,2), eight clients reading and writing the whole
+  time): 6000 MiB written while a node was down were healed onto it in 121 s and in 122 s, about 49 MiB/s, which is
+  about six hours per TB under that load. Other drives and networks give other numbers; measure your own.
+- **Not claimed.** No durability figure in nines is given. Such a figure depends on drive failure rates, repair time
+  and correlated failures that the server cannot know. Losing a whole site is answered by replication to another
+  region, not by the erasure code.
 
 ### Backing up
 

@@ -16,6 +16,17 @@ use crate::s3::{Cluster, count};
 const DRAINED_WITHIN: Duration = Duration::from_secs(300);
 /// Readers and writers kept busy while the backlog drains.
 const WORKERS: usize = 8;
+/// Bytes of each object written while the node is down.
+const MISSED_LEN: usize = 4 << 20;
+
+/// Objects written while the node is down: `TESSARIDB_S3_TEST_HEAL_MISSED`, else 40. A larger backlog measures the
+/// healing rate rather than the passes' retry hold.
+fn missed_count() -> usize {
+    std::env::var("TESSARIDB_S3_TEST_HEAL_MISSED")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(40)
+}
 
 /// `len` bytes that differ with `seed`.
 fn bytes(len: usize, seed: u8) -> Vec<u8> {
@@ -90,8 +101,9 @@ async fn a_returning_node_is_healed_while_clients_read_and_write() {
     let down = cluster.nodes.len().saturating_sub(1);
     crate::disk::kill(cluster.nodes[down].child.id().expect("running")).await;
     let _reaped = cluster.nodes[down].child.wait().await;
-    let missed = bytes(4 << 20, 7);
-    for n in 0..40 {
+    let missed = bytes(MISSED_LEN, 7);
+    let missed_count = missed_count();
+    for n in 0..missed_count {
         let (status, body) = put(&cluster.nodes[0], &format!("/heal/missed-{n}"), &missed)
             .await
             .expect("answered");
@@ -99,13 +111,17 @@ async fn a_returning_node_is_healed_while_clients_read_and_write() {
     }
     let backlog = count(&cluster.meta, "heal_queue").await;
     assert!(
-        backlog >= 40,
+        backlog >= missed_count,
         "every write without the node is listed: {backlog}"
     );
 
     cluster.restart(down).await;
     let (stop, until) = tokio::sync::watch::channel(false);
     let started = Instant::now();
+    // A second per object on top of the base bound, so a measuring run is not cut short.
+    let drained_within = DRAINED_WITHIN.saturating_add(Duration::from_secs(
+        u64::try_from(missed_count).unwrap_or(u64::MAX),
+    ));
     let workers = join_all((0..WORKERS).map(|worker| {
         let node = &cluster.nodes[worker.checked_rem(down).unwrap_or(0)];
         let kept = &kept;
@@ -115,7 +131,7 @@ async fn a_returning_node_is_healed_while_clients_read_and_write() {
     let drained = async {
         while count(&cluster.meta, "heal_queue").await > 0 {
             assert!(
-                started.elapsed() < DRAINED_WITHIN,
+                started.elapsed() < drained_within,
                 "the backlog did not drain under load; see {}",
                 cluster.logs.display()
             );
@@ -146,6 +162,11 @@ async fn a_returning_node_is_healed_while_clients_read_and_write() {
         writes.len(),
         quantile(&mut writes, 500),
         quantile(&mut writes, 990),
+    );
+    let healed_mib = missed_count.saturating_mul(MISSED_LEN) >> 20;
+    eprintln!(
+        "heal rate: {healed_mib} MiB of objects written without the node healed in {took:?}: {:.1} MiB/s",
+        f64::from(u32::try_from(healed_mib).unwrap_or(u32::MAX)) / took.as_secs_f64()
     );
 
     // Sixteen 64 MiB reads at once, each answered whole.

@@ -55,6 +55,8 @@ async fn nothing_reaches_into_another_space() {
 
     for (method, path) in [
         ("GET", "/ann-photos/a.txt"),
+        // A key that does not exist is refused alike, so a refusal never tells an outsider which keys exist.
+        ("GET", "/ann-photos/absent.txt"),
         ("PUT", "/ann-photos/b.txt"),
         ("HEAD", "/ann-photos"),
         ("DELETE", "/ann-photos"),
