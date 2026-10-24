@@ -12,7 +12,7 @@ name: tessaridb-s3
 
 services:
   tessaridb:
-    image: tessaridb/tessaridb:0.38.2
+    image: tessaridb/tessaridb:0.38.3
     restart: unless-stopped
     environment:
       # The first start declares this store-wide owner; a store with no user
@@ -26,7 +26,7 @@ services:
   # Declares the S3 server's own database account, as the owner, and exits: the
   # server signs in as an editor of its one database and never as the owner.
   s3-account:
-    image: tessaridb/tessaridb:0.38.2
+    image: tessaridb/tessaridb:0.38.3
     entrypoint: ["/bin/bash", "/s3-account.sh"]
     depends_on:
       tessaridb:
@@ -43,7 +43,7 @@ services:
       - ./docker/s3-account.sh:/s3-account.sh:ro
 
   s3:
-    image: tessaridb/s3:0.7.0
+    image: tessaridb/s3:0.8.0
     build: .
     restart: unless-stopped
     depends_on:

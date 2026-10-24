@@ -11,7 +11,7 @@ use crate::requests::call;
 use crate::s3::{Cluster, scratch};
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.2 image"]
+#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.3 image"]
 async fn a_region_level_the_store_cannot_count_is_refused_in_its_words() {
     let _quiet = crate::QUIET.lock().await;
     require_docker();

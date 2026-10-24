@@ -3,6 +3,24 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.8.0: 2026-10-25
+
+Metadata on TessariDB `0.38.3`.
+
+- Settings every node of a region shares are kept in the metadata store from the first start that names them; a
+  node's environment then needs only how to reach the store, the region, the keys passphrase and what describes the
+  machine. A stored value wins, an environment value that differs is logged by name, and a different erasure code or
+  cluster secret stops the start.
+- With `TESSARIDB_S3_KEYS_PASSPHRASE` set, the secrets among them (the root secret, the IAM key, the cluster secret,
+  the console provider's secret and key, the break-glass webhook, the notification targets) are kept in the
+  `s3_secrets` vault under that passphrase.
+- A running node re-reads the stored settings every 5 seconds and applies the background intervals, the move budget,
+  the console's rate limits and `TESSARIDB_S3_DOMAINS` without a restart.
+- Root reads and changes the stored settings on the console's overview page or at `GET /api/v1/settings` and
+  `PUT /api/v1/settings/{name}`, with a reason and against the value read; a secret needs the keys passphrase, and
+  every attempt is recorded without the value.
+- Going back to `0.7.0` reads every setting from the environment again: put back any that was removed from it.
+
 ## 0.7.0: 2026-10-24
 
 Metadata on TessariDB `0.38.2`.
