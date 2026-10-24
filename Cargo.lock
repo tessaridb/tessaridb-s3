@@ -67,6 +67,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "380962b3d93b99642e50b9febf72c071e97e8b32d86eae9cf4ef582bb960ae6e"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -764,7 +773,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2532,7 +2541,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2588,7 +2597,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3065,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-api"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3105,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-bench"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3127,11 +3136,11 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-constants"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "tessari-s3-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3152,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-daemons"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -3173,8 +3182,9 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-infrastructure"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
+ "arc-swap",
  "base64 0.22.1",
  "bytes",
  "crc-fast",
@@ -3205,7 +3215,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-node"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -3233,7 +3243,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-observability"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "prometheus-client",
  "tessari-s3-constants",
@@ -3245,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-storage"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",
@@ -3273,7 +3283,7 @@ dependencies = [
 
 [[package]]
 name = "tessari-s3-types"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "tessari-s3-constants",
  "thiserror 2.0.21",
@@ -3811,7 +3821,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

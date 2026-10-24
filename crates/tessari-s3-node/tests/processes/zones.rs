@@ -32,7 +32,7 @@ struct Write {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.2 image"]
+#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.3 image"]
 async fn a_zone_killed_under_a_writer_loses_nothing_acknowledged_and_heals_when_it_returns() {
     require_docker();
     let metadata = MetaCluster::start().await;

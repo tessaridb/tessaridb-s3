@@ -1,10 +1,10 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
-//! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
-//! configured, the healer and the mover on a cluster member, the upload reaper and the usage scanner), the API state and router,
-//! the listener — and, on a node of a cluster, the internal shard listener — then serving until SIGINT or SIGTERM,
-//! after which in-flight requests and the daemons' current runs get the configured grace period before the process
-//! exits.
+//! Order: tracing, configuration (the environment, then the settings the metadata store holds), the metadata pool
+//! and schema, the daemons (the reclaimer, when a data directory is configured, the healer and the mover on a cluster
+//! member, the upload reaper and the usage scanner), the API state and router, the listener — and, on a node of a
+//! cluster, the internal shard listener — then serving until SIGINT or SIGTERM, after which in-flight requests and the
+//! daemons' current runs get the configured grace period before the process exits.
 
 mod console;
 mod health;
@@ -12,16 +12,17 @@ mod internal;
 mod keys;
 mod membership;
 mod metrics;
+mod settings;
 
 use std::time::Duration;
 
 use std::sync::Arc;
 use tessari_s3_api::{ApiState, serve_s3};
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
+use tessari_s3_infrastructure::NotifyEndpoint;
 use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_infrastructure::tls::listener_config;
-use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         return health::run().await;
     }
     tessari_s3_observability::init();
-    let config = S3Config::from_env()?;
+    let (config, reread) = settings::configure(|key: &str| std::env::var(key).ok()).await?;
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         listen = %config.listen,
@@ -89,29 +90,27 @@ async fn main() -> anyhow::Result<()> {
     // Built before the daemons start, so their runs are counted in the metrics it serves.
     let state = ApiState::new(&config, ApiState::system_clock(), storage.clone());
     let counted = Arc::clone(state.metrics());
+    let live = state.live();
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut daemons = JoinSet::new();
     let reclaimer = Reclaimer::new(
         storage.objects().clone(),
         config.reclaim_grace_secs,
-        Duration::from_secs(config.reclaim_interval_secs),
+        live.reclaim_interval(),
     );
     daemons.spawn(run(
         Arc::new(reclaimer),
         stop_rx.clone(),
         Arc::clone(&counted),
     ));
-    if let Some(cluster) = &config.cluster {
-        let healer = Healer::new(
-            storage.objects().clone(),
-            Duration::from_secs(cluster.heal_interval_secs),
-        );
+    if config.cluster.is_some() {
+        let healer = Healer::new(storage.objects().clone(), live.heal_interval());
         daemons.spawn(run(Arc::new(healer), stop_rx.clone(), Arc::clone(&counted)));
         let mover = Mover::new(
             storage.objects().clone(),
-            Duration::from_secs(cluster.heal_interval_secs),
+            live.heal_interval(),
             config.reclaim_grace_secs,
-            cluster.move_bytes_per_sec,
+            live.move_bytes_per_sec(),
             stop_rx.clone(),
         );
         daemons.spawn(run(Arc::new(mover), stop_rx.clone(), Arc::clone(&counted)));
@@ -119,15 +118,12 @@ async fn main() -> anyhow::Result<()> {
     // Uploads can be opened without a data directory, so the reaper always runs.
     let reaper = UploadReaper::new(
         storage.multipart().clone(),
-        config.upload_max_age_secs,
-        Duration::from_secs(config.reclaim_interval_secs),
+        live.upload_max_age(),
+        live.reclaim_interval(),
     );
     daemons.spawn(run(Arc::new(reaper), stop_rx.clone(), Arc::clone(&counted)));
     // Due buckets are looked for as often as uploads are reaped; the queue decides which are due.
-    let lifecycle = LifecycleWorker::new(
-        storage.lifecycle(),
-        Duration::from_secs(config.reclaim_interval_secs),
-    );
+    let lifecycle = LifecycleWorker::new(storage.lifecycle(), live.reclaim_interval());
     daemons.spawn(run(
         Arc::new(lifecycle),
         stop_rx.clone(),
@@ -238,21 +234,35 @@ async fn main() -> anyhow::Result<()> {
     let scanner = UsageScanner::new(
         storage.usage().clone(),
         config.cluster.as_ref().map(|cluster| &cluster.node),
-        Duration::from_secs(config.usage_interval_secs),
+        live.usage_interval(),
     );
+    let settings_check = reread.check();
+    // Settings changed in the metadata store reach this node within one re-read.
+    daemons.spawn(run(
+        reread.daemon(Arc::clone(&live)),
+        stop_rx.clone(),
+        Arc::clone(&counted),
+    ));
     daemons.spawn(run(
         Arc::new(scanner),
         stop_rx.clone(),
         Arc::clone(&counted),
     ));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
-    let console = console::surface(&config, &storage, stop_rx.clone()).await?;
+    let console = console::surface(
+        &config,
+        &storage,
+        Arc::clone(&live),
+        settings_check,
+        stop_rx.clone(),
+    )
+    .await?;
     // People the console's identity provider vouches for may ask the S3 surface for temporary credentials.
     if let Some(console) = &config.console
         && let Some(settings) = &console.oidc
     {
         let client = OidcClient::new(settings, CONSOLE_OIDC_REFRESH_MIN_SECS)?;
-        state.accept_web_identity(client, console.sign_ins_per_minute);
+        state.accept_web_identity(client, live.console_sign_ins());
     }
     let metrics = metrics::surface(&config, &state, stop_rx.clone()).await?;
     if let Some(writer) = metrics::access_log(&config, &state, stop_rx.clone()) {

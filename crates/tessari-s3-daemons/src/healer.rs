@@ -2,6 +2,7 @@
 //! `ObjectService::heal`).
 
 use std::time::Duration;
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, HEAL_BATCH};
 use tessari_s3_storage::objects::ObjectService;
@@ -12,13 +13,13 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 /// Heals listed data ids on an interval.
 pub struct Healer {
     objects: ObjectService,
-    interval: Duration,
+    interval: Live,
 }
 
 impl Healer {
     /// A healer over `objects`, running every `interval`.
     #[must_use]
-    pub const fn new(objects: ObjectService, interval: Duration) -> Self {
+    pub const fn new(objects: ObjectService, interval: Live) -> Self {
         Self { objects, interval }
     }
 }
@@ -29,7 +30,7 @@ impl Daemon for Healer {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     fn timeout(&self) -> Duration {

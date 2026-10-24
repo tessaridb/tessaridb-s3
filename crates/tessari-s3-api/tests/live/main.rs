@@ -35,6 +35,7 @@ mod console_members;
 mod console_oidc;
 mod console_probe;
 mod console_quota;
+mod console_settings;
 mod console_store;
 mod console_users;
 mod copy;
@@ -93,6 +94,7 @@ mod replication_regions;
 mod replication_send;
 mod replication_tasks;
 mod sessions;
+mod settings_first_start;
 #[path = "../wire/signer.rs"]
 #[allow(
     dead_code,

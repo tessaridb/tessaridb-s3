@@ -4,6 +4,7 @@
 use std::future::Future;
 use std::num::NonZeroU64;
 use std::time::Duration;
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::MOVE_BATCH;
 use tessari_s3_storage::objects::ObjectService;
@@ -15,9 +16,9 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 /// Moves data onto the current layout on an interval.
 pub struct Mover {
     objects: ObjectService,
-    interval: Duration,
+    interval: Live,
     grace_secs: u64,
-    bytes_per_sec: u64,
+    bytes_per_sec: Live,
     shutdown: watch::Receiver<bool>,
 }
 
@@ -27,9 +28,9 @@ impl Mover {
     #[must_use]
     pub const fn new(
         objects: ObjectService,
-        interval: Duration,
+        interval: Live,
         grace_secs: u64,
-        bytes_per_sec: u64,
+        bytes_per_sec: Live,
         shutdown: watch::Receiver<bool>,
     ) -> Self {
         Self {
@@ -61,7 +62,7 @@ impl Daemon for Mover {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     /// None: a paced move of a large object takes as long as its bytes over the budget, so a run is bounded by its
@@ -72,7 +73,7 @@ impl Daemon for Mover {
 
     fn run_once(&self) -> DaemonFuture<'_> {
         Box::pin(async move {
-            let Some(budget) = NonZeroU64::new(self.bytes_per_sec) else {
+            let Some(budget) = NonZeroU64::new(self.bytes_per_sec.get()) else {
                 return Ok(Report {
                     message: "paused".to_owned(),
                     idle: true,

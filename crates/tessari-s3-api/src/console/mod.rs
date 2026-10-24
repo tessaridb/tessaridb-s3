@@ -33,20 +33,23 @@ mod page;
 mod quotas;
 mod regions;
 mod session;
+mod settings;
 mod spaces;
 mod status;
 mod upload_keys;
 mod usage;
 mod users;
 
-use std::sync::Arc;
+pub use settings::SettingsCheck;
+
+use std::sync::{Arc, OnceLock};
 
 use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post, put};
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
 use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::oidc::OidcClient;
-use tessari_s3_infrastructure::{S3Config, WebhookClient};
+use tessari_s3_infrastructure::{LiveSettings, S3Config, WebhookClient};
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{Code, SecretKey};
 
@@ -75,10 +78,12 @@ struct Inner {
     code: Option<Code>,
     meta_addresses: Vec<String>,
     principals: Principals,
-    usage_interval_secs: u64,
+    live: Arc<LiveSettings>,
     oidc: Option<OidcClient>,
     /// Where a root sign-in is announced, when an identity provider and a webhook are configured.
     break_glass_alert: Option<(WebhookClient, String)>,
+    /// How the node checks a stored setting's new value; unset in a console built without a node.
+    settings_check: OnceLock<SettingsCheck>,
 }
 
 impl ConsoleState {
@@ -90,6 +95,20 @@ impl ConsoleState {
         config: &S3Config,
         clock: Clock,
         storage: Storage,
+    ) -> Result<Option<Self>, tessari_s3_infrastructure::Error> {
+        Self::sharing(config, clock, storage, Arc::new(LiveSettings::new(config)))
+    }
+
+    /// As [`ConsoleState::new`], reading its rate limits and usage interval from `live`, which the node re-publishes
+    /// when they change in the metadata store.
+    ///
+    /// # Errors
+    /// As [`ConsoleState::new`].
+    pub fn sharing(
+        config: &S3Config,
+        clock: Clock,
+        storage: Storage,
+        live: Arc<LiveSettings>,
     ) -> Result<Option<Self>, tessari_s3_infrastructure::Error> {
         let Some(console) = config.console.as_ref() else {
             return Ok(None);
@@ -107,8 +126,8 @@ impl ConsoleState {
                 clock,
                 storage,
                 secure_cookie: console.tls.is_some(),
-                sign_ins: Window::new(console.sign_ins_per_minute),
-                requests: Window::new(console.requests_per_minute),
+                sign_ins: Window::new(live.console_sign_ins()),
+                requests: Window::new(live.console_requests()),
                 node: config
                     .cluster
                     .as_ref()
@@ -121,9 +140,10 @@ impl ConsoleState {
                 code: config.cluster.as_ref().map(|cluster| cluster.code),
                 meta_addresses: config.meta.addresses.clone(),
                 principals: Principals::new(),
-                usage_interval_secs: config.usage_interval_secs,
+                live,
                 oidc,
                 break_glass_alert,
+                settings_check: OnceLock::new(),
             }),
         }))
     }
@@ -190,7 +210,7 @@ impl ConsoleState {
     }
 
     fn usage_interval_secs(&self) -> u64 {
-        self.inner.usage_interval_secs
+        self.inner.live.usage_interval().get()
     }
 
     fn secure_cookie(&self) -> bool {
@@ -207,6 +227,16 @@ impl ConsoleState {
 
     fn node(&self) -> Option<&str> {
         self.inner.node.as_deref()
+    }
+
+    /// Lets this console change stored settings, checking each new value with `check`; `false` when it was set
+    /// already.
+    pub fn accept_settings_check(&self, check: SettingsCheck) -> bool {
+        self.inner.settings_check.set(check).is_ok()
+    }
+
+    fn settings_check(&self) -> Option<&SettingsCheck> {
+        self.inner.settings_check.get()
     }
 
     fn region(&self) -> &str {
@@ -281,6 +311,8 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
             "/api/v1/encryption/destroy",
             post(encryption_rotation::destroy),
         )
+        .route("/api/v1/settings", get(settings::list))
+        .route("/api/v1/settings/{name}", put(settings::change))
         .route("/api/v1/regions", get(regions::list))
         .route("/api/v1/regions/failover", post(regions::fail_over))
         .route("/api/v1/regions/restore", post(regions::restore))

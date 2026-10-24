@@ -105,7 +105,10 @@ pub(crate) async fn sign_in(console: &ConsoleState) -> String {
 }
 
 /// The action record, newest first, as (operation, target, reason, outcome).
-async fn record(console: &ConsoleState, token: &str) -> Vec<(String, String, Value, String)> {
+pub(crate) async fn record(
+    console: &ConsoleState,
+    token: &str,
+) -> Vec<(String, String, Value, String)> {
     let answer = send(console, "GET", "/api/v1/actions", Some(token), None).await;
     assert_eq!(answer.status, 200);
     let field = |action: &Value, name: &str| {

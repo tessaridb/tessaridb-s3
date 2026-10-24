@@ -2,6 +2,7 @@
 //! `LifecycleService::pass`), at this node's clock.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, LIFECYCLE_BATCH, LIFECYCLE_INTERVAL_SECS};
 use tessari_s3_storage::lifecycle::LifecycleService;
@@ -13,13 +14,13 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 /// Applies buckets' lifecycle rules on an interval.
 pub struct LifecycleWorker {
     lifecycle: LifecycleService,
-    interval: Duration,
+    interval: Live,
 }
 
 impl LifecycleWorker {
     /// A worker over `lifecycle`, looking for due buckets every `interval`.
     #[must_use]
-    pub const fn new(lifecycle: LifecycleService, interval: Duration) -> Self {
+    pub const fn new(lifecycle: LifecycleService, interval: Live) -> Self {
         Self {
             lifecycle,
             interval,
@@ -51,7 +52,7 @@ impl Daemon for LifecycleWorker {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     fn timeout(&self) -> Duration {

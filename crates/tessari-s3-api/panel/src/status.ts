@@ -9,6 +9,7 @@ import { icon, type IconName } from "./icons.ts";
 import { meter, used } from "./meter.ts";
 import { readStatus, readUsage, type Backlog, type Drive, type Member, type Replication, type Status, type Usage } from "./models.ts";
 import { encryptionCard } from "./encryption.ts";
+import { settingsCard } from "./settings.ts";
 import { format } from "./route.ts";
 import { empty, failed, head, loading, type Screen } from "./screen.ts";
 
@@ -132,7 +133,7 @@ function diskTile(node: Status): HTMLElement {
 
 export async function status(screen: Screen): Promise<void> {
   loading(screen, TITLE, "the node's status");
-  const [answer, usage, encryption] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen)]);
+  const [answer, usage, encryption, settings] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen), settingsCard(screen)]);
   if (!answer.ok) {
     failed(screen, TITLE, answer);
     return;
@@ -160,5 +161,6 @@ export async function status(screen: Screen): Promise<void> {
     ),
     members === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members),
     encryption,
+    settings,
   );
 }

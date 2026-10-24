@@ -2,6 +2,7 @@
 //! runs one; the claim in the metadata store lets one of them measure per pass.
 
 use std::time::Duration;
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::DAEMON_RUN_TIMEOUT_SECS;
 use tessari_s3_storage::usage::UsageService;
@@ -14,14 +15,14 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 pub struct UsageScanner {
     usage: UsageService,
     holder: String,
-    interval: Duration,
+    interval: Live,
 }
 
 impl UsageScanner {
     /// A scanner over `usage` running every `interval`, claiming each pass under `node`'s name on a cluster member,
     /// and as `standalone` on a node that is not one.
     #[must_use]
-    pub fn new(usage: UsageService, node: Option<&NodeId>, interval: Duration) -> Self {
+    pub fn new(usage: UsageService, node: Option<&NodeId>, interval: Live) -> Self {
         Self {
             usage,
             holder: node.map_or_else(|| "standalone".to_owned(), |node| node.as_str().to_owned()),
@@ -36,7 +37,7 @@ impl Daemon for UsageScanner {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     fn timeout(&self) -> Duration {

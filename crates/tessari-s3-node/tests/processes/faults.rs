@@ -49,7 +49,7 @@ pub(crate) fn require_docker() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.2 image"]
+#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.3 image"]
 async fn an_s3_node_killed_mid_write_or_mid_read_loses_nothing_acknowledged() {
     let _quiet = crate::QUIET.lock().await;
     require_docker();
@@ -170,7 +170,7 @@ struct Attempt {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.2 image"]
+#[ignore = "needs Docker and the tessaridb/tessaridb:0.38.3 image"]
 async fn the_metadata_leader_killed_under_traffic_loses_nothing_acknowledged() {
     let _quiet = crate::QUIET.lock().await;
     require_docker();

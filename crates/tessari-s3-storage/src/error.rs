@@ -178,6 +178,26 @@ pub enum Error {
     /// Too many wrong passphrases in a row: the metadata store makes the next attempt wait, right or not.
     #[error("too many wrong keys passphrases; wait before trying again")]
     PassphraseThrottled,
+    /// The environment names a value for a setting the metadata store holds and may not change once stored.
+    #[error("{key} {reason}")]
+    FixedSetting {
+        /// The variable.
+        key: &'static str,
+        /// Why it was refused.
+        reason: &'static str,
+    },
+    /// A stored setting no longer held the value the change was made against: someone changed it first.
+    #[error("{key} was changed by someone else; read it again")]
+    SettingChanged {
+        /// The variable.
+        key: &'static str,
+    },
+    /// A name that is not a stored setting.
+    #[error("{name} is not a setting the metadata store keeps")]
+    SettingUnknown {
+        /// The name asked for.
+        name: String,
+    },
 }
 
 impl Error {
@@ -205,10 +225,14 @@ impl Error {
             Self::InvalidShard { .. }
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }
-            | Self::OtherRegion { .. } => ErrorCategory::Validation,
-            Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
-                ErrorCategory::Conflict
-            }
+            | Self::OtherRegion { .. }
+            | Self::FixedSetting { .. }
+            | Self::SettingUnknown { .. } => ErrorCategory::Validation,
+            Self::Contended
+            | Self::Held
+            | Self::KeyExists { .. }
+            | Self::KeyActive { .. }
+            | Self::SettingChanged { .. } => ErrorCategory::Conflict,
             Self::KeysSealed | Self::PassphraseThrottled | Self::DriveFull { .. } => {
                 ErrorCategory::Unavailable
             }

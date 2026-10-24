@@ -3,6 +3,7 @@
 //! abort itself.
 
 use std::time::Duration;
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, REAP_BATCH};
 use tessari_s3_storage::multipart::MultipartService;
@@ -13,14 +14,14 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 /// Aborts uploads past the maximum age on an interval.
 pub struct UploadReaper {
     multipart: MultipartService,
-    max_age_secs: u64,
-    interval: Duration,
+    max_age_secs: Live,
+    interval: Live,
 }
 
 impl UploadReaper {
     /// A reaper over `multipart`, aborting uploads older than `max_age_secs` and running every `interval`.
     #[must_use]
-    pub const fn new(multipart: MultipartService, max_age_secs: u64, interval: Duration) -> Self {
+    pub const fn new(multipart: MultipartService, max_age_secs: Live, interval: Live) -> Self {
         Self {
             multipart,
             max_age_secs,
@@ -35,7 +36,7 @@ impl Daemon for UploadReaper {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     fn timeout(&self) -> Duration {
@@ -46,7 +47,7 @@ impl Daemon for UploadReaper {
         Box::pin(async move {
             let done = self
                 .multipart
-                .reap(self.max_age_secs, REAP_BATCH)
+                .reap(self.max_age_secs.get(), REAP_BATCH)
                 .await
                 .map_err(|error| Error::Run {
                     daemon: "upload-reaper",

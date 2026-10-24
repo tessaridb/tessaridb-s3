@@ -10,7 +10,7 @@ use tessari_s3_api::ApiState;
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
 use tessari_s3_core::authz::{Role, UserName};
 use tessari_s3_infrastructure::oidc::OidcClient;
-use tessari_s3_infrastructure::{KeySignIn, OidcSettings};
+use tessari_s3_infrastructure::{KeySignIn, Live, OidcSettings};
 use tessari_s3_types::SecretKey;
 
 use crate::access::{Key, user_with_key};
@@ -49,7 +49,10 @@ async fn issuing(provider: &Provider, per_minute: usize) -> (ApiState, Key) {
     let state = ApiState::new(&config, ApiState::system_clock(), storage.clone());
     let client =
         OidcClient::new(&settings(provider), CONSOLE_OIDC_REFRESH_MIN_SECS).expect("a client");
-    assert!(state.accept_web_identity(client, per_minute));
+    assert!(state.accept_web_identity(
+        client,
+        Live::new(u64::try_from(per_minute).expect("a small limit"))
+    ));
     let long_term = user_with_key(&storage, "ann", "alpha", Role::Member, true).await;
     user_with_key(&storage, "bob", "alpha", Role::Member, false).await;
     storage

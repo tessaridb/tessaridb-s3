@@ -26,12 +26,14 @@ pub mod regions;
 pub mod replication;
 mod schema;
 mod schema_queues;
+pub mod settings;
 pub mod shards;
 pub mod spaces;
 mod storage;
 mod topic_groups;
 pub mod usage;
 pub mod users;
+mod vaults;
 
 pub use error::{Error, Result};
 pub use storage::Storage;

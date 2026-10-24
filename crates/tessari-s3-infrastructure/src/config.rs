@@ -5,16 +5,15 @@ use std::net::SocketAddr;
 
 use tessari_s3_constants::{
     DEFAULT_DATA_MIN_FREE_BYTES, DEFAULT_LISTEN, DEFAULT_MAX_INFLIGHT, DEFAULT_MEDIA_WORKERS,
-    DEFAULT_RECLAIM_GRACE_SECS, DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_REGION,
-    DEFAULT_SHUTDOWN_GRACE_SECS, DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS,
-    MAX_MEDIA_WORKERS, MIN_SECRET_KEY_LEN,
+    DEFAULT_RECLAIM_GRACE_SECS, DEFAULT_RECLAIM_INTERVAL_SECS, DEFAULT_SHUTDOWN_GRACE_SECS,
+    DEFAULT_UPLOAD_MAX_AGE_SECS, DEFAULT_USAGE_INTERVAL_SECS, MAX_MEDIA_WORKERS,
+    MIN_SECRET_KEY_LEN,
 };
 use tessari_s3_types::{Code, NodeId, SecretKey};
 
 use crate::cluster_config::cluster_settings;
 use crate::meta_config::meta_settings;
 use crate::tessaridb::MetaSettings;
-use crate::tessaridb::regional_database;
 use crate::{Error, Result};
 
 /// Everything the S3 server reads from its environment.
@@ -127,7 +126,6 @@ impl S3Config {
             key: "TESSARIDB_S3_LISTEN",
             reason: "not an IP address and port",
         })?;
-        let region = get("TESSARIDB_S3_REGION").unwrap_or_else(|| DEFAULT_REGION.to_owned());
         let domains = get("TESSARIDB_S3_DOMAINS")
             .map(|list| {
                 list.split(',')
@@ -167,13 +165,7 @@ impl S3Config {
             })?,
         };
         let meta = meta_settings(&get)?;
-        if regional_database(&meta.database, &region).is_none() {
-            return Err(Error::InvalidConfig {
-                key: "TESSARIDB_S3_REGION",
-                reason: "not a region name (lowercase letters, digits and single hyphens, beginning with a letter) \
-                         short enough to name its metadata database",
-            });
-        }
+        let region = crate::bootstrap_config::region(&get, &meta.database)?;
         let cluster = cluster_settings(&get)?;
         let tls =
             crate::console_config::tls_pair(&get, "TESSARIDB_S3_TLS_CERT", "TESSARIDB_S3_TLS_KEY")?;
