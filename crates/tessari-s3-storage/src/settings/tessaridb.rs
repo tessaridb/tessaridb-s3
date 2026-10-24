@@ -40,6 +40,11 @@ impl TessariSettings {
     pub const fn new(pool: MetaPool) -> Self {
         Self { pool }
     }
+
+    /// The pool into the global database.
+    pub(crate) const fn pool(&self) -> &MetaPool {
+        &self.pool
+    }
 }
 
 fn string(name: &str, value: &str) -> (String, Value) {

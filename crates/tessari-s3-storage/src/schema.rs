@@ -363,18 +363,32 @@ fn grace(
 }
 
 async fn apply_once(global: &MetaPool, regional: &MetaPool, reclaim_grace_secs: u64) -> Result<()> {
-    // The names come from configuration checked against `[a-z][a-z0-9_]*`; a name is grammar and is never bound.
-    let (namespace, database) = global.scope();
+    let (_, database) = global.scope();
     let (_, region_database) = regional.scope();
+    tenancy(global, &[database, region_database]).await?;
+    global.run(GLOBAL_TABLES, Vec::new()).await?;
+    let regional_tables = REGIONAL_TABLES.replace("__GLOBAL__", database);
+    regional
+        .run(&regional_tables, grace(reclaim_grace_secs)?)
+        .await?;
+    fill_spaces(global).await
+}
+
+/// Declares `global`'s namespace and `databases` in it, each when it is not there yet — before anything else is read
+/// from or written to them, the stored settings included.
+pub(crate) async fn tenancy(global: &MetaPool, databases: &[&str]) -> Result<()> {
+    // The names come from configuration checked against `[a-z][a-z0-9_]*`; a name is grammar and is never bound.
+    let (namespace, _) = global.scope();
     // The replication is stated, never left out: a metadata cluster refuses a namespace whose replication nobody said.
     // `MAJORITY OR WEAKER` lets a bucket ask for its writes to be acknowledged by its region's majority alone.
     let replication = global.replication().clause();
     // The server's own account is an editor of its namespace (an operator declares the namespace and the account):
     // `USE` plus each database's `IF NOT EXISTS` is all it may run here. Only when that is refused — the namespace is
     // new, so an account that may declare one is starting the server — is the namespace declared.
-    let databases = format!(
-        "DEFINE DATABASE IF NOT EXISTS {database}; DEFINE DATABASE IF NOT EXISTS {region_database};"
-    );
+    let databases: String = databases
+        .iter()
+        .map(|database| format!("DEFINE DATABASE IF NOT EXISTS {database}; "))
+        .collect();
     let own = format!("USE NAMESPACE {namespace}; {databases}");
     match global.run_unscoped(&own).await {
         Ok(_) => {}
@@ -387,12 +401,7 @@ async fn apply_once(global: &MetaPool, regional: &MetaPool, reclaim_grace_secs: 
         }
         Err(error) => return Err(error.into()),
     }
-    global.run(GLOBAL_TABLES, Vec::new()).await?;
-    let regional_tables = REGIONAL_TABLES.replace("__GLOBAL__", database);
-    regional
-        .run(&regional_tables, grace(reclaim_grace_secs)?)
-        .await?;
-    fill_spaces(global).await
+    Ok(())
 }
 
 /// Gives every bucket record without a `space_name` the default space. A field's `DEFAULT` fills only what is written

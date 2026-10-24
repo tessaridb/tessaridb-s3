@@ -47,6 +47,12 @@ impl SettingsService {
         env: &impl Fn(&str) -> Option<String>,
         passphrase: Option<&Passphrase>,
     ) -> Result<Resolved> {
+        // Read before the schema is applied, so on a deployment's first start the namespace and its databases may not
+        // be declared yet; they are declared here — the same set, in one script with the namespace, as the schema
+        // would — and hold nothing.
+        let pool = self.store.pool();
+        let regional = pool.regional(region)?;
+        crate::schema::tenancy(pool, &[pool.scope().1, regional.scope().1]).await?;
         let mut held: HashMap<String, String> = self
             .settings(region)
             .await?
