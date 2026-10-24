@@ -21,12 +21,15 @@ use openidconnect::{
 use tessari_s3_types::SecretKey;
 
 use crate::Result;
-use crate::console_config::OidcSettings;
+use crate::console_config::{ClientAuth, OidcSettings};
 use crate::oidc_http::ProviderHttp;
 pub use crate::oidc_logout::LoggedOut;
 use crate::oidc_verify::verify;
 pub use crate::oidc_verify::{ALLOWED_ALGORITHMS, OidcError};
 pub use crate::oidc_web_identity::WebIdentity;
+
+/// RFC 7523 §2.2: the assertion type a `private_key_jwt` client sends.
+const CLIENT_ASSERTION_TYPE: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 
 type Client = CoreClient<
     EndpointSet,
@@ -92,6 +95,15 @@ impl OidcClient {
     /// # Errors
     /// [`Error::InvalidConfig`] when the HTTP client cannot be built.
     pub fn new(settings: &OidcSettings, refresh_min_secs: i64) -> Result<Self> {
+        if let ClientAuth::Key(key) = &settings.client_auth {
+            // The public half only: what the operator registers at the provider as this client's key.
+            tracing::info!(
+                client_id = %settings.client_id,
+                kid = key.kid(),
+                jwk = %key.public_jwk(),
+                "the console authenticates to the identity provider with this public key (private_key_jwt, EdDSA)"
+            );
+        }
         Ok(Self {
             inner: Arc::new(Inner {
                 settings: settings.clone(),
@@ -194,9 +206,11 @@ impl OidcClient {
         Ok(Client::from_provider_metadata(
             metadata.clone(),
             ClientId::new(settings.client_id.clone()),
-            Some(ClientSecret::new(
-                settings.client_secret.expose().to_owned(),
-            )),
+            match &settings.client_auth {
+                ClientAuth::Secret(secret) => Some(ClientSecret::new(secret.expose().to_owned())),
+                // `private_key_jwt`: no secret, so the client id goes in the body beside the assertion.
+                ClientAuth::Key(_) => None,
+            },
         )
         .set_redirect_uri(redirect))
     }
@@ -247,17 +261,27 @@ impl OidcClient {
         }
         let metadata = self.discovered(false).await?;
         let http = self.http();
-        let token = self
-            .client(&metadata)?
+        let client = self.client(&metadata)?;
+        let mut exchange = client
             .exchange_code(AuthorizationCode::new(code.to_owned()))
             .map_err(|_| OidcError::Unavailable)?
-            .set_pkce_verifier(PkceCodeVerifier::new(verifier.expose().to_owned()))
-            .request_async(&http)
-            .await
-            .map_err(|error| {
-                tracing::info!(error = %error, "identity provider refused the code");
-                OidcError::CodeRefused
-            })?;
+            .set_pkce_verifier(PkceCodeVerifier::new(verifier.expose().to_owned()));
+        if let ClientAuth::Key(key) = &settings.client_auth {
+            // RFC 7523 §2.2 with the issuer as the audience, which RFC 7523 §3 and OpenID Connect Core §9 both allow.
+            let assertion = key
+                .assertion(&settings.client_id, &settings.issuer, now_secs())
+                .map_err(|reason| {
+                    tracing::warn!(reason, "the console could not sign its client assertion");
+                    OidcError::Unavailable
+                })?;
+            exchange = exchange
+                .add_extra_param("client_assertion_type", CLIENT_ASSERTION_TYPE)
+                .add_extra_param("client_assertion", assertion);
+        }
+        let token = exchange.request_async(&http).await.map_err(|error| {
+            tracing::info!(error = %error, "identity provider refused the code");
+            OidcError::CodeRefused
+        })?;
         let id_token = token.id_token().ok_or(OidcError::NoIdToken)?;
         let nonce = Nonce::new(nonce.expose().to_owned());
         let verified = match verify(settings, id_token, &metadata, &nonce, token.access_token()) {

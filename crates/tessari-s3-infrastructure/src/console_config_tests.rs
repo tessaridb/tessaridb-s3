@@ -118,10 +118,10 @@ fn an_identity_provider_is_read_whole_and_requires_mfa_by_default() {
         .expect("an identity provider");
     assert_eq!(oidc.issuer, "https://id.example.test/realms/ops");
     assert_eq!(oidc.client_id, "tessaridb-s3-console");
-    assert_eq!(
-        oidc.client_secret.expose(),
-        "client-secret-fixture-0123456789"
-    );
+    assert!(matches!(
+        &oidc.client_auth,
+        crate::ClientAuth::Secret(secret) if secret.expose() == "client-secret-fixture-0123456789"
+    ));
     assert_eq!(
         oidc.redirect_uri,
         "https://console.example.test/api/v1/auth/oidc/callback"
@@ -270,6 +270,91 @@ fn a_break_glass_webhook_follows_the_identity_provider_and_its_url_rule() {
         Err(Error::InvalidConfig {
             key: "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK",
             reason: "set without TESSARIDB_S3_CONSOLE_OIDC_ISSUER",
+        })
+    ));
+}
+
+/// The fixture's provider with the secret replaced by `key` (`None` drops both).
+fn provider_with_key(
+    key: Option<&'static str>,
+    keep_secret: bool,
+) -> Vec<(&'static str, &'static str)> {
+    let mut vars: Vec<(&str, &str)> = with(&OIDC)
+        .into_iter()
+        .filter(|(name, _)| keep_secret || *name != "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET")
+        .collect();
+    if let Some(path) = key {
+        vars.push(("TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY", path));
+    }
+    vars
+}
+
+fn key_file(name: &str, pem: &str) -> &'static str {
+    let dir = std::env::temp_dir().join(format!("s3-oidc-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let path = dir.join(name);
+    std::fs::write(&path, pem).expect("written");
+    Box::leak(path.to_string_lossy().into_owned().into_boxed_str())
+}
+
+#[test]
+fn a_client_key_file_takes_the_place_of_the_secret() {
+    let pem = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
+        .expect("an Ed25519 key")
+        .serialize_pem();
+    let path = key_file("ed25519.pem", &pem);
+    let oidc = load(&provider_with_key(Some(path), false))
+        .expect("loads")
+        .console
+        .expect("console")
+        .oidc
+        .expect("provider");
+    let crate::ClientAuth::Key(key) = &oidc.client_auth else {
+        panic!("a key, not a secret");
+    };
+    assert!(key.public_jwk().contains("\"Ed25519\""));
+}
+
+#[test]
+fn secret_and_key_together_or_neither_are_refused_by_name() {
+    let pem = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
+        .expect("an Ed25519 key")
+        .serialize_pem();
+    let path = key_file("both.pem", &pem);
+    assert!(matches!(
+        load(&provider_with_key(Some(path), true)).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY",
+            reason: "set beside TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET: give one of the two",
+        })
+    ));
+    assert!(matches!(
+        load(&provider_with_key(None, false)).map(|_| ()),
+        Err(Error::MissingConfig {
+            key: "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET",
+        })
+    ));
+}
+
+#[test]
+fn a_client_key_that_cannot_be_read_or_is_not_ed25519_is_refused_by_name() {
+    let missing = "/nonexistent/s3-oidc-client.pem";
+    assert!(matches!(
+        load(&provider_with_key(Some(missing), false)).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY",
+            reason: "cannot be read",
+        })
+    ));
+    let p256 = key_file(
+        "p256.pem",
+        &rcgen::KeyPair::generate().expect("a key").serialize_pem(),
+    );
+    assert!(matches!(
+        load(&provider_with_key(Some(p256), false)).map(|_| ()),
+        Err(Error::InvalidConfig {
+            key: "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY",
+            reason: "not an Ed25519 private key in PKCS#8 PEM",
         })
     ));
 }

@@ -142,7 +142,8 @@ with a bound record cursor and every row count is bound, which earlier releases 
 | `TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE` | `10` | sign-in attempts accepted per client address per minute, and as many temporary-credential requests on the S3 listener; the limit is checked before the credential |
 | `TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE` | `600` | console requests accepted per signed-in key per minute |
 | `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` | unset (keys only) | an OpenID Connect provider people sign in to the console through, by its issuer URL (https, or http to this machine only). Its four companions are then required or defaulted; set without the issuer they are refused |
-| `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` / `_CLIENT_SECRET` | — | the console's client at the provider; the secret stays on the server (`client_secret_basic`) |
+| `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` | — | the console's client at the provider |
+| `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET` / `_CLIENT_KEY` | — | how the console authenticates at the provider, exactly one of the two: a secret (`client_secret_basic`), or the path of an Ed25519 private key in PKCS#8 PEM (`private_key_jwt`, EdDSA) for a provider that issues no secrets, such as TessariDB OAuth. With a key the server logs its public JWK at start, to register as the client's key |
 | `TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI` | — | the callback registered at the provider, exactly: the console's address followed by `/api/v1/auth/oidc/callback` |
 | `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` | `mfa` | comma-separated `amr` values that prove a second factor; a sign-in whose ID token carries none of them is refused |
 | `TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK` | unset (no alert) | where a root sign-in to the console is announced as it happens: one JSON POST (`event`, `key_id`, `reason`, `client`, `expires`), over https or http to this machine. Needs `TESSARIDB_S3_CONSOLE_OIDC_ISSUER` |

@@ -54,7 +54,9 @@ COPY LICENSE /usr/share/doc/tessaridb-s3/LICENSE
 #                                 answer 503
 #   TESSARIDB_S3_CLUSTER_SECRET   placement key, the same on every member
 #   TESSARIDB_S3_JOIN_TOKEN       one-time token from the console for this node
-#   TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET  the console's client secret
+#   TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET  the console's client secret, or
+#   TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY     the path of its Ed25519 key (mount
+#                                 it as a secret file, not into the image)
 #
 # Everything else has the server's own default when unset:
 #
