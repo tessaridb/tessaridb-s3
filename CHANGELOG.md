@@ -3,6 +3,18 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.7.0: 2026-10-24
+
+Metadata on TessariDB `0.38.2`.
+
+- The console signs in to its identity provider with a private key instead of a client secret:
+  `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY` names an Ed25519 key (PKCS#8 PEM), sent as a signed client assertion
+  (`private_key_jwt`, EdDSA). The server logs the public key at start for registering the client. Exactly one of the
+  secret and the key is accepted.
+- Works with TessariDB OAuth as the console's identity provider, and its ID tokens buy temporary credentials through
+  AssumeRoleWithWebIdentity.
+- tokio 1.54.1 (RUSTSEC-2026-0386).
+
 ## 0.6.0: 2026-10-21
 
 Metadata on TessariDB `0.36.2`.
