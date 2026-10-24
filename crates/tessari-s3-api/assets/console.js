@@ -548,11 +548,11 @@
     fill(screen.main, head(title), el("div", { class: "card" }, refusal(failure), retry));
   }
   var heading = (title) => el("h1", { tabindex: "-1", class: "view-title" }, title);
-  var head = (title, lede, action2) => el("div", { class: "page-head" }, el("div", {}, heading(title), lede === void 0 || lede === null ? null : el("p", { class: "lede" }, lede)), action2 ?? null);
+  var head = (title, lede, action3) => el("div", { class: "page-head" }, el("div", {}, heading(title), lede === void 0 || lede === null ? null : el("p", { class: "lede" }, lede)), action3 ?? null);
   function loading(screen, title, what) {
     fill(screen.main, head(title), el("div", { class: "card", "aria-busy": "true" }, el("p", { class: "muted" }, `Loading ${what}…`)));
   }
-  var empty = (why, action2) => el("div", { class: "empty" }, el("p", {}, why), action2 ?? null);
+  var empty = (why, action3) => el("div", { class: "empty" }, el("p", {}, why), action3 ?? null);
 
   // src/actions.ts
   //! The action record, newest first: who did what to which bucket or object,
@@ -571,13 +571,13 @@
     }
     const page = answer.value;
     const rows = page.actions.map(
-      (action2) => row(
-        moment(action2.at),
-        mono(action2.operator),
-        action2.operation.replaceAll("_", " "),
-        mono(action2.target),
-        action2.reason ?? el("span", { class: "muted" }, "none given"),
-        el("span", { class: `chip ${action2.outcome === "done" || action2.outcome === "sent" ? "ok" : "warn"}` }, action2.outcome.replaceAll("_", " "))
+      (action3) => row(
+        moment(action3.at),
+        mono(action3.operator),
+        action3.operation.replaceAll("_", " "),
+        mono(action3.target),
+        action3.reason ?? el("span", { class: "muted" }, "none given"),
+        el("span", { class: `chip ${action3.outcome === "done" || action3.outcome === "sent" ? "ok" : "warn"}` }, action3.outcome.replaceAll("_", " "))
       )
     );
     fill(
@@ -2675,6 +2675,121 @@
     return card2;
   }
 
+  // src/settings-model.ts
+  //! The settings this node's region shares, as the console sees them: a plain
+  //! setting with its stored value, a secret only as stored or not, each with
+  //! when a change applies and whether it may change at all.
+  function readSetting(v) {
+    if (!record(v) || !text(v["name"]) || !flag(v["stored"]) || !flag(v["fixed"])) {
+      return null;
+    }
+    const scope = v["scope"];
+    const kind = v["class"];
+    const applies = v["applies"];
+    const value = v["value"];
+    if (scope !== "global" && scope !== "region" || kind !== "setting" && kind !== "secret" || applies !== "live" && applies !== "start") {
+      return null;
+    }
+    if (value !== null && !text(value) || kind === "secret" && value !== null) {
+      return null;
+    }
+    return { name: v["name"], scope, secret: kind === "secret", value, stored: v["stored"], live: applies === "live", fixed: v["fixed"] };
+  }
+  function readSettings(v) {
+    if (!record(v) || !text(v["region"])) {
+      return null;
+    }
+    const settings = list(v["settings"], readSetting);
+    return settings === null ? null : { region: v["region"], settings };
+  }
+
+  // src/settings.ts
+  //! The settings every node of this region shares, for an operator: each with
+  //! its stored value — a secret only as stored or not — when a change applies,
+  //! and a form to change it against the value read, with a reason; a secret
+  //! takes the keys passphrase. The server checks the value with the node's own
+  //! configuration and records every attempt without the value.
+  var BASE4 = "/settings";
+  var PREFIX = "TESSARIDB_S3_";
+  var short = (name) => name.startsWith(PREFIX) ? name.slice(PREFIX.length) : name;
+  function valueCell(setting) {
+    if (setting.secret) {
+      return setting.stored ? el("span", { class: "chip ok" }, "Stored") : "Not stored";
+    }
+    return setting.value === null ? "Not stored" : mono(setting.value);
+  }
+  function changeForm(screen, setting, region) {
+    const id = `setting-${short(setting.name).toLowerCase()}`;
+    const value = field(`${id}-value`, short(setting.name), { autocomplete: "off", required: "", ...setting.secret ? { type: "password" } : {} }, setting.live ? "Applies on every node within 5 seconds." : "Applies when each node next starts.");
+    const why = field(`${id}-reason`, "Reason", { autocomplete: "off", required: "" }, "Kept in the action record; the value is not.");
+    const passphrase = setting.secret ? field(`${id}-passphrase`, "Keys passphrase", { type: "password", autocomplete: "off", required: "" }, "Opens the secrets vault for this one write.") : null;
+    const said = el("div", { "aria-live": "polite" });
+    const form = el(
+      "form",
+      { class: "confirm", novalidate: "", "aria-labelledby": `${id}-title` },
+      el("p", { id: `${id}-title` }, el("strong", {}, "Change "), mono(setting.name)),
+      value.row,
+      passphrase === null ? null : passphrase.row,
+      why.row,
+      el("div", { class: "actions" }, el("button", { type: "submit", class: "primary" }, "Change"), el("button", { type: "button", class: "quiet", "data-cancel": "" }, "Cancel")),
+      said
+    );
+    form.querySelector("[data-cancel]")?.addEventListener("click", () => fill(region));
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const answer = await call("PUT", `${BASE4}/${setting.name}`, ignored, {
+        value: value.input.value,
+        expected: setting.value,
+        reason: why.input.value.trim(),
+        ...passphrase === null || passphrase.input.value === "" ? {} : { passphrase: passphrase.input.value }
+      });
+      if (passphrase !== null) {
+        passphrase.input.value = "";
+      }
+      if (setting.secret) {
+        value.input.value = "";
+      }
+      if (answer.ok) {
+        announce(`${short(setting.name)} is changed.`);
+        screen.redraw();
+      } else if (answer.status === 401) {
+        screen.signIn();
+      } else {
+        fill(said, refusal(answer));
+      }
+    });
+    return form;
+  }
+  function action2(screen, setting, region) {
+    if (setting.fixed) {
+      return el("span", { class: "chip" }, "Fixed");
+    }
+    const button = el("button", { type: "button", class: "quiet" }, "Change…");
+    button.addEventListener("click", () => fill(region, changeForm(screen, setting, region)));
+    return button;
+  }
+  async function settingsCard(screen) {
+    if (screen.may?.operate !== true) {
+      return null;
+    }
+    const card2 = el("section", { class: "card" }, el("h2", {}, "Settings"));
+    const answer = await call("GET", BASE4, readSettings);
+    if (!answer.ok) {
+      card2.append(refusal(answer));
+      return card2;
+    }
+    const region = el("div", {});
+    const rows = answer.value.settings.map(
+      (setting) => row(mono(short(setting.name)), setting.scope === "global" ? "Every region" : answer.value.region, valueCell(setting), setting.live ? "Live" : "At start", action2(screen, setting, region))
+    );
+    card2.append(
+      el("p", {}, "Kept in the metadata store and shared by every node of ", mono(answer.value.region), ". A value set here wins over a node's environment."),
+      table("Stored settings", ["Setting", "Applies to", "Value", "Takes effect", ""], rows),
+      region
+    );
+    return card2;
+  }
+
   // src/status.ts
   //! The overview: is this node and its cluster healthy, how much is stored and
   //! how full the drives are, and is anything waiting to be healed. Each tile
@@ -2777,7 +2892,7 @@
   }
   async function status(screen) {
     loading(screen, TITLE3, "the node's status");
-    const [answer, usage, encryption] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen)]);
+    const [answer, usage, encryption, settings] = await Promise.all([call("GET", "/status", readStatus), call("GET", "/usage", readUsage), encryptionCard(screen), settingsCard(screen)]);
     if (!answer.ok) {
       failed(screen, TITLE3, answer);
       return;
@@ -2804,7 +2919,8 @@
         tile("record", "Action record", "Review", "Every console change and download", format({ kind: "actions", before: null }))
       ),
       members2 === null ? null : el("section", { class: "card flush" }, el("h2", {}, "Members"), members2),
-      encryption
+      encryption,
+      settings
     );
   }
 

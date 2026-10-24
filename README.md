@@ -164,8 +164,9 @@ to reach the metadata store, the region, the passphrase and what describes this 
 data directory, node identity) stay in the environment. Without the passphrase, secrets are read from the
 environment as before. A running node re-reads the stored settings every 5 seconds and applies the intervals of its
 background work, the move budget, the console's rate limits and `TESSARIDB_S3_DOMAINS` without a restart; a value
-that fails the checks is refused by name and the running one kept. Every other setting is read at start. In the
-console, root reads them at `GET /api/v1/settings` (a secret by name only) and changes one at
+that fails the checks is refused by name and the running one kept. Every other setting is read at start. Root reads
+and changes them on the console's overview page, or reads them at `GET /api/v1/settings` (a secret by name only) and
+changes one at
 `PUT /api/v1/settings/{name}` with a reason, against the value it read; a secret needs the keys passphrase, and every
 attempt is recorded without the value.
 
