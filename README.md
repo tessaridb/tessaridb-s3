@@ -155,6 +155,15 @@ The server applies its metadata schema on start-up and does not start without
 the metadata node. Anonymous requests are refused. SIGINT or SIGTERM stops the
 server after the grace period.
 
+Settings every node of a region shares are kept in the metadata store from the first start that names them: the
+global database's `s3_settings` table and, when `TESSARIDB_S3_KEYS_PASSPHRASE` is set, the secrets (the root secret,
+the IAM key, the cluster secret, the console provider's secret and key, the break-glass webhook, the notification
+targets) in its `s3_secrets` vault, sealed under that passphrase. From then on the stored value is used: an
+environment value that differs is logged by name, and a different erasure code or cluster secret stops the start. How
+to reach the metadata store, the region, the passphrase and what describes this machine (addresses, certificates,
+data directory, node identity) stay in the environment. Without the passphrase, secrets are read from the
+environment as before.
+
 With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console: open that address in a browser
 and sign in with an access key — the root key, or one issued to a user. The page needs nothing from the network — no font, no script from anywhere
 else — and runs only its own script under a strict content security policy. Everything it does goes through the

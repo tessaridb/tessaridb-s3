@@ -1,10 +1,10 @@
 //! The `tessaridb-s3` process: the composition root, and nothing else.
 //!
-//! Order: tracing, configuration, the metadata pool and schema, the daemons (the reclaimer, when a data directory is
-//! configured, the healer and the mover on a cluster member, the upload reaper and the usage scanner), the API state and router,
-//! the listener — and, on a node of a cluster, the internal shard listener — then serving until SIGINT or SIGTERM,
-//! after which in-flight requests and the daemons' current runs get the configured grace period before the process
-//! exits.
+//! Order: tracing, configuration (the environment, then the settings the metadata store holds), the metadata pool
+//! and schema, the daemons (the reclaimer, when a data directory is configured, the healer and the mover on a cluster
+//! member, the upload reaper and the usage scanner), the API state and router, the listener — and, on a node of a
+//! cluster, the internal shard listener — then serving until SIGINT or SIGTERM, after which in-flight requests and the
+//! daemons' current runs get the configured grace period before the process exits.
 
 mod console;
 mod health;
@@ -12,16 +12,17 @@ mod internal;
 mod keys;
 mod membership;
 mod metrics;
+mod settings;
 
 use std::time::Duration;
 
 use std::sync::Arc;
 use tessari_s3_api::{ApiState, serve_s3};
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
+use tessari_s3_infrastructure::NotifyEndpoint;
 use tessari_s3_infrastructure::oidc::OidcClient;
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 use tessari_s3_infrastructure::tls::listener_config;
-use tessari_s3_infrastructure::{NotifyEndpoint, S3Config};
 
 use tessari_s3_core::notification::DATABASE_TARGET;
 use tessari_s3_daemons::{
@@ -40,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
         return health::run().await;
     }
     tessari_s3_observability::init();
-    let config = S3Config::from_env()?;
+    let config = settings::configure(&|key: &str| std::env::var(key).ok()).await?;
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         listen = %config.listen,

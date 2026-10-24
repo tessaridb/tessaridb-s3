@@ -178,6 +178,14 @@ pub enum Error {
     /// Too many wrong passphrases in a row: the metadata store makes the next attempt wait, right or not.
     #[error("too many wrong keys passphrases; wait before trying again")]
     PassphraseThrottled,
+    /// The environment names a value for a setting the metadata store holds and may not change once stored.
+    #[error("{key} {reason}")]
+    FixedSetting {
+        /// The variable.
+        key: &'static str,
+        /// Why it was refused.
+        reason: &'static str,
+    },
 }
 
 impl Error {
@@ -205,7 +213,8 @@ impl Error {
             Self::InvalidShard { .. }
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }
-            | Self::OtherRegion { .. } => ErrorCategory::Validation,
+            | Self::OtherRegion { .. }
+            | Self::FixedSetting { .. } => ErrorCategory::Validation,
             Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
                 ErrorCategory::Conflict
             }
