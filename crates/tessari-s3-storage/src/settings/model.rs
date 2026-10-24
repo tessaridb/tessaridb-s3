@@ -15,6 +15,25 @@ pub(crate) fn record_id(stored: &Stored, region: &str) -> String {
     }
 }
 
+/// One stored setting as an operator sees it; a secret's value is never part of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingView {
+    /// The variable.
+    pub name: &'static str,
+    /// Whether one value serves every region.
+    pub global: bool,
+    /// Whether it is a secret, kept in the vault.
+    pub secret: bool,
+    /// A plain setting's stored value; `None` for a secret, or when nothing is stored.
+    pub value: Option<String>,
+    /// Whether the store holds it.
+    pub stored: bool,
+    /// Whether a running node applies a change to it without a restart.
+    pub live: bool,
+    /// Whether it may never change once stored.
+    pub fixed: bool,
+}
+
 /// The variable a record id names for `region`, or `None` for another region's record or one this build does not keep.
 #[must_use]
 pub(crate) fn variable_of(id: &str, region: &str) -> Option<&'static str> {

@@ -28,4 +28,22 @@ pub(crate) trait SettingsStore: Send + Sync {
         id: &str,
         value: &str,
     ) -> impl Future<Output = Result<()>> + Send;
+    /// Sets plain setting `id` to `value` only while it holds `expected` (`None`: only while it is absent); `false`
+    /// when it held something else, which the caller reports instead of overwriting.
+    fn change_setting(
+        &self,
+        id: &str,
+        expected: Option<&str>,
+        value: &str,
+    ) -> impl Future<Output = Result<bool>> + Send;
+    /// The ids of the secrets the vault holds — names only, nothing revealed; empty when no vault is declared.
+    fn secret_ids(&self) -> impl Future<Output = Result<Vec<String>>> + Send;
+    /// Opens the secrets vault with `passphrase` and sets secret `id` to `value`, stored or not. The vault is sealed
+    /// again before this answers.
+    fn change_secret(
+        &self,
+        passphrase: &Passphrase,
+        id: &str,
+        value: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
 }

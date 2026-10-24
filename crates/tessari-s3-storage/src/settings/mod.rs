@@ -7,5 +7,6 @@ mod repository;
 mod service;
 mod tessaridb;
 
+pub use model::SettingView;
 pub use service::SettingsService;
 pub use tessaridb::TessariSettings;

@@ -33,13 +33,16 @@ mod page;
 mod quotas;
 mod regions;
 mod session;
+mod settings;
 mod spaces;
 mod status;
 mod upload_keys;
 mod usage;
 mod users;
 
-use std::sync::Arc;
+pub use settings::SettingsCheck;
+
+use std::sync::{Arc, OnceLock};
 
 use axum::middleware::from_fn_with_state;
 use axum::routing::{delete, get, post, put};
@@ -79,6 +82,8 @@ struct Inner {
     oidc: Option<OidcClient>,
     /// Where a root sign-in is announced, when an identity provider and a webhook are configured.
     break_glass_alert: Option<(WebhookClient, String)>,
+    /// How the node checks a stored setting's new value; unset in a console built without a node.
+    settings_check: OnceLock<SettingsCheck>,
 }
 
 impl ConsoleState {
@@ -138,6 +143,7 @@ impl ConsoleState {
                 live,
                 oidc,
                 break_glass_alert,
+                settings_check: OnceLock::new(),
             }),
         }))
     }
@@ -223,6 +229,16 @@ impl ConsoleState {
         self.inner.node.as_deref()
     }
 
+    /// Lets this console change stored settings, checking each new value with `check`; `false` when it was set
+    /// already.
+    pub fn accept_settings_check(&self, check: SettingsCheck) -> bool {
+        self.inner.settings_check.set(check).is_ok()
+    }
+
+    fn settings_check(&self) -> Option<&SettingsCheck> {
+        self.inner.settings_check.get()
+    }
+
     fn region(&self) -> &str {
         &self.inner.region
     }
@@ -295,6 +311,8 @@ pub fn console_router(state: ConsoleState) -> axum::Router {
             "/api/v1/encryption/destroy",
             post(encryption_rotation::destroy),
         )
+        .route("/api/v1/settings", get(settings::list))
+        .route("/api/v1/settings/{name}", put(settings::change))
         .route("/api/v1/regions", get(regions::list))
         .route("/api/v1/regions/failover", post(regions::fail_over))
         .route("/api/v1/regions/restore", post(regions::restore))

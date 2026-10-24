@@ -3,15 +3,16 @@
 
 use std::collections::HashMap;
 
-use tessari_s3_infrastructure::settings_keys::{Class, STORED};
+use tessari_s3_infrastructure::APPLIED_LIVE;
+use tessari_s3_infrastructure::settings_keys::{Class, Reach, STORED};
 use tessari_s3_infrastructure::settings_source::{Resolved, resolve};
 use tessari_s3_infrastructure::tessaridb::MetaPool;
 
-use super::model::{record_id, variable_of};
+use super::model::{SettingView, record_id, variable_of};
 use super::repository::SettingsStore;
 use super::tessaridb::TessariSettings;
-use crate::Result;
 use crate::keys::Passphrase;
+use crate::{Error, Result};
 
 /// The settings service.
 #[derive(Clone)]
@@ -91,6 +92,80 @@ impl SettingsService {
             .into_iter()
             .filter_map(|(id, value)| variable_of(&id, region).map(|key| (key, value)))
             .collect())
+    }
+
+    /// Every stored-class setting as `region` sees it: plain values shown, secrets only named as stored or not.
+    ///
+    /// # Errors
+    /// The store's refusal or a malformed record.
+    pub async fn view(&self, region: &str) -> Result<Vec<SettingView>> {
+        let plain = self.settings(region).await?;
+        let secrets: Vec<&'static str> = self
+            .store
+            .secret_ids()
+            .await?
+            .iter()
+            .filter_map(|id| variable_of(id, region))
+            .collect();
+        Ok(STORED
+            .iter()
+            .map(|stored| {
+                let secret = stored.class == Class::Secret;
+                let value = if secret {
+                    None
+                } else {
+                    plain.get(stored.key).cloned()
+                };
+                SettingView {
+                    name: stored.key,
+                    global: stored.reach == Reach::Global,
+                    secret,
+                    stored: value.is_some() || (secret && secrets.contains(&stored.key)),
+                    value,
+                    live: APPLIED_LIVE.contains(&stored.key),
+                    fixed: stored.fixed,
+                }
+            })
+            .collect())
+    }
+
+    /// Changes stored setting `name` for `region` to `value` — a value the caller has already checked against the
+    /// node's configuration. A plain setting changes only while it still holds `expected` (`None`: only while
+    /// absent); a secret is written into the vault with `passphrase`.
+    ///
+    /// # Errors
+    /// [`Error::SettingUnknown`] for a name outside the stored set; [`Error::FixedSetting`] for one that may not
+    /// change; [`Error::SettingChanged`] when another change came first; [`Error::KeysSealed`] for a secret without
+    /// the passphrase; the store's refusal.
+    pub async fn change(
+        &self,
+        region: &str,
+        name: &str,
+        expected: Option<&str>,
+        value: &str,
+        passphrase: Option<&Passphrase>,
+    ) -> Result<&'static str> {
+        let stored = STORED
+            .iter()
+            .find(|stored| stored.key == name)
+            .ok_or_else(|| Error::SettingUnknown {
+                name: name.to_owned(),
+            })?;
+        if stored.fixed {
+            return Err(Error::FixedSetting {
+                key: stored.key,
+                reason: "may not change once stored",
+            });
+        }
+        let id = record_id(stored, region);
+        if stored.class == Class::Secret {
+            let passphrase = passphrase.ok_or(Error::KeysSealed)?;
+            self.store.change_secret(passphrase, &id, value).await?;
+        } else if !self.store.change_setting(&id, expected, value).await? {
+            return Err(Error::SettingChanged { key: stored.key });
+        }
+        tracing::info!(setting = stored.key, "a stored setting was changed");
+        Ok(stored.key)
     }
 
     /// Stores, for `region`, every setting the environment held and the store did not; a secret goes into the secrets

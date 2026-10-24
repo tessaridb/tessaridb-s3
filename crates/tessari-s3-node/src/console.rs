@@ -1,7 +1,7 @@
 //! The operator console a node serves when `TESSARIDB_S3_CONSOLE_LISTEN` is set (ADR-0006).
 
 use std::sync::Arc;
-use tessari_s3_api::{ApiState, ConsoleState, serve_console};
+use tessari_s3_api::{ApiState, ConsoleState, SettingsCheck, serve_console};
 
 use tessari_s3_infrastructure::tls::listener_config;
 use tessari_s3_infrastructure::{LiveSettings, S3Config};
@@ -13,6 +13,7 @@ pub(crate) async fn surface(
     config: &S3Config,
     storage: &Storage,
     live: Arc<LiveSettings>,
+    check: SettingsCheck,
     mut stop: watch::Receiver<bool>,
 ) -> anyhow::Result<Option<impl Future<Output = std::io::Result<()>> + use<>>> {
     let (Some(console), Some(state)) = (
@@ -21,6 +22,7 @@ pub(crate) async fn surface(
     ) else {
         return Ok(None);
     };
+    state.accept_settings_check(check);
     let tls = console
         .tls
         .as_ref()

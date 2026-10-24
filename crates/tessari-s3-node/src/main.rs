@@ -236,6 +236,7 @@ async fn main() -> anyhow::Result<()> {
         config.cluster.as_ref().map(|cluster| &cluster.node),
         live.usage_interval(),
     );
+    let settings_check = reread.check();
     // Settings changed in the metadata store reach this node within one re-read.
     daemons.spawn(run(
         reread.daemon(Arc::clone(&live)),
@@ -248,7 +249,14 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&counted),
     ));
     let internal = internal::surface(&config, &storage, stop_rx.clone()).await?;
-    let console = console::surface(&config, &storage, Arc::clone(&live), stop_rx.clone()).await?;
+    let console = console::surface(
+        &config,
+        &storage,
+        Arc::clone(&live),
+        settings_check,
+        stop_rx.clone(),
+    )
+    .await?;
     // People the console's identity provider vouches for may ask the S3 surface for temporary credentials.
     if let Some(console) = &config.console
         && let Some(settings) = &console.oidc

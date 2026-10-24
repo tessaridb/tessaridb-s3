@@ -195,6 +195,13 @@ impl Storage {
         &self.cluster
     }
 
+    /// The settings the region's nodes share, kept in the global database: the service the console changes them
+    /// through and the node reads them with.
+    #[must_use]
+    pub fn settings(&self) -> crate::settings::SettingsService {
+        crate::settings::SettingsService::new(self.pool.clone())
+    }
+
     /// The encryption keys this node holds, sealed until an operator unseals them.
     #[must_use]
     pub fn keys(&self) -> &KeyService {

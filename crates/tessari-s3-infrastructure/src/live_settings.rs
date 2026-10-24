@@ -9,6 +9,18 @@ use arc_swap::ArcSwap;
 
 use crate::S3Config;
 
+/// The variables a running node applies without a restart; every other stored setting is read at start.
+pub const APPLIED_LIVE: [&str; 8] = [
+    "TESSARIDB_S3_RECLAIM_INTERVAL_SECS",
+    "TESSARIDB_S3_UPLOAD_MAX_AGE_SECS",
+    "TESSARIDB_S3_USAGE_INTERVAL_SECS",
+    "TESSARIDB_S3_HEAL_INTERVAL_SECS",
+    "TESSARIDB_S3_MOVE_BYTES_PER_SEC",
+    "TESSARIDB_S3_CONSOLE_SIGN_INS_PER_MINUTE",
+    "TESSARIDB_S3_CONSOLE_REQUESTS_PER_MINUTE",
+    "TESSARIDB_S3_DOMAINS",
+];
+
 /// One live number. Relaxed ordering: every cell stands alone and publishes nothing beside its own value.
 #[derive(Debug, Clone)]
 pub struct Live(Arc<AtomicU64>);

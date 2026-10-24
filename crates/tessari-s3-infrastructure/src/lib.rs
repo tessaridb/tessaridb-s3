@@ -36,7 +36,7 @@ pub use config::{ClusterSettings, S3Config};
 pub use console_config::{ClientAuth, ConsoleSettings, KeySignIn, OidcSettings};
 pub use error::{Error, Result};
 pub use kafka::KafkaProducer;
-pub use live_settings::{Live, LiveSettings};
+pub use live_settings::{APPLIED_LIVE, Live, LiveSettings};
 pub use notify_config::{NotifyEndpoint, NotifyTarget};
 pub use oidc_client_key::ClientKey;
 pub use replica_client::ReplicaClient;

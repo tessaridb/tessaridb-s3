@@ -186,6 +186,18 @@ pub enum Error {
         /// Why it was refused.
         reason: &'static str,
     },
+    /// A stored setting no longer held the value the change was made against: someone changed it first.
+    #[error("{key} was changed by someone else; read it again")]
+    SettingChanged {
+        /// The variable.
+        key: &'static str,
+    },
+    /// A name that is not a stored setting.
+    #[error("{name} is not a setting the metadata store keeps")]
+    SettingUnknown {
+        /// The name asked for.
+        name: String,
+    },
 }
 
 impl Error {
@@ -214,10 +226,13 @@ impl Error {
             | Self::ShardLength { .. }
             | Self::SealedLength { .. }
             | Self::OtherRegion { .. }
-            | Self::FixedSetting { .. } => ErrorCategory::Validation,
-            Self::Contended | Self::Held | Self::KeyExists { .. } | Self::KeyActive { .. } => {
-                ErrorCategory::Conflict
-            }
+            | Self::FixedSetting { .. }
+            | Self::SettingUnknown { .. } => ErrorCategory::Validation,
+            Self::Contended
+            | Self::Held
+            | Self::KeyExists { .. }
+            | Self::KeyActive { .. }
+            | Self::SettingChanged { .. } => ErrorCategory::Conflict,
             Self::KeysSealed | Self::PassphraseThrottled | Self::DriveFull { .. } => {
                 ErrorCategory::Unavailable
             }

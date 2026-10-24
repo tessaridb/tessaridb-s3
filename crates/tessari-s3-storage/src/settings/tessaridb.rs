@@ -183,4 +183,56 @@ impl SettingsStore for TessariSettings {
         seal(&mut link).await;
         kept(created)
     }
+
+    async fn change_setting(&self, id: &str, expected: Option<&str>, value: &str) -> Result<bool> {
+        self.pool.run(TABLE, Vec::new()).await?;
+        let Some(expected) = expected else {
+            let created = self
+                .pool
+                .run(
+                    "CREATE s3_settings:$id = { name: $id, value: $value };",
+                    vec![string("id", id), string("value", value)],
+                )
+                .await;
+            return match created {
+                Ok(_) => Ok(true),
+                Err(error) if error.is_class(RefusalClass::Conflict) => Ok(false),
+                Err(error) => Err(error.into()),
+            };
+        };
+        // Compare-and-set in one statement: the record changes only while it still holds what the caller read.
+        let mut answers = self
+            .pool
+            .run(
+                "UPDATE s3_settings:$id SET value = $value WHERE value = $expected RETURN AFTER;",
+                vec![
+                    string("id", id),
+                    string("value", value),
+                    string("expected", expected),
+                ],
+            )
+            .await?;
+        Ok(first_record(answers.pop())?.is_some())
+    }
+
+    async fn secret_ids(&self) -> Result<Vec<String>> {
+        let mut link = self.pool.vault_link(VAULT).await?;
+        if !vaults::declared_on(&mut link, VAULT).await? {
+            return Ok(Vec::new());
+        }
+        vaults::ids(&mut link, VAULT).await
+    }
+
+    async fn change_secret(&self, passphrase: &Passphrase, id: &str, value: &str) -> Result<()> {
+        let mut link = self.pool.vault_link(VAULT).await?;
+        opened(&mut link, passphrase).await?;
+        let written = link
+            .run(
+                "UPSERT s3_secrets:$id = { value: $value };",
+                vec![string("id", id), string("value", value)],
+            )
+            .await;
+        seal(&mut link).await;
+        written.map(|_| ()).map_err(Into::into)
+    }
 }

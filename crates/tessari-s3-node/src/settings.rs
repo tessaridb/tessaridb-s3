@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use tessari_s3_api::SettingsCheck;
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, SETTINGS_REREAD_SECS};
 use tessari_s3_daemons::{Daemon, DaemonFuture, Error, Report};
 use tessari_s3_infrastructure::settings_keys::{Class, stored_setting};
@@ -45,7 +46,7 @@ pub(crate) async fn configure(env: Environment) -> anyhow::Result<(S3Config, Rer
     let reread = Reread {
         settings,
         region: bootstrap.region,
-        started: resolved,
+        started: Arc::new(resolved),
         env,
     };
     Ok((config, reread))
@@ -55,11 +56,28 @@ pub(crate) async fn configure(env: Environment) -> anyhow::Result<(S3Config, Rer
 pub(crate) struct Reread {
     settings: SettingsService,
     region: String,
-    started: Resolved,
+    started: Arc<Resolved>,
     env: Environment,
 }
 
 impl Reread {
+    /// How the console checks a stored setting's new value: this node's whole configuration read with that one value
+    /// in its place, so a value the next start would refuse is refused before it is stored.
+    pub(crate) fn check(&self) -> SettingsCheck {
+        let started = Arc::clone(&self.started);
+        let env = self.env;
+        Arc::new(move |name: &str, value: &str| {
+            S3Config::from_lookup(|key| {
+                if key == name {
+                    Some(value.to_owned())
+                } else {
+                    started.lookup(&env, key)
+                }
+            })
+            .map(|_| ())
+        })
+    }
+
     /// The daemon that re-reads the store every [`SETTINGS_REREAD_SECS`] and publishes into `live`.
     pub(crate) fn daemon(self, live: Arc<LiveSettings>) -> Arc<dyn Daemon> {
         Arc::new(Refresh { reread: self, live })
