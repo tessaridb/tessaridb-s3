@@ -14,8 +14,8 @@ TessariDB cluster.
 [![licence](https://img.shields.io/badge/licence-BUSL--1.1-6B5FD1?style=flat-square)](LICENSE)
 [![rust](https://img.shields.io/badge/rust-1.98%2B-6B5FD1?style=flat-square)](#building)
 
-[tessaridb.com](https://tessaridb.com) · [TessariDB](https://github.com/tessaridb/tessaridb) ·
-[docs](https://docs.tessaridb.com)
+[s3.tessaridb.com](https://s3.tessaridb.com) · [docs](https://docs.tessaridb.com/s3) ·
+[tessaridb.com](https://tessaridb.com) · [TessariDB](https://github.com/tessaridb/tessaridb)
 
 </div>
 
