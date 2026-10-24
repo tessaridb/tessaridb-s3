@@ -178,3 +178,58 @@ async fn every_run_is_counted_in_the_metrics_by_its_outcome() {
         assert!(text.lines().any(|seen| seen == line), "{line} in\n{text}");
     }
 }
+
+/// A daemon whose interval is read from `secs` each time it is asked, counting its runs.
+struct Paced {
+    secs: Arc<AtomicU64>,
+    started: Arc<AtomicU64>,
+}
+
+impl Daemon for Paced {
+    fn name(&self) -> &'static str {
+        "paced"
+    }
+    fn interval(&self) -> Duration {
+        Duration::from_secs(self.secs.load(Ordering::Relaxed))
+    }
+    fn timeout(&self) -> Duration {
+        Duration::from_secs(5)
+    }
+    fn run_once(&self) -> DaemonFuture<'_> {
+        self.started.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async move {
+            Ok(Report {
+                message: "done".to_owned(),
+                idle: false,
+            })
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_interval_changed_while_running_paces_the_next_wait() {
+    let secs = Arc::new(AtomicU64::new(100));
+    let started = Arc::new(AtomicU64::new(0));
+    let daemon = Arc::new(Paced {
+        secs: Arc::clone(&secs),
+        started: Arc::clone(&started),
+    });
+    let (stop, stopped) = watch::channel(false);
+    let runner = tokio::spawn(run(daemon, stopped, Arc::new(Metrics::new())));
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        started.load(Ordering::Relaxed),
+        1,
+        "the first run starts at once"
+    );
+    secs.store(1, Ordering::Relaxed);
+    // The wait already begun under 100 s ends first; every wait after it is the new second.
+    tokio::time::sleep(Duration::from_secs(110)).await;
+    stop.send(true).expect("runner listening");
+    runner.await.expect("runner returns");
+    assert!(
+        started.load(Ordering::Relaxed) >= 5,
+        "runs after the change: {}",
+        started.load(Ordering::Relaxed)
+    );
+}

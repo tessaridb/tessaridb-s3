@@ -1,9 +1,11 @@
 //! Runs a daemon on its interval until shutdown.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use tessari_s3_observability::{Metrics, RunOutcome};
 use tokio::sync::watch;
+use tokio::time::Instant;
 
 use crate::daemon::Daemon;
 
@@ -18,9 +20,9 @@ pub struct Runs {
     pub timed_out: u64,
 }
 
-/// Runs `daemon` every interval until `shutdown` changes or its sender is dropped, counting each run by its outcome in
-/// `metrics`. A run that is under way when shutdown arrives finishes or reaches its timeout first; no new run starts
-/// after it.
+/// Runs `daemon` at once and then every interval — read again after each run — until `shutdown` changes or its sender
+/// is dropped, counting each run by its outcome in `metrics`. A run that is under way when shutdown arrives finishes or
+/// reaches its timeout first; no new run starts after it.
 pub async fn run(
     daemon: Arc<dyn Daemon>,
     mut shutdown: watch::Receiver<bool>,
@@ -28,9 +30,7 @@ pub async fn run(
 ) -> Runs {
     let name = daemon.name();
     let timeout = daemon.timeout();
-    let mut ticker = tokio::time::interval(daemon.interval());
-    // A run that overran its interval does not trigger a burst of catch-up runs.
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut next = Instant::now();
     let mut runs = Runs::default();
     loop {
         tokio::select! {
@@ -39,7 +39,8 @@ pub async fn run(
                 tracing::info!(daemon = name, ?runs, "daemon stopping");
                 return runs;
             }
-            _ = ticker.tick() => {
+            () = tokio::time::sleep_until(next) => {
+                let started = Instant::now();
                 match tokio::time::timeout(timeout, daemon.run_once()).await {
                     Ok(Ok(report)) => {
                         runs.succeeded = runs.succeeded.saturating_add(1);
@@ -61,9 +62,24 @@ pub async fn run(
                         tracing::error!(daemon = name, timeout_secs = timeout.as_secs(), "daemon run timed out");
                     }
                 }
+                next = next_start(started, daemon.interval());
             }
         }
     }
+}
+
+/// When the run after one that started at `started` begins: its interval later, read after every run so a changed
+/// setting paces the next wait; a run that overran its interval waits a whole interval from now rather than starting
+/// a burst of catch-up runs.
+fn next_start(started: Instant, interval: Duration) -> Instant {
+    let now = Instant::now();
+    started
+        .checked_add(interval)
+        .filter(|due| *due > now)
+        .or_else(|| now.checked_add(interval))
+        // An interval past what the clock can count: wait as long as it can, which no configured value reaches.
+        .or_else(|| now.checked_add(Duration::from_secs(u64::from(u32::MAX))))
+        .unwrap_or(now)
 }
 
 #[cfg(test)]

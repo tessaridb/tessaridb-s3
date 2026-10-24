@@ -6,19 +6,21 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
+use tessari_s3_infrastructure::Live;
+
 /// The window, in seconds.
 const WINDOW_SECS: i64 = 60;
 /// Keys held before idle ones are dropped, so addresses that never come back do not accumulate.
 const PRUNE_ABOVE: usize = 10_000;
 
-/// Admissions per key within the last minute.
+/// Admissions per key within the last minute, at most the limit the node holds now.
 pub(crate) struct Window {
-    limit: usize,
+    limit: Live,
     seen: Mutex<HashMap<String, VecDeque<i64>>>,
 }
 
 impl Window {
-    pub(crate) fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: Live) -> Self {
         Self {
             limit,
             seen: Mutex::new(HashMap::new()),
@@ -37,7 +39,9 @@ impl Window {
         while times.front().is_some_and(|first| *first <= floor) {
             times.pop_front();
         }
-        if times.len() >= self.limit {
+        // Read on every admission, so a limit changed in the metadata store applies to the next request.
+        let limit = usize::try_from(self.limit.get()).unwrap_or(usize::MAX);
+        if times.len() >= limit {
             tracing::warn!(key, "console rate limit reached");
             return Ok(false);
         }
@@ -45,3 +49,7 @@ impl Window {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "limits_tests.rs"]
+mod tests;

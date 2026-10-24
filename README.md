@@ -162,7 +162,9 @@ targets) in its `s3_secrets` vault, sealed under that passphrase. From then on t
 environment value that differs is logged by name, and a different erasure code or cluster secret stops the start. How
 to reach the metadata store, the region, the passphrase and what describes this machine (addresses, certificates,
 data directory, node identity) stay in the environment. Without the passphrase, secrets are read from the
-environment as before.
+environment as before. A running node re-reads the stored settings every 5 seconds and applies the intervals of its
+background work, the move budget, the console's rate limits and `TESSARIDB_S3_DOMAINS` without a restart; a value
+that fails the checks is refused by name and the running one kept. Every other setting is read at start.
 
 With `TESSARIDB_S3_CONSOLE_LISTEN` set, the node also serves the operator console: open that address in a browser
 and sign in with an access key — the root key, or one issued to a user. The page needs nothing from the network — no font, no script from anywhere

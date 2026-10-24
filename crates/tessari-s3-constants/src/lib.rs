@@ -402,6 +402,10 @@ pub const MEDIA_AVIF_SPEED: u8 = 8;
 /// Longest one daemon run may take before it is abandoned and reported.
 pub const DAEMON_RUN_TIMEOUT_SECS: u64 = 300;
 
+/// Seconds between re-reads of the settings a running node applies without a restart: the bound on how long a value
+/// changed in the metadata store takes to reach every node.
+pub const SETTINGS_REREAD_SECS: u64 = 5;
+
 /// Most entries (keys and common prefixes) one ListObjects page carries, and the default.
 pub const LIST_MAX_KEYS: usize = 1000;
 

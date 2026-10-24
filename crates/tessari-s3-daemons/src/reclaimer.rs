@@ -2,6 +2,7 @@
 //! `ObjectService::reclaim` for what makes that safe against a racing commit).
 
 use std::time::Duration;
+use tessari_s3_infrastructure::Live;
 
 use tessari_s3_constants::{DAEMON_RUN_TIMEOUT_SECS, RECLAIM_BATCH};
 use tessari_s3_storage::objects::ObjectService;
@@ -13,13 +14,13 @@ use crate::daemon::{Daemon, DaemonFuture, Report};
 pub struct Reclaimer {
     objects: ObjectService,
     grace_secs: u64,
-    interval: Duration,
+    interval: Live,
 }
 
 impl Reclaimer {
     /// A reclaimer over `objects`, keeping queued files for `grace_secs` and running every `interval`.
     #[must_use]
-    pub const fn new(objects: ObjectService, grace_secs: u64, interval: Duration) -> Self {
+    pub const fn new(objects: ObjectService, grace_secs: u64, interval: Live) -> Self {
         Self {
             objects,
             grace_secs,
@@ -34,7 +35,7 @@ impl Daemon for Reclaimer {
     }
 
     fn interval(&self) -> Duration {
-        self.interval
+        self.interval.secs()
     }
 
     fn timeout(&self) -> Duration {

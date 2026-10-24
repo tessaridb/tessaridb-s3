@@ -9,6 +9,7 @@ use axum::body::Body;
 use axum::http::request::Parts;
 use axum::http::{Response, StatusCode};
 use tessari_s3_core::auth::{compose_session_token, session_token_digest};
+use tessari_s3_infrastructure::Live;
 use tessari_s3_infrastructure::oidc::{OidcClient, OidcError};
 use tessari_s3_storage::users::NewSession;
 use tessari_s3_types::Timestamp;
@@ -28,7 +29,7 @@ pub(crate) struct WebIdentityIssuer {
 }
 
 impl WebIdentityIssuer {
-    pub(crate) fn new(client: OidcClient, per_minute: usize) -> Self {
+    pub(crate) fn new(client: OidcClient, per_minute: Live) -> Self {
         Self {
             client,
             requests: Window::new(per_minute),

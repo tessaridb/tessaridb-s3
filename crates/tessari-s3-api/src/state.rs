@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 use tessari_s3_core::auth::{session_token_expiry, session_token_matches};
 use tessari_s3_core::authz::Principal;
 use tessari_s3_core::objects::token::TokenKey;
-use tessari_s3_infrastructure::S3Config;
 use tessari_s3_infrastructure::oidc::OidcClient;
+use tessari_s3_infrastructure::{Live, LiveSettings, S3Config};
 use tessari_s3_observability::Metrics;
 use tessari_s3_storage::Storage;
 use tessari_s3_storage::audit::AccessRecord;
@@ -36,12 +36,11 @@ pub struct ApiState {
 
 struct Inner {
     region: String,
-    domains: Vec<String>,
+    live: Arc<LiveSettings>,
     root_access_key: String,
     root_secret_key: SecretKey,
     list_tokens: TokenKey,
     max_inflight: usize,
-    usage_interval_secs: u64,
     clock: Clock,
     storage: Storage,
     principals: Principals,
@@ -69,12 +68,11 @@ impl ApiState {
         Self {
             inner: Arc::new(Inner {
                 region: config.region.clone(),
-                domains: config.domains.clone(),
+                live: Arc::new(LiveSettings::new(config)),
                 root_access_key: config.root_access_key.clone(),
                 root_secret_key: config.root_secret_key.clone(),
                 list_tokens: TokenKey::derive(&config.root_secret_key),
                 max_inflight,
-                usage_interval_secs: config.usage_interval_secs,
                 clock,
                 storage,
                 principals: Principals::new(),
@@ -122,7 +120,13 @@ impl ApiState {
     /// Seconds between usage passes; a quota is checked only against a measurement this recent (twice over).
     #[must_use]
     pub fn usage_interval_secs(&self) -> u64 {
-        self.inner.usage_interval_secs
+        self.inner.live.usage_interval().get()
+    }
+
+    /// The settings this node re-reads while it runs, shared with its console, daemons and refresher.
+    #[must_use]
+    pub fn live(&self) -> Arc<LiveSettings> {
+        Arc::clone(&self.inner.live)
     }
 
     /// The region requests must be signed for.
@@ -131,10 +135,10 @@ impl ApiState {
         &self.inner.region
     }
 
-    /// The endpoint domains for virtual-hosted addressing.
+    /// The endpoint domains for virtual-hosted addressing, as the node holds them now.
     #[must_use]
-    pub fn domains(&self) -> &[String] {
-        &self.inner.domains
+    pub fn domains(&self) -> Arc<Vec<String>> {
+        self.inner.live.domains()
     }
 
     /// Requests served at once before `SlowDown`.
@@ -175,7 +179,7 @@ impl ApiState {
 
     /// Issues temporary credentials to people `client`'s provider vouches for, at most `per_minute` requests per
     /// client address; `false` when it was set already.
-    pub fn accept_web_identity(&self, client: OidcClient, per_minute: usize) -> bool {
+    pub fn accept_web_identity(&self, client: OidcClient, per_minute: Live) -> bool {
         self.inner
             .web_identity
             .set(WebIdentityIssuer::new(client, per_minute))

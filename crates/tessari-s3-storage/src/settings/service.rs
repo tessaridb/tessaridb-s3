@@ -46,12 +46,12 @@ impl SettingsService {
         env: &impl Fn(&str) -> Option<String>,
         passphrase: Option<&Passphrase>,
     ) -> Result<Resolved> {
-        let mut held: HashMap<String, String> = HashMap::new();
-        for (id, value) in self.store.settings().await? {
-            if let Some(key) = variable_of(&id, region) {
-                held.insert(key.to_owned(), value);
-            }
-        }
+        let mut held: HashMap<String, String> = self
+            .settings(region)
+            .await?
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value))
+            .collect();
         if let Some(passphrase) = passphrase {
             for (id, value) in self.store.secrets(passphrase).await? {
                 if let Some(key) = variable_of(&id, region) {
@@ -76,6 +76,21 @@ impl SettingsService {
             );
         }
         Ok(resolved)
+    }
+
+    /// The plain settings the store holds for `region` (its own and the global ones), by variable — never a secret,
+    /// so reading them opens no vault and records no reveal.
+    ///
+    /// # Errors
+    /// The store's refusal or a malformed record.
+    pub async fn settings(&self, region: &str) -> Result<HashMap<&'static str, String>> {
+        Ok(self
+            .store
+            .settings()
+            .await?
+            .into_iter()
+            .filter_map(|(id, value)| variable_of(&id, region).map(|key| (key, value)))
+            .collect())
     }
 
     /// Stores, for `region`, every setting the environment held and the store did not; a secret goes into the secrets

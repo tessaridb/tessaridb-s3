@@ -46,7 +46,7 @@ use axum::routing::{delete, get, post, put};
 use tessari_s3_constants::CONSOLE_OIDC_REFRESH_MIN_SECS;
 use tessari_s3_core::authz::Principal;
 use tessari_s3_infrastructure::oidc::OidcClient;
-use tessari_s3_infrastructure::{S3Config, WebhookClient};
+use tessari_s3_infrastructure::{LiveSettings, S3Config, WebhookClient};
 use tessari_s3_storage::Storage;
 use tessari_s3_types::{Code, SecretKey};
 
@@ -75,7 +75,7 @@ struct Inner {
     code: Option<Code>,
     meta_addresses: Vec<String>,
     principals: Principals,
-    usage_interval_secs: u64,
+    live: Arc<LiveSettings>,
     oidc: Option<OidcClient>,
     /// Where a root sign-in is announced, when an identity provider and a webhook are configured.
     break_glass_alert: Option<(WebhookClient, String)>,
@@ -90,6 +90,20 @@ impl ConsoleState {
         config: &S3Config,
         clock: Clock,
         storage: Storage,
+    ) -> Result<Option<Self>, tessari_s3_infrastructure::Error> {
+        Self::sharing(config, clock, storage, Arc::new(LiveSettings::new(config)))
+    }
+
+    /// As [`ConsoleState::new`], reading its rate limits and usage interval from `live`, which the node re-publishes
+    /// when they change in the metadata store.
+    ///
+    /// # Errors
+    /// As [`ConsoleState::new`].
+    pub fn sharing(
+        config: &S3Config,
+        clock: Clock,
+        storage: Storage,
+        live: Arc<LiveSettings>,
     ) -> Result<Option<Self>, tessari_s3_infrastructure::Error> {
         let Some(console) = config.console.as_ref() else {
             return Ok(None);
@@ -107,8 +121,8 @@ impl ConsoleState {
                 clock,
                 storage,
                 secure_cookie: console.tls.is_some(),
-                sign_ins: Window::new(console.sign_ins_per_minute),
-                requests: Window::new(console.requests_per_minute),
+                sign_ins: Window::new(live.console_sign_ins()),
+                requests: Window::new(live.console_requests()),
                 node: config
                     .cluster
                     .as_ref()
@@ -121,7 +135,7 @@ impl ConsoleState {
                 code: config.cluster.as_ref().map(|cluster| cluster.code),
                 meta_addresses: config.meta.addresses.clone(),
                 principals: Principals::new(),
-                usage_interval_secs: config.usage_interval_secs,
+                live,
                 oidc,
                 break_glass_alert,
             }),
@@ -190,7 +204,7 @@ impl ConsoleState {
     }
 
     fn usage_interval_secs(&self) -> u64 {
-        self.inner.usage_interval_secs
+        self.inner.live.usage_interval().get()
     }
 
     fn secure_cookie(&self) -> bool {

@@ -115,7 +115,7 @@ fn cross_origin(
                 .authority()
                 .map(|authority| authority.as_str())
         })?;
-    let bucket = resolve(host, request.uri().path(), state.domains())
+    let bucket = resolve(host, request.uri().path(), &state.domains())
         .ok()?
         .bucket?;
     Some((origin, bucket))
@@ -157,7 +157,7 @@ async fn serve(
         .ok_or_else(|| Error::new(ErrorCode::InvalidRequest, "the Host header is required"))?;
     let raw_path = parts.uri.path();
     let raw_query = parts.uri.query().unwrap_or("");
-    let addressed = resolve(host, raw_path, state.domains())?;
+    let addressed = resolve(host, raw_path, &state.domains())?;
     if trail.logged {
         trail.bucket = addressed
             .bucket
