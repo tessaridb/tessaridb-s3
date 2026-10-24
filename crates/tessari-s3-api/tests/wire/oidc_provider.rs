@@ -111,6 +111,8 @@ struct Shared {
     grants: Arc<Mutex<HashMap<String, Grant>>>,
     published: Arc<Mutex<Vec<Key>>>,
     key_fetches: Arc<AtomicUsize>,
+    /// The public JWK a `private_key_jwt` client registered; while set, the token endpoint takes only its assertion.
+    client_key: Arc<Mutex<Option<String>>>,
 }
 
 /// A running provider; stopped when dropped.
@@ -148,6 +150,11 @@ fn signing_key((kid, seed): (&str, [u8; 32])) -> CoreEdDsaPrivateSigningKey {
 }
 
 impl Provider {
+    /// Registers the console as a `private_key_jwt` client with `jwk`; from then on a secret is refused.
+    pub(crate) fn accept_client_key(&self, jwk: &str) {
+        *self.shared.client_key.lock().expect("client key") = Some(jwk.to_owned());
+    }
+
     pub(crate) async fn start() -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -158,6 +165,7 @@ impl Provider {
             grants: Arc::default(),
             published: Arc::new(Mutex::new(vec![FIRST])),
             key_fetches: Arc::default(),
+            client_key: Arc::default(),
         };
         let app = axum::Router::new()
             .route("/.well-known/openid-configuration", get(discovery))
@@ -317,6 +325,43 @@ async fn keys(State(shared): State<Shared>) -> Json<CoreJsonWebKeySet> {
     ))
 }
 
+/// Whether `assertion` is signed by the registered key, names the client and is addressed to `issuer`.
+fn assertion_holds(assertion: &str, jwk: &str, issuer: &str) -> bool {
+    use openidconnect::JsonWebKey;
+    let Some((signed, signature)) = assertion.rsplit_once('.') else {
+        return false;
+    };
+    let Ok(key) = serde_json::from_str::<openidconnect::core::CoreJsonWebKey>(jwk) else {
+        return false;
+    };
+    let Ok(signature) = URL_SAFE_NO_PAD.decode(signature) else {
+        return false;
+    };
+    if key
+        .verify_signature(
+            &CoreJwsSigningAlgorithm::EdDsa,
+            signed.as_bytes(),
+            &signature,
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let claims: Option<serde_json::Value> = signed
+        .split('.')
+        .nth(1)
+        .and_then(|part| URL_SAFE_NO_PAD.decode(part).ok())
+        .and_then(|raw| serde_json::from_slice(&raw).ok());
+    claims.is_some_and(|claims| {
+        claims["iss"] == CLIENT_ID
+            && claims["sub"] == CLIENT_ID
+            && claims["aud"] == issuer
+            && claims["exp"]
+                .as_i64()
+                .is_some_and(|exp| exp > Utc::now().timestamp())
+    })
+}
+
 fn refuse() -> Response {
     (
         StatusCode::BAD_REQUEST,
@@ -331,11 +376,25 @@ async fn token(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) ->
         "Basic {}",
         STANDARD.encode(format!("{CLIENT_ID}:{CLIENT_SECRET}"))
     );
-    let authenticated = headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        == Some(basic.as_str());
     let field = |name: &str| form.get(name).map(String::as_str);
+    let registered = shared.client_key.lock().expect("client key").clone();
+    let authenticated = match registered {
+        // `private_key_jwt`: no Authorization header, the client id in the body, an assertion it signed.
+        Some(jwk) => {
+            headers.get("authorization").is_none()
+                && field("client_id") == Some(CLIENT_ID)
+                && field("client_assertion_type")
+                    == Some("urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+                && field("client_assertion")
+                    .is_some_and(|assertion| assertion_holds(assertion, &jwk, &shared.issuer))
+        }
+        None => {
+            headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                == Some(basic.as_str())
+        }
+    };
     if !authenticated
         || field("grant_type") != Some("authorization_code")
         || field("redirect_uri") != Some(REDIRECT)

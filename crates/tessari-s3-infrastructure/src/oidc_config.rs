@@ -4,22 +4,25 @@
 use tessari_s3_constants::CONSOLE_OIDC_DEFAULT_MFA_AMR;
 use tessari_s3_types::SecretKey;
 
-use crate::console_config::{KeySignIn, OidcSettings};
+use crate::console_config::{ClientAuth, KeySignIn, OidcSettings};
+use crate::oidc_client_key::ClientKey;
 use crate::{Error, Result};
 
 pub(crate) const ISSUER: &str = "TESSARIDB_S3_CONSOLE_OIDC_ISSUER";
 pub(crate) const CLIENT_ID: &str = "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID";
 pub(crate) const CLIENT_SECRET: &str = "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET";
+pub(crate) const CLIENT_KEY: &str = "TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY";
 pub(crate) const REDIRECT_URI: &str = "TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI";
 pub(crate) const MFA_AMR: &str = "TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR";
 pub(crate) const BREAK_GLASS_WEBHOOK: &str = "TESSARIDB_S3_CONSOLE_BREAK_GLASS_WEBHOOK";
 pub(crate) const KEY_SIGN_IN: &str = "TESSARIDB_S3_CONSOLE_KEY_SIGN_IN";
 
 /// Every variable of this group, the issuer first.
-pub(crate) const ALL: [&str; 7] = [
+pub(crate) const ALL: [&str; 8] = [
     ISSUER,
     CLIENT_ID,
     CLIENT_SECRET,
+    CLIENT_KEY,
     REDIRECT_URI,
     MFA_AMR,
     BREAK_GLASS_WEBHOOK,
@@ -60,7 +63,7 @@ pub(crate) fn oidc_settings(get: &impl Fn(&str) -> Option<String>) -> Result<Opt
     Ok(Some(OidcSettings {
         issuer: url(ISSUER, &issuer)?,
         client_id: required(CLIENT_ID)?,
-        client_secret: SecretKey::new(required(CLIENT_SECRET)?),
+        client_auth: client_auth(get)?,
         redirect_uri: url(REDIRECT_URI, &required(REDIRECT_URI)?)?,
         mfa_amr,
         break_glass_webhook: get(BREAK_GLASS_WEBHOOK)
@@ -77,6 +80,30 @@ pub(crate) fn oidc_settings(get: &impl Fn(&str) -> Option<String>) -> Result<Opt
             }
         },
     }))
+}
+
+/// The secret or the key file, exactly one of them; the key is read and parsed here, so a bad file stops the start.
+fn client_auth(get: &impl Fn(&str) -> Option<String>) -> Result<ClientAuth> {
+    match (get(CLIENT_SECRET), get(CLIENT_KEY)) {
+        (Some(_), Some(_)) => Err(Error::InvalidConfig {
+            key: CLIENT_KEY,
+            reason: "set beside TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET: give one of the two",
+        }),
+        (Some(secret), None) => Ok(ClientAuth::Secret(SecretKey::new(secret.trim().to_owned()))),
+        (None, Some(path)) => {
+            let pem = std::fs::read_to_string(path.trim()).map_err(|_| Error::InvalidConfig {
+                key: CLIENT_KEY,
+                reason: "cannot be read",
+            })?;
+            ClientKey::from_pem(&pem)
+                .map(ClientAuth::Key)
+                .map_err(|reason| Error::InvalidConfig {
+                    key: CLIENT_KEY,
+                    reason,
+                })
+        }
+        (None, None) => Err(Error::MissingConfig { key: CLIENT_SECRET }),
+    }
 }
 
 /// `text` as a URL over https, or over http to this machine only.

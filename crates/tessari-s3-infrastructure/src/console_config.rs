@@ -33,8 +33,8 @@ pub struct OidcSettings {
     pub issuer: String,
     /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_ID` — the console's client id at the provider.
     pub client_id: String,
-    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET` — its client secret (`client_secret_basic`).
-    pub client_secret: tessari_s3_types::SecretKey,
+    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET` or `_CLIENT_KEY` — how the console proves itself at the token endpoint.
+    pub client_auth: ClientAuth,
     /// `TESSARIDB_S3_CONSOLE_OIDC_REDIRECT_URI` — the callback URL registered at the provider, exactly.
     pub redirect_uri: String,
     /// `TESSARIDB_S3_CONSOLE_OIDC_MFA_AMR` — `amr` values that prove a second factor; one must be present.
@@ -43,6 +43,16 @@ pub struct OidcSettings {
     pub break_glass_webhook: Option<String>,
     /// `TESSARIDB_S3_CONSOLE_KEY_SIGN_IN` — which access keys still open a console session beside the provider.
     pub key_sign_in: KeySignIn,
+}
+
+/// How the console authenticates at the provider's token endpoint: exactly one of the two is configured.
+#[derive(Debug, Clone)]
+pub enum ClientAuth {
+    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_SECRET` — a shared secret (`client_secret_basic`).
+    Secret(tessari_s3_types::SecretKey),
+    /// `TESSARIDB_S3_CONSOLE_OIDC_CLIENT_KEY` — an Ed25519 key signing a `private_key_jwt` assertion; for a provider
+    /// that issues no secrets, such as TessariDB OAuth.
+    Key(crate::oidc_client_key::ClientKey),
 }
 
 /// Which access keys open a console session where an identity provider is configured. The S3 API is not affected.

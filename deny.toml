@@ -10,6 +10,7 @@ yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "unmaintained compile-time macro under the AVIF encoder; nothing to upgrade to" },
   { id = "RUSTSEC-2023-0071", reason = "timing side channel in RSA private-key operations; the console only verifies an identity provider's RSA signatures with its public keys and performs no RSA private-key operation" },
+  { id = "RUSTSEC-2026-0387", reason = "timing variability on secret integers in crypto-bigint 0.5 (under ecdsa/p256 via openidconnect); the console only verifies a provider's ECDSA signatures with public keys, and its own client key is Ed25519 outside crypto-bigint; no fixed release reachable from ecdsa 0.16" },
 ]
 
 [bans]

@@ -15,7 +15,9 @@ fn settings(provider: &Provider) -> OidcSettings {
     OidcSettings {
         issuer: provider.issuer.clone(),
         client_id: CLIENT_ID.to_owned(),
-        client_secret: SecretKey::new(CLIENT_SECRET.to_owned()),
+        client_auth: tessari_s3_infrastructure::ClientAuth::Secret(SecretKey::new(
+            CLIENT_SECRET.to_owned(),
+        )),
         redirect_uri: REDIRECT.to_owned(),
         mfa_amr: vec!["mfa".to_owned()],
         break_glass_webhook: None,
@@ -255,4 +257,37 @@ async fn a_fresh_sign_in_asks_for_max_age_and_finish_reports_when_its_holder_aut
         "{stale} vs {now}"
     );
     assert_eq!(authenticated(Shape::NoAuthTime, "code-none").await, None);
+}
+
+#[tokio::test]
+async fn a_console_with_a_client_key_signs_in_with_an_assertion_and_no_secret() {
+    let provider = Provider::start().await;
+    let pem = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519)
+        .expect("an Ed25519 key")
+        .serialize_pem();
+    let key = tessari_s3_infrastructure::ClientKey::from_pem(&pem).expect("loads");
+    provider.accept_client_key(&key.public_jwk());
+    let keyed = OidcClient::new(
+        &OidcSettings {
+            client_auth: tessari_s3_infrastructure::ClientAuth::Key(key),
+            ..settings(&provider)
+        },
+        60,
+    )
+    .expect("a client");
+    assert_eq!(
+        sign_in(&provider, &keyed, "code-keyed", Shape::Good).await,
+        Ok(SUBJECT.to_owned())
+    );
+    // The same provider now refuses the shared secret: the console really authenticated with the key.
+    assert_eq!(
+        sign_in(
+            &provider,
+            &client(&provider, 60),
+            "code-secret",
+            Shape::Good
+        )
+        .await,
+        Err(OidcError::CodeRefused)
+    );
 }

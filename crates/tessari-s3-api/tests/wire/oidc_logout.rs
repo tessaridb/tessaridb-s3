@@ -13,7 +13,9 @@ fn client(provider: &Provider) -> OidcClient {
         &OidcSettings {
             issuer: provider.issuer.clone(),
             client_id: CLIENT_ID.to_owned(),
-            client_secret: SecretKey::new(CLIENT_SECRET.to_owned()),
+            client_auth: tessari_s3_infrastructure::ClientAuth::Secret(SecretKey::new(
+                CLIENT_SECRET.to_owned(),
+            )),
             redirect_uri: REDIRECT.to_owned(),
             mfa_amr: vec!["mfa".to_owned()],
             break_glass_webhook: None,
