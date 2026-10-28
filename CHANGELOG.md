@@ -3,6 +3,13 @@
 Versions before 1.0 promise no compatibility with each other. Every release
 section records which TessariDB version its metadata runs on.
 
+## 0.8.1: 2026-10-28
+
+Metadata on TessariDB `0.38.3`.
+
+- On a cluster, data no object holds is no longer moved onto a new layout or counted as moving. A write refused below
+  its quorum, or one cut short, used to keep `moving.listed` above zero until its reclaim ran a day later.
+
 ## 0.8.0: 2026-10-25
 
 Metadata on TessariDB `0.38.3`.
