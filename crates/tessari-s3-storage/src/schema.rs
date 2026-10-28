@@ -348,6 +348,12 @@ pub async fn apply(global: &MetaPool, regional: &MetaPool, reclaim_grace_secs: u
 /// server-side path queues with, so it and the events compute `due` from the same value.
 pub(crate) const QUEUE_FOR_RECLAIM: &str = "UPSERT reclaims:$data SET data = $data, due = time::now() + duration::from_secs($reclaim_grace);";
 
+/// Whatever holds data `$data`: an object, any version of one, or a multipart part — three answers, a record in any
+/// of them meaning it is held. `USING` makes a dropped or renamed index a refusal here rather than a full scan.
+pub(crate) const DATA_HOLDERS: &str = "SELECT key FROM objects WHERE data = $data LIMIT 1 USING INDEX by_data; \
+                                       SELECT number FROM parts WHERE data = $data LIMIT 1 USING INDEX by_part_data; \
+                                       SELECT seq FROM versions WHERE data = $data LIMIT 1 USING INDEX by_version_data;";
+
 /// The schema's one parameter: the reclamation grace, in seconds.
 fn grace(
     reclaim_grace_secs: u64,

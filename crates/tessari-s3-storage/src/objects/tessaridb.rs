@@ -8,7 +8,7 @@ use super::entity::read;
 use super::model::{NewObject, Part};
 use super::repository::{Batch, Guard, Head, ObjectRepository, Snapshot, VersionPlan, Wrote};
 use crate::answers::{bucket_read, first_record, incarnation_of};
-use crate::schema::QUEUE_FOR_RECLAIM;
+use crate::schema::{DATA_HOLDERS, QUEUE_FOR_RECLAIM};
 use crate::{Error, Result};
 
 #[path = "tessaridb_convert.rs"]
@@ -218,12 +218,7 @@ impl ObjectRepository for TessariObjects {
 
     async fn referenced(&self, id: [u8; 16]) -> Result<bool> {
         let parameters = vec![("data".to_owned(), Value::Uuid(id))];
-        // An object, any version of one, or a multipart part may hold the file. `USING` makes a dropped or renamed
-        // index a refusal here rather than a full scan.
-        let script = "SELECT key FROM objects WHERE data = $data LIMIT 1 USING INDEX by_data; \
-                      SELECT number FROM parts WHERE data = $data LIMIT 1 USING INDEX by_part_data; \
-                      SELECT seq FROM versions WHERE data = $data LIMIT 1 USING INDEX by_version_data;";
-        let mut answers = self.pool.run(script, parameters).await?.into_iter();
+        let mut answers = self.pool.run(DATA_HOLDERS, parameters).await?.into_iter();
         let by_object = first_record(answers.next())?.is_some();
         let by_part = first_record(answers.next())?.is_some();
         Ok(by_object || by_part || first_record(answers.next())?.is_some())

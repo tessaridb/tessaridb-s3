@@ -46,6 +46,7 @@ mod delete_many;
 mod erasure;
 mod erasure_heals;
 mod erasure_moves;
+mod erasure_moves_uncommitted;
 mod erasure_pacing;
 mod erasure_reads;
 mod erasure_retires;
