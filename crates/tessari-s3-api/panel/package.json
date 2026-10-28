@@ -1,6 +1,6 @@
 {
   "name": "tessaridb-s3-console",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "author": "boogvar",
   "private": true,
   "description": "Source for the operator console TessariDB S3 serves on its console listener. The build's output is committed to ../assets/ and embedded by include_str!, so nothing here is needed to build or run the server.",
